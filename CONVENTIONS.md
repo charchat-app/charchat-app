@@ -1,0 +1,121 @@
+# 코드·작업 컨벤션 (앱 · Expo)
+
+> 초안. 팀 합의 후 확정한다.
+> 폴더 구조와 경계 규칙은 `CLAUDE.md`를 따른다. 이 문서는 작업 방식, 이름, 테스트, 브랜치·PR 정책을 정한다.
+> 피처·브랜치·PR 정책은 서버 저장소(`charchat-server/CONVENTIONS.md`)를 참고하되, 코드 규칙은 Expo 기준이다.
+
+## 1. 도구
+
+| 목적      | 명령                                      | 설명                                |
+| --------- | ----------------------------------------- | ----------------------------------- |
+| 타입 검사 | `npm run typecheck`                       | `tsc --noEmit`, `strict`            |
+| 린트      | `npm run lint`                            | ESLint (`eslint-config-expo`)       |
+| 포맷      | `npm run format` / `npm run format:check` | Prettier (작은따옴표, 줄 길이 120)  |
+| 테스트    | `npm test`                                | Jest + React Native Testing Library |
+
+**커밋 전에 `npm run typecheck`, `npm run lint`, `npm run format:check`, `npm test`가 모두 통과해야 한다.**
+
+## 2. 폴더와 계층
+
+- 구조는 `CLAUDE.md` 3번을 따른다.
+- 화면(`app/`)은 조립만 한다. 데이터는 `features/<도메인>/hooks`와 `api.ts`에서 가져온다.
+- 도메인 간 연결은 `index.ts`로만 한다.
+- 공통 코드는 `shared/`로 올린다. 올리는 기준은 팀이 시점마다 상의해서 정하고, 자동으로 올리지 않는다.
+  - 공통 코드를 올리는 PR은 어떤 도메인이 쓰는지 본문에 적는다.
+- 다른 도메인의 내부 파일(`features/<다른도메인>/components/*`)을 직접 import하지 않는다.
+
+## 3. 이름
+
+| 대상                   | 규칙                                                          | 예                                  |
+| ---------------------- | ------------------------------------------------------------- | ----------------------------------- |
+| 컴포넌트 파일·컴포넌트 | PascalCase                                                    | `ChipGroup.tsx`, `ChipGroup`        |
+| 훅 파일·훅             | `use` 접두사, camelCase                                       | `useStoryDraft.ts`, `useStoryDraft` |
+| 그 밖의 파일           | camelCase                                                     | `api.ts`, `theme.ts`                |
+| 변수·함수              | camelCase                                                     | `saveState`, `toDraftPatch`         |
+| 타입·인터페이스        | PascalCase                                                    | `StoryDraft`, `Bubble`              |
+| 상수                   | UPPER_SNAKE_CASE (디자인 토큰 객체는 `Colors`처럼 PascalCase) | `MIN_TOUCH_SIZE`, `Colors`          |
+| 라우트 파일            | Expo Router 규칙 (`index.tsx`, `[id].tsx`, `_layout.tsx`)     | `app/story/[id].tsx`                |
+| 테스트 파일            | `<대상>.test.tsx`                                             | `ui.test.tsx`                       |
+
+- 식별자는 영문으로 쓴다. 주석과 문서는 한글로 쓴다.
+- 파일 맨 위 주석이나 docstring 첫 줄에 스토리 ID를 쓴다. 예: `// CREATE-US-03 인트로 편집`
+- 화면과 훅 이름은 목업의 용어를 따른다(예: 발화자, 인트로, 상황 예시).
+
+## 4. 컴포넌트와 스타일
+
+- 함수 컴포넌트만 쓴다. 이름 있는 export를 쓴다. (`app/` 라우트 파일만 default export)
+- 스타일은 `StyleSheet.create`로 쓴다. 색상·간격·글자 크기는 `constants/theme.ts`의 토큰만 쓴다.
+- 글자는 `components/ui/Text`의 variant로만 쓴다. `fontSize`를 화면마다 직접 쓰지 않는다.
+- 같은 모양이 두 도메인 이상에서 쓰이면 `components/ui`로 옮긴다.
+  - `components/ui`는 도메인을 모른다. 표시만 한다.
+  - 동작이 있는 부품(예: 말풍선 편집기)은 도메인 `components/`에 둔다.
+- 터치 가능한 요소는 최소 44px 높이를 지킨다(`MIN_TOUCH_SIZE`).
+- 접근성: 버튼은 `accessibilityRole`과 `accessibilityLabel`을 준다. 선택 상태는 `accessibilityState`로 준다.
+
+## 5. 데이터와 상태
+
+- 화면에서 `fetch`를 직접 호출하지 않는다. `api.ts`의 함수를 거친다. 공통 HTTP 처리는 `lib/api-client.ts`에 둔다.
+- 서버 데이터 타입은 `shared/story-types`에서만 정의한다.
+- 서버 연결 전에는 `mocks/seed/`로 개발한다. API가 준비되면 `api.ts`만 바꾼다.
+- 환경변수는 `EXPO_PUBLIC_` 접두사만 클라이언트에서 읽는다. 비밀값은 앱에 넣지 않는다.
+- 모든 화면은 로딩, 빈 상태, 에러 상태를 처리한다.
+
+## 6. 테스트
+
+- 테스트는 `components/ui/__tests__/`처럼 대상 옆의 `__tests__/`에 둔다.
+- 부품은 사용자가 하는 동작을 기준으로 테스트한다. 예: 버튼 누르기, 칩 최대 개수 넘기기.
+- 시드 데이터 테스트만으로 인수 조건을 충족했다고 말하지 않는다. 실제 API 연결 후 검증한다.
+- 인수 조건 ID를 테스트 이름에 적어 추적할 수 있게 한다. 예: `CREATE-US-03-AC02: 인트로 최대 5개 제한`
+- 화면 변경은 실행 화면(시뮬레이터 또는 실기기) 스크린샷을 PR에 첨부한다.
+
+## 7. 커밋
+
+- 형식은 `<type>: <요약>`이다. type은 `feat`, `fix`, `refactor`, `test`, `docs`, `chore` 중 하나를 영문으로 쓰고, 요약은 한글로 쓴다.
+- 예: `feat: 인트로 말풍선 순서 변경 추가`
+- 한 커밋은 한 목적만 담는다.
+
+## 8. 브랜치·PR·이슈
+
+서버 저장소(`charchat-server/CONVENTIONS.md` 10번)와 같은 정책이다. 아래는 앱에 맞춘 요약이다.
+
+**용어**
+
+- **카드**: 지라 스토리 카드 하나 (예: KAN-12 = CREATE-US-01). 피처마다 카드를 따로 만들지 않는다.
+- **피처**: 카드 안에서 기능별로 묶은 작업 단위. 폴더가 아니라 **브랜치와 PR 단위**다.
+- **인수 조건(AC)**: 카드의 완료 기준. 요구 문서의 `CREATE-US-01-AC01` 형식 ID를 쓴다.
+
+**피처 추가 절차**
+
+1. 카드가 없을 때만 지라에 카드를 추가한다.
+2. `dev`에서 `feat/KAN-번호-피처명` 브랜치를 딴다. 예: `feat/KAN-12-story-save`
+3. 도메인 폴더 안에서 작업하고, 필요한 테스트를 같이 쓴다.
+4. PR을 올린다. base는 `dev`다. 작업 중에는 draft PR을 쓸 수 있다.
+5. CI와 AI 리뷰를 거쳐 `dev`에 squash merge한다.
+6. 에픽의 카드가 모두 끝나면 `dev → main` 릴리스 PR을 연다. 제목은 `[릴리스] EPIC-CREATE 완료` 형식이다.
+
+**PR 제목**: `[KAN-12] 피처 이름 — 한 줄 요약`. 예: `[KAN-12] 인트로 — 순서 변경`
+
+**머지 조건**
+
+1. CI(`typecheck`, `lint`, `format:check`, `test`)가 통과한다.
+2. AI 리뷰 코멘트가 모두 해결된다.
+3. 그 PR이 맡은 인수 조건이 체크되고, 테스트나 실행 화면으로 확인된다.
+
+- 사람 리뷰어 승인은 요구하지 않는다. 단, 담당 폴더는 `CODEOWNERS`에 따라 리뷰어가 지정된다.
+- squash merge. squash 커밋 메시지는 PR 제목을 쓴다.
+
+**브랜치 보호**: `main`과 `dev`는 직접 push를 막고 PR로만 바꾼다. (현재 앱 저장소는 비공개라 보호 규칙을 못 거는 상태다. 상세는 저장소 설정 확인 필요)
+
+**카드 완료**: 카드의 인수 조건이 전부 충족되고, 모든 피처 PR이 머지되면 Done으로 옮긴다.
+
+**리뷰 코멘트**
+
+- 한글로 쓴다.
+- 접두어로 중요도를 표시한다. `blocker:` 머지 전 반드시 수정, `nit:` 사소한 개선, `question:` 확인 요청. 접두어가 없으면 `nit:`로 본다.
+
+**이슈**
+
+- 스토리는 지라에서 관리하고 GitHub 이슈에 중복으로 올리지 않는다.
+- 스토리 밖의 일(버그, 기술 부채, 조사)은 GitHub 이슈로 등록한다. 제목 형식은 `[분류] 요약`이다. 분류는 `bug`, `tech`, `question`.
+- 이슈를 PR로 완전히 해결하면 `Closes #번호`, 일부만 해결하면 `Refs #번호`를 쓴다.
+- 지라와 GitHub는 연동되어 있지 않으므로 카드 번호(예: KAN-12)를 PR에 수동으로 적는다.
