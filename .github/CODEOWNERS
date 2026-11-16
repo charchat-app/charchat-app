@@ -1,0 +1,32 @@
+# 폴더별 리뷰어 지정. 실제 GitHub 아이디로 바꾼 뒤 사용한다.
+# 형식: 경로 소유자(@사용자명 또는 @팀명)
+# 아래 OWNER_* 값은 임시 자리표시자다.
+
+# 강태훈: 기본 정보·캐릭터·프로필 프리셋·이미지
+/features/story-setup/       @OWNER_KANG_TAEHUN
+
+# 이휘: 말투·퓨샷·인트로·초기 상태
+/features/story-scene/       @OWNER_LEE_HWI
+
+# 공동 영역: 저장·공개·수정 (담당은 강태훈으로 지정됨)
+/features/story-publish/     @OWNER_KANG_TAEHUN
+
+# 생성 8~10번 (착수 시 강태훈이 맡는 것으로 정해짐)
+/features/story-insight/     @OWNER_KANG_TAEHUN
+
+# 개인 프로필·마이페이지 (담당 미정)
+/features/profile/           @OWNER_TBD
+
+# 공유 타입: 변경 시 두 담당자 모두 리뷰
+/shared/story-types/         @OWNER_KANG_TAEHUN @OWNER_LEE_HWI
+
+# 공유 미디어 (강태훈 소유)
+/shared/media/               @OWNER_KANG_TAEHUN
+
+# 디자인 시스템 (UI 담당 지정 필요)
+/components/ui/              @OWNER_UI_TBD
+
+# 공통 설정
+/constants/theme.ts          @OWNER_UI_TBD
+/CLAUDE.md                   @OWNER_KANG_TAEHUN @OWNER_LEE_HWI
+/.github/CODEOWNERS          @OWNER_KANG_TAEHUN @OWNER_LEE_HWI
