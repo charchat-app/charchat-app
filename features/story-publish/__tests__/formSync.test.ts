@@ -5,6 +5,7 @@ const values = {
   subtitle: '',
   world: '',
   tags: [],
+  tagInput: '',
   characters: [
     { key: 'new-1', name: 'A', detail: 'a' },
     { key: 'new-2', name: 'B', detail: 'b' },

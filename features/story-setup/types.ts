@@ -12,12 +12,18 @@ export type BasicInfoDraft = Pick<StoryDraft, 'title' | 'subtitle' | 'world' | '
 /** 입력 중인 캐릭터 한 명. key는 화면 목록용 고유값이고 저장되지 않는다. */
 export type CharacterValues = CharacterDraft & { key: string };
 
-/** 기본 설정 탭의 입력 상태. 해시태그는 칩으로 추가한 태그 원문 목록이다(입력 중인 글자는 포함하지 않는다). */
+/** 기본 설정 탭의 입력 상태. */
 export type BasicInfoValues = {
   title: string;
   subtitle: string;
   world: string;
+  /** 칩으로 추가한 해시태그 원문 */
   tags: string[];
+  /**
+   * 해시태그 입력창에 쓰고 아직 '추가'하지 않은 글자. 저장할 때 태그로 포함해
+   * 추가 버튼을 누르지 않고 저장해도 입력이 사라지지 않게 한다.
+   */
+  tagInput: string;
   characters: CharacterValues[];
 };
 

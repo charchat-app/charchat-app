@@ -9,6 +9,7 @@ const rendered: BasicInfoValues = {
   subtitle: '',
   world: '',
   tags: [],
+  tagInput: '',
   characters: [{ key: 'new-1', name: '', detail: '' }],
 };
 

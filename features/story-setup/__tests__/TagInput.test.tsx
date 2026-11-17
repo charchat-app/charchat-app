@@ -9,11 +9,11 @@ import type { BasicInfoValues } from '../types';
 jest.mock('../api', () => ({ fetchTagSuggestions: jest.fn() }));
 const mockFetch = fetchTagSuggestions as jest.MockedFunction<typeof fetchTagSuggestions>;
 
-const initial: BasicInfoValues = { title: '', subtitle: '', world: '', tags: [], characters: [] };
+const initial: BasicInfoValues = { title: '', subtitle: '', world: '', tags: [], tagInput: '', characters: [] };
 
 function Harness({ start = initial }: { start?: BasicInfoValues }) {
   const [values, setValues] = useState(start);
-  return <TagInput tags={values.tags} onChange={(update) => setValues(update)} />;
+  return <TagInput tags={values.tags} input={values.tagInput} onChange={(update) => setValues(update)} />;
 }
 
 async function renderInput(start?: BasicInfoValues) {
@@ -111,5 +111,11 @@ describe('TagInput', () => {
 
     expect(screen.queryByLabelText('romance 태그 삭제')).toBeNull();
     expect(screen.getByText(/'romance'는 'Romance'와 같은 태그예요/)).toBeOnTheScreen();
+  });
+
+  it('불러온 태그 중 같은 태그로 취급되는 칩을 표시하고 이유를 보여 준다', async () => {
+    mockFetch.mockResolvedValue([]);
+    await renderInput({ ...initial, tags: ['Romance', 'romance'] });
+    expect(screen.getByText(/#romance: 'Romance'와 같은 태그예요/)).toBeOnTheScreen();
   });
 });

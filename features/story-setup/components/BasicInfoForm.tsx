@@ -63,7 +63,13 @@ export function BasicInfoForm({ values, onChange, errors = {}, editable = true }
             accessibilityLabel="세계관 · 서사"
           />
         </FormField>
-        <TagInput tags={values.tags} onChange={onChange} error={errors.tags} editable={editable} />
+        <TagInput
+          tags={values.tags}
+          input={values.tagInput}
+          onChange={onChange}
+          error={errors.tags}
+          editable={editable}
+        />
       </Section>
 
       <Section title="등장 캐릭터" description="이야기에 등장할 인물을 1~10명 등록해 주세요.">

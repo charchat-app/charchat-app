@@ -34,6 +34,27 @@ export function findSameTag(tags: string[], tag: string): string | undefined {
   return tags.find((t) => tagKey(t) === key);
 }
 
+/**
+ * 목록 전체를 보고 태그별 문제를 모은다. 길이·빈 값에 더해, 앞에 같은 태그로 취급되는 표기가
+ * 있으면(예: Romance 뒤의 romance) 뒤쪽 태그를 문제로 표시한다(서버 TAG_DUPLICATE와 같은 기준).
+ */
+export function tagProblems(tags: string[]): Map<string, string> {
+  const problems = new Map<string, string>();
+  const firstByKey = new Map<string, string>();
+  for (const tag of tags) {
+    const own = tagProblem(tag);
+    if (own) problems.set(tag, own);
+    const key = tagKey(tag);
+    const first = firstByKey.get(key);
+    if (key !== '' && first !== undefined) {
+      problems.set(tag, `'${first}'와 같은 태그예요. 대소문자와 띄어쓰기는 구분하지 않아요.`);
+    } else {
+      firstByKey.set(key, tag);
+    }
+  }
+  return problems;
+}
+
 export type AddTagResult = 'added' | 'empty' | 'duplicate';
 
 /**

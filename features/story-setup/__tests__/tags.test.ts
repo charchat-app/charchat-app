@@ -1,7 +1,7 @@
-import { addTag, findSameTag, MAX_TAG_LENGTH, removeTag, tagKey, tagLength, tagProblem } from '../tags';
+import { addTag, findSameTag, MAX_TAG_LENGTH, removeTag, tagKey, tagLength, tagProblem, tagProblems } from '../tags';
 import type { BasicInfoValues } from '../types';
 
-const base: BasicInfoValues = { title: '', subtitle: '', world: '', tags: ['로맨스'], characters: [] };
+const base: BasicInfoValues = { title: '', subtitle: '', world: '', tags: ['로맨스'], tagInput: '', characters: [] };
 
 describe('해시태그 규칙 (CREATE-US-01)', () => {
   it('10자까지는 문제없고 11자부터 이유를 알려 준다 (AC13)', () => {
@@ -38,5 +38,11 @@ describe('해시태그 규칙 (CREATE-US-01)', () => {
     expect(addTag(v, 'romance').result).toBe('duplicate');
     expect(addTag(v, '판타지로맨스').result).toBe('duplicate');
     expect(findSameTag(v.tags, 'ROMANCE')).toBe('Romance');
+  });
+
+  it('불러온 목록에 같은 태그로 취급되는 표기가 있으면 뒤쪽을 문제로 표시한다 (서버 TAG_DUPLICATE)', () => {
+    const problems = tagProblems(['Romance', '로맨스', 'romance', '가나다라마바사아자차카']);
+    expect([...problems.keys()]).toEqual(['romance', '가나다라마바사아자차카']);
+    expect(problems.get('romance')).toMatch(/'Romance'와 같은 태그예요/);
   });
 });

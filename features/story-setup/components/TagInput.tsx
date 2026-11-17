@@ -6,11 +6,13 @@ import { MinTouchSize, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 
 import { useTagSuggestions } from '../hooks/useTagSuggestions';
-import { addTag, findSameTag, MAX_TAG_LENGTH, MAX_TAGS, removeTag, tagLength, tagProblem } from '../tags';
+import { addTag, findSameTag, MAX_TAG_LENGTH, MAX_TAGS, removeTag, tagLength, tagProblems } from '../tags';
 import type { BasicInfoValues } from '../types';
 
 export type TagInputProps = {
   tags: string[];
+  /** 입력창의 글자(아직 추가하지 않은 태그). 저장 시 태그로 포함된다. */
+  input: string;
   onChange: (update: (values: BasicInfoValues) => BasicInfoValues) => void;
   /** 서버가 알려 준 태그 목록 전체의 안내(예: 개수 초과) */
   error?: string;
@@ -22,11 +24,12 @@ export type TagInputProps = {
  * - 입력하면 앞부분이 같은 태그 후보와 공개 스토리 수를 보여 준다. 후보에 없어도 그대로 추가할 수 있다.
  * - 10자·10개를 넘는 태그도 잘라내지 않고 추가해 문제로 표시한다(임시 저장 보존, 완성 저장은 서버가 막음).
  */
-export function TagInput({ tags, onChange, error, editable = true }: TagInputProps) {
+export function TagInput({ tags, input, onChange, error, editable = true }: TagInputProps) {
   const c = useTheme();
-  const [input, setInput] = useState('');
   const [notice, setNotice] = useState<string | null>(null);
   const suggestions = useTagSuggestions(input);
+
+  const setInput = (text: string) => onChange((v) => ({ ...v, tagInput: text }));
 
   const commit = (raw: string) => {
     const tag = raw.trim();
@@ -62,7 +65,7 @@ export function TagInput({ tags, onChange, error, editable = true }: TagInputPro
   const inputLength = tagLength(input.trim());
   const candidates = (suggestions.data ?? []).filter((s) => findSameTag(tags, s.name) === undefined);
   const showSuggestions = editable && input.trim() !== '';
-  const problems = tags.map((t) => [t, tagProblem(t)] as const).filter(([, p]) => p !== null);
+  const problemByTag = tagProblems(tags);
 
   return (
     <View style={styles.wrap}>
@@ -78,7 +81,7 @@ export function TagInput({ tags, onChange, error, editable = true }: TagInputPro
       {tags.length > 0 ? (
         <View style={styles.chips} accessibilityRole="list">
           {tags.map((tag) => {
-            const bad = tagProblem(tag) !== null;
+            const bad = problemByTag.has(tag);
             return (
               <Pressable
                 key={tag}
@@ -155,7 +158,7 @@ export function TagInput({ tags, onChange, error, editable = true }: TagInputPro
           해시태그는 최대 {MAX_TAGS}개까지 등록할 수 있어요. 공개·비공개 저장 전에 줄여 주세요.
         </Text>
       ) : null}
-      {problems.map(([tag, problem]) => (
+      {[...problemByTag].map(([tag, problem]) => (
         <Text key={tag} variant="error">
           #{tag}: {problem}
         </Text>
