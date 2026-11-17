@@ -1,3 +1,6 @@
+import type { ExpressionSettings } from './expression';
+export * from './expression';
+
 /**
  * 스토리 저장 데이터 타입. 두 담당자(강태훈·이휘)가 함께 확정하는 계약이다.
  *
@@ -71,13 +74,7 @@ export type StoryDraft = {
   characters: Character[];
 
   /** 말투·서술 (CREATE-US-02) */
-  speech: {
-    pov: '1인칭' | '2인칭' | '3인칭';
-    tense: '과거형' | '현재형';
-    lengthTarget: '짧게' | '보통' | '길게';
-    styles: string[];
-    customStyle: string;
-  };
+  speech: ExpressionSettings;
 
   /** 상황 예시 (퓨샷) */
   fewshotGroups: { id: string; messages: Bubble[] }[];
@@ -95,3 +92,8 @@ export type StoryDraft = {
   saveState: SaveState;
   updatedAt: string | null;
 };
+
+/** 표현 API 전용 조회 투영. 미조회 생성 영역을 가짜 빈 배열로 채우지 않는다. */
+export type StoryExpressionDocument = Pick<StoryDraft, 'id' | 'title' | 'speech' | 'saveState' | 'updatedAt'>;
+
+export * from './fewshots';

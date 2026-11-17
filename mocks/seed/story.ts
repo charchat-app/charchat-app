@@ -13,11 +13,11 @@ export const seedStory: StoryDraft = {
   coverPhotoUrls: [],
   characters: [{ name: '하린', detail: '예시 캐릭터의 상세 설명입니다.', photoUrls: [] }],
   speech: {
-    pov: '3인칭',
-    tense: '과거형',
-    lengthTarget: '보통',
-    styles: [],
-    customStyle: '',
+    pointOfView: 'third_person',
+    tense: 'past',
+    composition: 'balanced',
+    responseLength: 'normal',
+    style: { mode: 'none' },
   },
   fewshotGroups: [],
   intros: [

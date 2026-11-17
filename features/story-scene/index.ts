@@ -1,2 +1,5 @@
-// story-scene: 공개 API. 다른 도메인은 이 파일로만 접근한다.
-export {};
+export { ExpressionScreen } from './components/ExpressionScreen';
+export { fromDraft, toDraftPatch } from './expressionAdapter';
+
+export { CreationWorkspace } from './components/CreationWorkspace';
+export { FewshotScreen } from './components/FewshotScreen';

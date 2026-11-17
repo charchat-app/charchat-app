@@ -1,2 +1,3 @@
-// story-scene: 서버 호출. 화면에서 fetch를 직접 쓰지 않고 이 파일을 거친다.
-export {};
+/** CREATE-US-02 실제 SQL 행 변환. 공통 저장과 동일한 매퍼를 사용한다. */
+export { fromExpressionRow, toExpressionRow } from '@/shared/story-types';
+export type { ExpressionRow } from '@/shared/story-types';
