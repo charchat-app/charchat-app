@@ -1,11 +1,11 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { DefaultTheme, Stack, ThemeProvider, type Theme } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import { Colors } from '@/constants/theme';
 
-SplashScreen.preventAutoHideAsync();
+void SplashScreen.preventAutoHideAsync().catch(() => undefined);
 
 /**
  * 네비게이션 테마는 라이트로 고정한다. 디자인 시스템에 다크 모드가 아직 없고(constants/theme.ts),
@@ -27,6 +27,11 @@ const NAV_THEME: Theme = {
 export default function RootLayout() {
   // 서버 상태 캐시. 저장(mutation)은 실패해도 자동 재시도하지 않고 사용자가 다시 누른다.
   const [queryClient] = useState(() => new QueryClient({ defaultOptions: { mutations: { retry: false } } }));
+
+  // preventAutoHideAsync만 두면 시작 화면이 남으므로 첫 렌더 뒤 해제한다.
+  useEffect(() => {
+    void SplashScreen.hideAsync().catch(() => undefined);
+  }, []);
 
   return (
     <QueryClientProvider client={queryClient}>

@@ -1,5 +1,6 @@
 module.exports = {
   preset: 'jest-expo',
+  testPathIgnorePatterns: ['/node_modules/', '<rootDir>/scripts/'],
   setupFilesAfterEnv: ['@testing-library/react-native/matchers'],
   moduleNameMapper: { '^@/(.*)$': '<rootDir>/$1' },
   transformIgnorePatterns: [

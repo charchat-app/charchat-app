@@ -29,6 +29,7 @@ const light = {
   placeholderBorder: '#b3beb0',
   avatarBackground: '#dce4d8',
   avatarText: '#49604d',
+  userToken: '#8b5cf6', // 제작 원문의 {{user}} 구분색
   onAccent: '#ffffff', // 초록 버튼 위 글자
 };
 

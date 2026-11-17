@@ -3,6 +3,7 @@ import { StyleSheet, TextInput, View, type TextInputProps } from 'react-native';
 import { Text } from '@/components/ui/Text';
 import { Fonts, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+import { countRawText } from '@/lib/rawText';
 
 export type TextAreaProps = TextInputProps & {
   /** 글자 수 한도. 공백·줄바꿈 포함 기준으로 센다 (CREATE-US-02 등). */
@@ -15,7 +16,7 @@ export type TextAreaProps = TextInputProps & {
 /** 여러 줄 입력창. 목업: 최소 높이 115px, 오른쪽 아래 글자 수 표시 */
 export function TextArea({ value = '', maxLength, showCount = true, invalid = false, style, ...rest }: TextAreaProps) {
   const c = useTheme();
-  const length = value.length;
+  const length = countRawText(value);
   const over = maxLength !== undefined && length > maxLength;
 
   return (

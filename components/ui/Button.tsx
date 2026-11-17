@@ -23,15 +23,15 @@ export function Button({ label, variant = 'primary', fullWidth = false, disabled
       accessibilityLabel={label}
       accessibilityState={{ disabled: !!disabled }}
       disabled={disabled}
-      style={({ pressed }) => [
+      style={(state) => [
         styles.base,
         isPrimary
           ? { backgroundColor: c.accent, borderColor: c.accent }
           : { backgroundColor: c.surface, borderColor: variant === 'danger' ? c.danger : c.chipBorder },
         fullWidth && styles.fullWidth,
-        pressed && styles.pressed,
+        state.pressed && styles.pressed,
         disabled && styles.disabled,
-        typeof style === 'function' ? style({ pressed }) : style,
+        typeof style === 'function' ? style(state) : style,
       ]}
       {...rest}
     >

@@ -63,7 +63,8 @@ export function ChipGroup({
           <Pressable
             key={option}
             accessibilityRole={mode === 'single' ? 'radio' : 'checkbox'}
-            accessibilityState={{ selected }}
+            accessibilityState={{ checked: selected }}
+            aria-checked={selected}
             onPress={() => toggle(option)}
             style={({ pressed }) => [
               styles.chip,

@@ -41,3 +41,9 @@ example
 # generated native folders
 /ios
 /android
+
+# Private database connection settings
+/.env
+
+# Local development fixtures (no shared database)
+/.local/

@@ -1,7 +1,7 @@
 import { Tabs } from 'expo-router';
-import { useColorScheme } from 'react-native';
 
 import { Colors } from '@/constants/theme';
+import { useColorScheme } from '@/hooks/use-color-scheme';
 
 /** 하단 탭: 홈 / 제작 / 대화 (목업 하단 내비게이션과 같은 순서) */
 export default function TabsLayout() {
