@@ -5,6 +5,8 @@ import { publishStoryCharacters } from '@/features/story-setup';
 import type { FewshotsDocument } from '@/shared/story-types';
 
 jest.mock('react-native-safe-area-context', () => require('react-native-safe-area-context/jest/mock').default);
+// 화면 전체 흐름(입력·정렬·저장·재진입)이라 느린 CI에서 기본 5초를 넘을 수 있다.
+jest.setTimeout(30000);
 function fixture() {
   let value: FewshotsDocument = {
     id: '1',
