@@ -18,6 +18,11 @@ export type Bubble = {
 };
 
 export type Character = {
+  /**
+   * 서버가 발급한 캐릭터 id. 아직 저장하지 않은 새 캐릭터는 없다.
+   * 이름을 바꿔도 같은 인물로 이어지게(이미지·말풍선 발화자 연결 등) 이름 대신 이 값으로 구분한다.
+   */
+  id?: string;
   name: string;
   /** 자유 서술. 성격·외형·배경을 나누지 않는다 (CREATE-US-01). */
   detail: string;
