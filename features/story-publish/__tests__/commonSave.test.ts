@@ -1,6 +1,34 @@
 import { act, renderHook } from '@testing-library/react-native';
-import { defaultExpression, type CreationSaveDocument } from '@/shared/story-types';
+import { defaultExpression, emptyScene, type CreationSaveDocument } from '@/shared/story-types';
 
+// 서버 응답·요청의 빈 장면 형식. 빈 입력은 서버가 null(미지정)로 돌려준다.
+const serverScene = {
+  date_mode: null,
+  era: null,
+  year_input: null,
+  month_input: null,
+  day_input: null,
+  reference_event: null,
+  elapsed_day_input: null,
+  time_format: '24h',
+  hour_input: null,
+  minute_input: null,
+  meridiem: null,
+  place: null,
+  characters: [],
+};
+const requestScene = {
+  ...serverScene,
+  era: '',
+  year_input: '',
+  month_input: '',
+  day_input: '',
+  reference_event: '',
+  elapsed_day_input: '',
+  hour_input: '',
+  minute_input: '',
+  place: '',
+};
 import { completionIssues, useCommonSave } from '../hooks/useCommonSave';
 import type { CommonSaveRepository } from '../commonRepository';
 import { createCommonSaveRepository } from '../commonRepository';
@@ -20,8 +48,11 @@ const document = (): CreationSaveDocument => ({
       clientKey: 'intro-30',
       title: '첫 만남',
       messages: [{ id: '31', clientKey: 'intro-message-31', speakerKind: 'narrator', characterId: null, body: '*비*' }],
+      scene: emptyScene(),
     },
   ],
+  relations: [],
+  affinities: [],
 });
 const repo = (save: CommonSaveRepository['save']): CommonSaveRepository => ({
   load: jest.fn(),
@@ -66,8 +97,11 @@ it('표현·퓨샷을 같은 요청에 보내고 조회도 같은 공통 응답�
           messages: [
             { id: '31', client_key: 'intro-message-31', speaker_kind: 'narrator', character_id: null, body: '*비*' },
           ],
+          scene: serverScene,
         },
       ],
+      relations: [],
+      affinities: [],
       request_id: 'one',
     }),
   } as Response);
@@ -89,8 +123,11 @@ it('표현·퓨샷을 같은 요청에 보내고 조회도 같은 공통 응답�
           messages: [
             { id: '31', client_key: 'intro-message-31', speaker_kind: 'narrator', character_id: null, body: '*비*' },
           ],
+          scene: requestScene,
         },
       ],
+      relations: [],
+      affinities: [],
       save_state: 'private',
       mode: 'manual',
     });

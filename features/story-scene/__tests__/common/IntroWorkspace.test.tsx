@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
-import { defaultExpression, type CreationSaveDocument } from '@/shared/story-types';
+import { defaultExpression, emptyScene, type CreationSaveDocument } from '@/shared/story-types';
 import type { CommonSaveRepository } from '@/features/story-publish';
 import { publishStoryCharacters } from '@/features/story-setup';
 import { CommonCreationWorkspace } from '../../components/CommonCreationWorkspace';
@@ -17,6 +17,8 @@ function fixture(initial: Partial<CreationSaveDocument> = {}) {
     characters: [{ id: '5', name: '하린', position: 0 }],
     fewshots: [],
     intros: [],
+    relations: [],
+    affinities: [],
     ...initial,
   };
   let next = 100;
@@ -121,8 +123,8 @@ it('인트로를 작성·정렬·삭제하고 완성 조건을 지킨 뒤 비공
   await fireEvent.press(screen.getByRole('tab', { name: '인트로' }));
   await waitFor(() => expect(screen.getByLabelText('인트로 2 상황 제목').props.value).toBe('비 오는 골목'));
   await fireEvent.press(screen.getByRole('button', { name: '인트로 2 본문 편집' }));
-  // 말풍선 이름표에 캐릭터 이름이 보인다.
-  expect(screen.getAllByText('하린').length).toBeGreaterThan(0);
+  // 이름표와 하단 상태 카드에 모두 이름이 보인다.
+  expect(screen.getAllByText('하린').length).toBeGreaterThan(1);
   expect(screen.getByText('저장한 설정과 같습니다.')).toBeTruthy();
   // 단계가 많은 전체 흐름 검사라 기본 5초보다 넉넉히 둔다.
 }, 30000);
@@ -145,6 +147,7 @@ it('캐릭터 삭제 시 그 인물의 인트로 말풍선만 제거하고 이�
           { id: '32', clientKey: 'intro-message-32', speakerKind: 'character', characterId: '5', body: '하린 대사' },
           { id: '33', clientKey: 'intro-message-33', speakerKind: 'user', characterId: null, body: '유저 대사' },
         ],
+        scene: emptyScene(),
       },
     ],
   });
@@ -179,8 +182,9 @@ it('인트로 화면에서 말풍선 정렬·삭제·수정 취소/완료·삽�
         clientKey: 'intro-40',
         title: '첫째',
         messages: [msg('41', 'narrator', 'a1'), msg('42', 'character', 'a2'), msg('43', 'user', 'a3')],
+        scene: emptyScene(),
       },
-      { id: '50', clientKey: 'intro-50', title: '둘째', messages: [msg('51', 'narrator', 'b1')] },
+      { id: '50', clientKey: 'intro-50', title: '둘째', messages: [msg('51', 'narrator', 'b1')], scene: emptyScene() },
     ],
   });
   await render(<CommonCreationWorkspace repository={repository} storyId="1" />);

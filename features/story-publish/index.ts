@@ -3,7 +3,7 @@ export { StoryEditorScreen } from './components/StoryEditorScreen';
 export { StoryListScreen } from './components/StoryListScreen';
 export type { EditorStory, StorySummary } from './types';
 
-// 생성 2·3번(표현·퓨샷·인트로) 저장
+// 생성 2~4번(표현·퓨샷·인트로·초기 상태) 저장
 export { createFixtureRepository } from './fixtureRepository';
 export { createServerExpressionRepository } from './serverRepository';
 export type { StoryRepository } from './fixtureRepository';

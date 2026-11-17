@@ -2,6 +2,11 @@ import { useEffect, useRef, useState } from 'react';
 import { ApiError } from '@/lib/api-client';
 import { countRawText } from '@/lib/rawText';
 import {
+  affinityIssue,
+  dateIssue,
+  sceneTextOver,
+  SCENE_LIMITS,
+  timeIssue,
   INTRO_BODY_LIMIT,
   INTRO_TITLE_LIMIT,
   newFewshotKey,
@@ -21,6 +26,20 @@ export function completionIssues(document: CreationSaveDocument): string[] {
   )
     issues.push('퓨샷 전체를 2000자 이내로 작성해 주세요.');
   issues.push(...introIssues(document.intros));
+  issues.push(...initialStateIssues(document));
+  return issues;
+}
+/** CREATE-US-04 완성 저장 조건. 서버 initial_state.validate_completed와 같은 순서·기준이다. */
+export function initialStateIssues(
+  document: Pick<CreationSaveDocument, 'intros' | 'relations' | 'affinities'>,
+): string[] {
+  const scenes = document.intros.map((intro) => intro.scene);
+  const issues: string[] = [];
+  if (scenes.some((scene) => dateIssue(scene))) issues.push(messages.INITIAL_DATE_INVALID);
+  if (scenes.some((scene) => timeIssue(scene))) issues.push(messages.INITIAL_TIME_INVALID);
+  if (scenes.some(sceneTextOver) || document.relations.some((r) => countRawText(r.label) > SCENE_LIMITS.relationLabel))
+    issues.push(messages.INITIAL_TEXT_TOO_LONG);
+  if (document.affinities.some((a) => affinityIssue(a.value))) issues.push(messages.AFFINITY_INVALID);
   return issues;
 }
 /** CREATE-US-03 완성 저장 조건. 서버 validate_completed와 같은 순서·기준이다. */
@@ -52,6 +71,12 @@ const messages: Record<string, string> = {
   INTRO_BODY_REQUIRED: '모든 인트로에 대사나 서술을 작성해 주세요.',
   INTRO_TOO_LONG: '인트로 본문은 인트로마다 2000자 이내로 작성해 주세요.',
   MESSAGE_INTRO_CHANGED: '말풍선은 다른 인트로로 옮길 수 없습니다.',
+  INITIAL_DATE_INVALID: '초기 날짜를 모두 올바르게 채우거나 비워 주세요.',
+  INITIAL_TIME_INVALID: '초기 시간을 모두 올바르게 채우거나 비워 주세요.',
+  INITIAL_TEXT_TOO_LONG: '장소·착장·속마음·관계명·연호·기준 사건의 글자 수 한도를 확인해 주세요.',
+  AFFINITY_INVALID: '초기 호감도는 -100~100 사이 정수로 입력해 주세요.',
+  INVALID_SCENE_CHARACTER: '삭제된 캐릭터의 상태가 남아 있습니다. 다시 불러온 뒤 저장해 주세요.',
+  INVALID_RELATION_PERSON: '삭제된 캐릭터의 관계가 남아 있습니다. 다시 불러온 뒤 저장해 주세요.',
 };
 type Options = {
   document: CreationSaveDocument | null;

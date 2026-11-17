@@ -16,6 +16,7 @@ import {
 } from '@/shared/story-types';
 import { FewshotGroupEditor, type PendingInput } from './FewshotGroupEditor';
 import { ReorderList } from './ReorderList';
+import { SceneSummary } from './initial-state/SceneSummary';
 
 const introName = (index: number) => (index === 0 ? '기본 인트로' : `인트로 ${index + 1}`);
 
@@ -67,6 +68,8 @@ export function IntroEditorView({
               onClose={() => setSelected(null)}
               onChange={(value) => update(value.clientKey, () => value)}
             />
+            {/* CREATE-US-04-AC08·18: 이 인트로의 초기 상태를 하단에서 확인한다. */}
+            <SceneSummary scene={active.scene} characters={characters} />
           </>
         ) : (
           <>

@@ -1,6 +1,7 @@
 /** CREATE-US-03 인트로를 7번 공통 저장 응답·요청으로 변환한다. 별도 인트로 API는 두지 않는다. */
 import type { FewshotCharacter, IntroItem } from '@/shared/story-types';
 import { readId, readKey, readMessage, readObject } from './fewshotRepository';
+import { readScene, scenePayload } from './initialStateRepository';
 
 export function readIntros(value: unknown, characters: FewshotCharacter[]): IntroItem[] {
   if (!Array.isArray(value)) throw new Error('인트로 응답을 확인할 수 없습니다.');
@@ -21,6 +22,7 @@ export function readIntros(value: unknown, characters: FewshotCharacter[]): Intr
       clientKey,
       title: (intro.title as string | null) ?? '',
       messages: intro.messages.map((message) => readMessage(message, characters, keys, messageIds)),
+      scene: readScene(intro.scene, characters),
     };
   });
 }
@@ -38,6 +40,7 @@ export function introsPayload(intros: IntroItem[]) {
         character_id: message.characterId,
         body: message.body,
       })),
+      scene: scenePayload(intro.scene),
     })),
   };
 }

@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
-import { defaultExpression, type CreationSaveDocument } from '@/shared/story-types';
+import { defaultExpression, emptyScene, type CreationSaveDocument } from '@/shared/story-types';
 import type { CommonSaveRepository } from '@/features/story-publish';
 import { CommonCreationWorkspace } from '../../components/CommonCreationWorkspace';
 
@@ -32,8 +32,11 @@ function fixture(overlong = false) {
         messages: [
           { id: '31', clientKey: 'intro-message-31', speakerKind: 'narrator', characterId: null, body: '*비*' },
         ],
+        scene: emptyScene(),
       },
     ],
+    relations: [],
+    affinities: [],
   };
   const save = jest.fn(async (document: CreationSaveDocument, state: CreationSaveDocument['saveState']) => {
     data = {
