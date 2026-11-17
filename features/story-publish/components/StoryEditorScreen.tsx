@@ -6,7 +6,14 @@ import { Badge, Button, Notice, ScreenHeader, Surface, Text, TopTabs } from '@/c
 import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { ApiError, type FieldIssue } from '@/lib/api-client';
-import { BasicInfoForm, fromDraft, toDraftPatch, type BasicInfoValues } from '@/features/story-setup';
+import {
+  applySavedIds,
+  BasicInfoForm,
+  fromDraft,
+  toDraftPatch,
+  toFieldErrors,
+  type BasicInfoValues,
+} from '@/features/story-setup';
 
 import { toAppIssues } from '../api';
 import { useSaveStoryBasic, useStory } from '../hooks/useStories';
@@ -30,10 +37,17 @@ export function StoryEditorScreen({ storyId, onBack }: StoryEditorScreenProps) {
   const save = useSaveStoryBasic(storyId);
   const [tab, setTab] = useState(0);
   const [values, setValues] = useState<BasicInfoValues | null>(null);
+  // 서버 issues의 characters[i]가 어느 캐릭터인지 알려면, 그 판정을 받은 저장본의 캐릭터 순서(key)가 필요하다.
+  const [savedKeys, setSavedKeys] = useState<string[]>([]);
+  const [attemptKeys, setAttemptKeys] = useState<string[]>([]);
 
   // 처음 불러온 저장본으로 입력값을 채운다. 이후 서버 응답이 입력 중인 내용을 덮어쓰지 않게 한 번만 한다.
   useEffect(() => {
-    if (story.data && values === null) setValues(fromDraft(story.data));
+    if (story.data && values === null) {
+      const loaded = fromDraft(story.data);
+      setValues(loaded);
+      setSavedKeys(loaded.characters.map((ch) => ch.key));
+    }
   }, [story.data, values]);
 
   if (story.isPending || (story.data && values === null)) {
@@ -53,8 +67,27 @@ export function StoryEditorScreen({ storyId, onBack }: StoryEditorScreenProps) {
   const saved = story.data;
   const failedIssues = save.error instanceof ApiError ? toAppIssues(save.error.issues) : [];
   const issues: FieldIssue[] = failedIssues.length > 0 ? failedIssues : saved.issues;
+  const errors = toFieldErrors(issues, failedIssues.length > 0 ? attemptKeys : savedKeys);
   const isDraft = saved.saveState === '임시 저장';
-  const doSave = () => save.mutate(toDraftPatch(values));
+  const doSave = () => {
+    const sent = values.characters.map((ch) => ch.key);
+    setAttemptKeys(sent);
+    save.mutate(toDraftPatch(values), {
+      onSuccess: (story) => {
+        // 새 캐릭터에 서버 id를 붙여 다음 저장 때 같은 캐릭터로 수정되게 한다.
+        setValues((v) =>
+          v
+            ? applySavedIds(
+                v,
+                sent,
+                story.characters.map((ch) => ch.id ?? ''),
+              )
+            : v,
+        );
+        setSavedKeys(sent);
+      },
+    });
+  };
 
   return (
     <Surface style={styles.container}>
@@ -74,7 +107,7 @@ export function StoryEditorScreen({ storyId, onBack }: StoryEditorScreenProps) {
             {issues.length > 0 ? (
               <Notice tone="alert" message="공개·비공개로 저장하려면 표시된 항목을 채워 주세요." />
             ) : null}
-            <BasicInfoForm values={values} onChange={setValues} issues={issues} />
+            <BasicInfoForm values={values} onChange={setValues} errors={errors} />
           </>
         ) : (
           <Notice message={`${TABS[tab]} 탭은 아직 연결되지 않았어요.`} />

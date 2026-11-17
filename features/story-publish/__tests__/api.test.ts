@@ -8,6 +8,7 @@ const dto: StoryResponseDto = {
   subtitle: '부제',
   world_description: null,
   tags: [],
+  characters: [{ id: 3, name: '서윤', description: null, position: 0 }],
   saved_at: '2026-11-17T11:00:00Z',
   issues: [
     { field: 'title', code: 'REQUIRED', message: '제목을 입력하세요.' },
@@ -20,15 +21,31 @@ describe('서버 응답 ↔ 앱 타입 변환', () => {
     const story = toEditorStory(dto);
     expect(story).toMatchObject({ id: '7', title: '', subtitle: '부제', world: '', saveState: '임시 저장' });
     expect(story.issues.map((i) => i.field)).toEqual(['title', 'world']);
+    expect(story.characters).toEqual([{ id: '3', name: '서윤', detail: '' }]);
     expect(toEditorStory({ ...dto, save_state: 'public' }).saveState).toBe('공개');
   });
 
   it('빈 입력만 null로 보내고 공백 원문은 그대로 보낸다', () => {
-    expect(toWriteDto({ title: '', subtitle: '  ', world: '세계', tags: ['로맨스'] })).toEqual({
+    expect(
+      toWriteDto({
+        title: '',
+        subtitle: '  ',
+        world: '세계',
+        tags: ['로맨스'],
+        characters: [
+          { id: '3', name: '서윤', detail: '' },
+          { name: ' 새 인물', detail: '상세' },
+        ],
+      }),
+    ).toEqual({
       title: null,
       subtitle: '  ',
       world_description: '세계',
       tags: ['로맨스'],
+      characters: [
+        { id: 3, name: '서윤', description: null },
+        { id: null, name: ' 새 인물', description: '상세' },
+      ],
     });
   });
 });

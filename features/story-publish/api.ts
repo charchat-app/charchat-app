@@ -39,6 +39,11 @@ export function toEditorStory(dto: StoryResponseDto): EditorStory {
     subtitle: dto.subtitle ?? '',
     world: dto.world_description ?? '',
     tags: dto.tags,
+    characters: dto.characters.map((c) => ({
+      id: String(c.id),
+      name: c.name ?? '',
+      detail: c.description ?? '',
+    })),
     saveState: toSaveState(dto.save_state),
     updatedAt: dto.saved_at,
     issues: toAppIssues(dto.issues),
@@ -65,6 +70,11 @@ export function toWriteDto(fields: StoryBasicFields): StoryBasicWriteDto {
     subtitle: emptyToNull(fields.subtitle),
     world_description: emptyToNull(fields.world),
     tags: fields.tags,
+    characters: fields.characters.map((c) => ({
+      id: c.id === undefined ? null : Number(c.id),
+      name: emptyToNull(c.name),
+      description: emptyToNull(c.detail),
+    })),
   };
 }
 
