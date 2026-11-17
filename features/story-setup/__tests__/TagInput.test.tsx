@@ -118,4 +118,20 @@ describe('TagInput', () => {
     await renderInput({ ...initial, tags: ['Romance', 'romance'] });
     expect(screen.getByText(/#romance: 'Romance'와 같은 태그예요/)).toBeOnTheScreen();
   });
+
+  it('#을 붙여 입력해도 #을 떼고 찾고 추가하며 글자 수에서도 뺀다', async () => {
+    mockFetch.mockResolvedValue([{ name: '로맨스', publicStoryCount: 3 }]);
+    await renderInput();
+
+    await fireEvent.changeText(screen.getByLabelText('해시태그 입력'), '#로');
+    await act(async () => {
+      jest.advanceTimersByTime(300);
+    });
+    expect(mockFetch).toHaveBeenCalledWith('로');
+    expect(screen.getByText('1/10자')).toBeOnTheScreen();
+
+    await fireEvent.changeText(screen.getByLabelText('해시태그 입력'), '#서점물');
+    await fireEvent.press(screen.getByRole('button', { name: '추가' }));
+    expect(screen.getByLabelText('서점물 태그 삭제')).toBeOnTheScreen();
+  });
 });

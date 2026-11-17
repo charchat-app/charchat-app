@@ -1,4 +1,14 @@
-import { addTag, findSameTag, MAX_TAG_LENGTH, removeTag, tagKey, tagLength, tagProblem, tagProblems } from '../tags';
+import {
+  addTag,
+  findSameTag,
+  normalizeTagInput,
+  MAX_TAG_LENGTH,
+  removeTag,
+  tagKey,
+  tagLength,
+  tagProblem,
+  tagProblems,
+} from '../tags';
 import type { BasicInfoValues } from '../types';
 
 const base: BasicInfoValues = { title: '', subtitle: '', world: '', tags: ['로맨스'], tagInput: '', characters: [] };
@@ -44,5 +54,14 @@ describe('해시태그 규칙 (CREATE-US-01)', () => {
     const problems = tagProblems(['Romance', '로맨스', 'romance', '가나다라마바사아자차카']);
     expect([...problems.keys()]).toEqual(['romance', '가나다라마바사아자차카']);
     expect(problems.get('romance')).toMatch(/'Romance'와 같은 태그예요/);
+  });
+
+  it('앞쪽 # 기호는 떼고 추가한다 (서버와 같은 처리)', () => {
+    expect(normalizeTagInput(' ##로맨스 ')).toBe('로맨스');
+    expect(normalizeTagInput('# 로맨스')).toBe('로맨스');
+    expect(normalizeTagInput('C#')).toBe('C#');
+    expect(addTag({ ...base, tags: [] }, '#판타지').values.tags).toEqual(['판타지']);
+    expect(addTag(base, '#로맨스').result).toBe('duplicate');
+    expect(addTag(base, '#').result).toBe('empty');
   });
 });

@@ -55,6 +55,14 @@ export function tagProblems(tags: string[]): Map<string, string> {
   return problems;
 }
 
+/**
+ * 입력한 태그를 저장할 표기로 정리한다. 구분용 앞뒤 공백과 앞쪽 해시 기호(#)를 뗀다.
+ * '#로맨스'·'##로맨스'·'# 로맨스' → '로맨스'. #은 표시 기호라 태그 내용이 아니다(서버도 같은 처리).
+ */
+export function normalizeTagInput(raw: string): string {
+  return raw.trim().replace(/^#+/, '').trim();
+}
+
 export type AddTagResult = 'added' | 'empty' | 'duplicate';
 
 /**
@@ -63,7 +71,7 @@ export type AddTagResult = 'added' | 'empty' | 'duplicate';
  * 대소문자·띄어쓰기만 다른 태그는 같은 태그라 한 번만 둔다.
  */
 export function addTag(values: BasicInfoValues, raw: string): { values: BasicInfoValues; result: AddTagResult } {
-  const tag = raw.trim();
+  const tag = normalizeTagInput(raw);
   if (tag === '') return { values, result: 'empty' };
   if (findSameTag(values.tags, tag) !== undefined) return { values, result: 'duplicate' };
   return { values: { ...values, tags: [...values.tags, tag] }, result: 'added' };

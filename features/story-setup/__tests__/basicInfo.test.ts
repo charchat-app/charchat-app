@@ -54,5 +54,7 @@ describe('캐릭터 추가·삭제·수정 (AC08·AC12)', () => {
     expect(toDraftPatch({ ...empty, tags: ['로맨스'], tagInput: ' 서점물 ' }).tags).toEqual(['로맨스', '서점물']);
     expect(toDraftPatch({ ...empty, tags: ['Romance'], tagInput: 'romance' }).tags).toEqual(['Romance']);
     expect(toDraftPatch({ ...empty, tags: ['로맨스'], tagInput: '  ' }).tags).toEqual(['로맨스']);
+    expect(toDraftPatch({ ...empty, tags: ['로맨스'], tagInput: '#로맨스' }).tags).toEqual(['로맨스']);
+    expect(toDraftPatch({ ...empty, tags: [], tagInput: '#서점물' }).tags).toEqual(['서점물']);
   });
 });

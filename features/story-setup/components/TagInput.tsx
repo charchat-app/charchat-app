@@ -6,7 +6,16 @@ import { MinTouchSize, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 
 import { useTagSuggestions } from '../hooks/useTagSuggestions';
-import { addTag, findSameTag, MAX_TAG_LENGTH, MAX_TAGS, removeTag, tagLength, tagProblems } from '../tags';
+import {
+  addTag,
+  findSameTag,
+  MAX_TAG_LENGTH,
+  MAX_TAGS,
+  normalizeTagInput,
+  removeTag,
+  tagLength,
+  tagProblems,
+} from '../tags';
 import type { BasicInfoValues } from '../types';
 
 export type TagInputProps = {
@@ -27,12 +36,14 @@ export type TagInputProps = {
 export function TagInput({ tags, input, onChange, error, editable = true }: TagInputProps) {
   const c = useTheme();
   const [notice, setNotice] = useState<string | null>(null);
-  const suggestions = useTagSuggestions(input);
+  // 앞쪽 #을 뗀 값으로 찾고 센다. '#로'를 입력해도 '로맨스'가 후보로 나온다.
+  const typed = normalizeTagInput(input);
+  const suggestions = useTagSuggestions(typed);
 
   const setInput = (text: string) => onChange((v) => ({ ...v, tagInput: text }));
 
   const commit = (raw: string) => {
-    const tag = raw.trim();
+    const tag = normalizeTagInput(raw);
     setInput('');
     if (tag === '') return;
     const same = findSameTag(tags, tag);
@@ -62,9 +73,9 @@ export function TagInput({ tags, input, onChange, error, editable = true }: TagI
   };
 
   const countOver = tags.length > MAX_TAGS;
-  const inputLength = tagLength(input.trim());
+  const inputLength = tagLength(typed);
   const candidates = (suggestions.data ?? []).filter((s) => findSameTag(tags, s.name) === undefined);
-  const showSuggestions = editable && input.trim() !== '';
+  const showSuggestions = editable && typed !== '';
   const problemByTag = tagProblems(tags);
 
   return (
@@ -114,14 +125,9 @@ export function TagInput({ tags, input, onChange, error, editable = true }: TagI
             accessibilityLabel="해시태그 입력"
           />
         </View>
-        <Button
-          label="추가"
-          variant="secondary"
-          onPress={() => commit(input)}
-          disabled={!editable || input.trim() === ''}
-        />
+        <Button label="추가" variant="secondary" onPress={() => commit(input)} disabled={!editable || typed === ''} />
       </View>
-      {input.trim() !== '' ? (
+      {typed !== '' ? (
         <Text variant="caption" color={inputLength > MAX_TAG_LENGTH ? 'danger' : 'textSecondary'}>
           {inputLength}/{MAX_TAG_LENGTH}자
         </Text>
