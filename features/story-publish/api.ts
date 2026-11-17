@@ -1,6 +1,6 @@
 // story-publish: 서버 호출. 화면에서 fetch를 직접 쓰지 않고 이 파일을 거친다.
 // 서버 필드 이름(world_description·draft 등)과 앱 타입(world·'임시 저장' 등)의 변환도 여기서만 한다.
-import { apiRequest, type FieldIssue } from '@/lib/api-client';
+import { ApiError, apiRequest, type FieldIssue } from '@/lib/api-client';
 import type { SaveState } from '@/shared/story-types';
 
 import type {
@@ -64,6 +64,17 @@ function emptyToNull(value: string): string | null {
   return value === '' ? null : value;
 }
 
+/**
+ * 앱의 캐릭터 id(문자열)를 서버 id(양의 정수)로 바꾼다. 시드 데이터의 'seed-…'처럼 서버가 발급하지 않은 id는
+ * NaN → null(새 캐릭터)로 바뀌어 기존 캐릭터가 삭제되므로, 보내지 않고 오류로 막는다.
+ */
+function toServerId(id: string): number {
+  if (!/^[1-9]\d*$/.test(id)) {
+    throw new ApiError(0, 'INVALID_CHARACTER_ID', `서버에 저장되지 않은 캐릭터 id입니다: ${id}`);
+  }
+  return Number(id);
+}
+
 export function toWriteDto(fields: StoryBasicFields): StoryBasicWriteDto {
   return {
     title: emptyToNull(fields.title),
@@ -71,7 +82,7 @@ export function toWriteDto(fields: StoryBasicFields): StoryBasicWriteDto {
     world_description: emptyToNull(fields.world),
     tags: fields.tags,
     characters: fields.characters.map((c) => ({
-      id: c.id === undefined ? null : Number(c.id),
+      id: c.id === undefined ? null : toServerId(c.id),
       name: emptyToNull(c.name),
       description: emptyToNull(c.detail),
     })),

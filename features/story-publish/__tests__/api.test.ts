@@ -48,4 +48,16 @@ describe('서버 응답 ↔ 앱 타입 변환', () => {
       ],
     });
   });
+
+  it('서버가 발급하지 않은 캐릭터 id는 보내지 않고 오류로 막는다', () => {
+    const fields = {
+      title: '',
+      subtitle: '',
+      world: '',
+      tags: [],
+      characters: [{ id: 'seed-1', name: 'A', detail: 'a' }],
+    };
+    expect(() => toWriteDto(fields)).toThrow(expect.objectContaining({ code: 'INVALID_CHARACTER_ID' }));
+    expect(() => toWriteDto({ ...fields, characters: [{ id: '', name: 'A', detail: 'a' }] })).toThrow();
+  });
 });

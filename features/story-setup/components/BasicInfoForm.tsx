@@ -9,8 +9,15 @@ import type { BasicInfoValues, CharacterValues } from '../types';
 
 export type BasicInfoFormProps = {
   values: BasicInfoValues;
-  onChange: (values: BasicInfoValues) => void;
-  /** toFieldErrors()로 만든 위치별 안내 문구 */
+  /**
+   * 입력 변경. 화면에 그려진 시점의 값으로 덮어쓰지 않도록 항상 "이전 값 → 새 값" 함수로 전달한다.
+   * 저장 응답이 붙인 캐릭터 id 같은 비동기 변경이 같은 순간의 입력에 지워지지 않게 하기 위해서다.
+   */
+  onChange: (update: (values: BasicInfoValues) => BasicInfoValues) => void;
+  /**
+   * 위치별 안내 문구. key는 'title' | 'subtitle' | 'world' | 'characters' |
+   * '<캐릭터 key>.name' | '<캐릭터 key>.detail'.
+   */
   errors?: Record<string, string>;
   editable?: boolean;
 };
@@ -22,7 +29,7 @@ export type BasicInfoFormProps = {
  */
 export function BasicInfoForm({ values, onChange, errors = {}, editable = true }: BasicInfoFormProps) {
   const set = (field: 'title' | 'subtitle' | 'world' | 'tagsText') => (text: string) =>
-    onChange({ ...values, [field]: text });
+    onChange((v) => ({ ...v, [field]: text }));
   const full = values.characters.length >= MAX_CHARACTERS;
 
   return (
@@ -79,14 +86,14 @@ export function BasicInfoForm({ values, onChange, errors = {}, editable = true }
             character={character}
             errors={errors}
             editable={editable}
-            onChange={(patch) => onChange(updateCharacter(values, character.key, patch))}
-            onRemove={() => onChange(removeCharacter(values, character.key))}
+            onChange={(patch) => onChange((v) => updateCharacter(v, character.key, patch))}
+            onRemove={() => onChange((v) => removeCharacter(v, character.key))}
           />
         ))}
         <Button
           label={full ? `캐릭터는 최대 ${MAX_CHARACTERS}명이에요` : '+ 캐릭터 추가'}
           variant="secondary"
-          onPress={() => onChange(addCharacter(values))}
+          onPress={() => onChange(addCharacter)}
           disabled={!editable || full}
         />
       </Section>

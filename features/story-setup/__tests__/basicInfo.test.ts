@@ -1,12 +1,10 @@
 import {
   addCharacter,
-  applySavedIds,
   fromDraft,
   MAX_CHARACTERS,
   parseTags,
   removeCharacter,
   toDraftPatch,
-  toFieldErrors,
   updateCharacter,
 } from '../basicInfo';
 import type { BasicInfoValues } from '../types';
@@ -64,29 +62,5 @@ describe('캐릭터 추가·삭제·수정 (AC08·AC12)', () => {
     let v = empty;
     for (let i = 0; i < MAX_CHARACTERS + 2; i += 1) v = addCharacter(v);
     expect(v.characters).toHaveLength(MAX_CHARACTERS);
-  });
-
-  it('저장 후 새 캐릭터에 서버 id를 붙인다', () => {
-    const v = addCharacter(addCharacter(empty));
-    const sent = v.characters.map((ch) => ch.key);
-    const saved = applySavedIds(v, sent, ['11', '12']);
-    expect(saved.characters.map((ch) => ch.id)).toEqual(['11', '12']);
-    expect(toDraftPatch(saved).characters.map((ch) => ch.id)).toEqual(['11', '12']);
-  });
-});
-
-describe('서버 issues → 화면 위치 (AC05·AC08·AC10·AC11)', () => {
-  it('characters[i]를 저장 당시 key로 옮기고 description은 detail로 바꾼다', () => {
-    const errors = toFieldErrors(
-      [
-        { field: 'title', code: 'REQUIRED', message: '제목' },
-        { field: 'characters', code: 'CHARACTER_COUNT_OUT_OF_RANGE', message: '인원' },
-        { field: 'characters[1].name', code: 'NAME_DUPLICATE', message: '중복' },
-        { field: 'characters[0].description', code: 'REQUIRED', message: '상세' },
-        { field: 'characters[5].name', code: 'REQUIRED', message: '없는 위치' },
-      ],
-      ['k0', 'k1'],
-    );
-    expect(errors).toEqual({ title: '제목', characters: '인원', 'k1.name': '중복', 'k0.detail': '상세' });
   });
 });

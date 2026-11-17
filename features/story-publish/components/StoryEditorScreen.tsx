@@ -6,16 +6,10 @@ import { Badge, Button, Notice, ScreenHeader, Surface, Text, TopTabs } from '@/c
 import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { ApiError, type FieldIssue } from '@/lib/api-client';
-import {
-  applySavedIds,
-  BasicInfoForm,
-  fromDraft,
-  toDraftPatch,
-  toFieldErrors,
-  type BasicInfoValues,
-} from '@/features/story-setup';
+import { BasicInfoForm, fromDraft, toDraftPatch, type BasicInfoValues } from '@/features/story-setup';
 
 import { toAppIssues } from '../api';
+import { applySavedIds, toFieldErrors } from '../formSync';
 import { useSaveStoryBasic, useStory } from '../hooks/useStories';
 import { formatSavedAt } from '../savedAt';
 
@@ -107,7 +101,11 @@ export function StoryEditorScreen({ storyId, onBack }: StoryEditorScreenProps) {
             {issues.length > 0 ? (
               <Notice tone="alert" message="공개·비공개로 저장하려면 표시된 항목을 채워 주세요." />
             ) : null}
-            <BasicInfoForm values={values} onChange={setValues} errors={errors} />
+            <BasicInfoForm
+              values={values}
+              onChange={(update) => setValues((v) => (v ? update(v) : v))}
+              errors={errors}
+            />
           </>
         ) : (
           <Notice message={`${TABS[tab]} 탭은 아직 연결되지 않았어요.`} />
