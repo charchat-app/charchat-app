@@ -94,6 +94,77 @@ async function main() {
   await fewRepo.save({ ...afterDelete, fewshots: [] }, 'live-fewshots-four');
   assert.equal((await fewRepo.load(id)).fewshots.length, 0);
   assert.deepEqual((await repo.load(id)).speech, restored.speech);
+  const { createCommonSaveRepository } = require('../features/story-publish/commonRepository.ts');
+  const common = createCommonSaveRepository(base);
+  const commonInitial = await common.load(id);
+  const overflow = {
+    ...commonInitial,
+    speech: { ...commonInitial.speech, style: { mode: 'custom', text: '😀'.repeat(1001) } },
+  };
+  const draftSaved = await common.save(overflow, 'draft', 'manual', 'live-common-overflow');
+  assert.equal(draftSaved.speech.style.text, overflow.speech.style.text);
+  await assert.rejects(
+    () => common.save(draftSaved, 'private', 'manual', 'live-common-invalid'),
+    (error) => error.status === 422 && error.code === 'CUSTOM_STYLE_TOO_LONG',
+  );
+  const fixedStyle = { ...draftSaved.speech, style: { mode: 'custom', text: '원문 {{user}}' } };
+  // CREATE-US-03: 인트로 0개는 완성 저장을 거절한다.
+  await assert.rejects(
+    () => common.save({ ...draftSaved, speech: fixedStyle, intros: [] }, 'private', 'manual', 'live-intro-none'),
+    (error) => error.status === 422 && error.code === 'INTRO_REQUIRED',
+  );
+  const characterId = draftSaved.characters[0].id;
+  // CREATE-US-03: 미완성·초과 제목도 임시 저장 원문으로 보존한다.
+  const introDraft = {
+    ...draftSaved,
+    speech: fixedStyle,
+    intros: [
+      { id: null, clientKey: 'live-intro-b', title: '😀'.repeat(31), messages: [] },
+      {
+        id: null,
+        clientKey: 'live-intro-a',
+        title: '첫 만남',
+        messages: [
+          { id: null, clientKey: 'live-im-1', speakerKind: 'narrator', characterId: null, body: ' *비* \n' },
+          { id: null, clientKey: 'live-im-2', speakerKind: 'character', characterId, body: '{{user}}?' },
+        ],
+      },
+    ],
+  };
+  const introSaved = await common.save(introDraft, 'draft', 'manual', 'live-intro-draft');
+  const introLoaded = await common.load(id);
+  assert.deepEqual(
+    introLoaded.intros.map((intro) => [intro.id, intro.title, intro.messages.map((m) => [m.id, m.body])]),
+    introSaved.intros.map((intro) => [intro.id, intro.title, intro.messages.map((m) => [m.id, m.body])]),
+  );
+  assert.equal(introLoaded.intros[0].title, '😀'.repeat(31));
+  assert.equal(introLoaded.intros[1].messages[1].characterId, characterId);
+  await assert.rejects(
+    () => common.save(introLoaded, 'private', 'manual', 'live-intro-title'),
+    (error) => error.status === 422 && error.code === 'INTRO_TITLE_TOO_LONG',
+  );
+  const fixedIntro = { ...introLoaded.intros[1] };
+  // 제목 없는 첫 인트로를 삭제해 두 번째가 기본이 된 상태로 완성 저장한다.
+  const completed = await common.save(
+    { ...introLoaded, intros: [fixedIntro] },
+    'private',
+    'manual',
+    'live-common-private',
+  );
+  assert.equal(completed.saveState, 'private');
+  const reloaded = await common.load(id);
+  assert.equal(reloaded.speech.style.text, '원문 {{user}}');
+  assert.deepEqual(
+    reloaded.intros.map((intro) => intro.id),
+    [introLoaded.intros[1].id],
+  );
+  assert.equal(reloaded.intros[0].messages[0].body, ' *비* \n');
+  const published = await common.save(completed, 'public', 'manual', 'live-common-public');
+  assert.equal(published.saveState, 'public');
+  await assert.rejects(
+    () => common.save(published, 'draft', 'manual', 'live-common-back'),
+    (error) => error.status === 409,
+  );
   console.log(
     JSON.stringify({
       passed: true,
@@ -104,6 +175,8 @@ async function main() {
       rawTextPreserved: true,
       replayDidNotOverwriteLaterSave: true,
       sharedDatabaseUsed: false,
+      commonSaveAndCompletionValidation: true,
+      introSaveRestoreAndValidation: true,
     }),
   );
 }
