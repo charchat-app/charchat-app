@@ -30,6 +30,8 @@ export function StoryEditorScreen({ storyId, onBack }: StoryEditorScreenProps) {
   const story = useStory(storyId);
   const save = useSaveStoryBasic(storyId);
   const [tab, setTab] = useState(0);
+  // 캐릭터를 끄는 동안 화면 스크롤을 멈춘다 (AC14: 드래그와 페이지 스크롤이 겹치지 않게)
+  const [dragging, setDragging] = useState(false);
   const [values, setValues] = useState<BasicInfoValues | null>(null);
   // 서버 issues의 characters[i]가 어느 캐릭터인지 알려면, 그 판정을 받은 저장본의 캐릭터 순서(key)가 필요하다.
   const [savedKeys, setSavedKeys] = useState<string[]>([]);
@@ -95,7 +97,12 @@ export function StoryEditorScreen({ storyId, onBack }: StoryEditorScreenProps) {
       <View style={styles.tabs}>
         <TopTabs tabs={TABS} activeIndex={tab} onChange={setTab} />
       </View>
-      <ScrollView style={styles.body} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+      <ScrollView
+        style={styles.body}
+        contentContainerStyle={styles.content}
+        keyboardShouldPersistTaps="handled"
+        scrollEnabled={!dragging}
+      >
         {tab === 0 ? (
           <>
             {issues.length > 0 ? (
@@ -105,6 +112,7 @@ export function StoryEditorScreen({ storyId, onBack }: StoryEditorScreenProps) {
               values={values}
               onChange={(update) => setValues((v) => (v ? update(v) : v))}
               errors={errors}
+              onDragActiveChange={setDragging}
             />
           </>
         ) : (

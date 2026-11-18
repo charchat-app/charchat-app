@@ -30,3 +30,37 @@ describe('BasicInfoForm 입력 변경', () => {
     expect(update(latest).characters[0]).toEqual({ key: 'new-1', id: '11', name: '', detail: '서점 주인' });
   });
 });
+
+describe('BasicInfoForm 합산 글자 수·순서 버튼', () => {
+  const twoChars: BasicInfoValues = {
+    ...rendered,
+    world: '가'.repeat(2999),
+    characters: [
+      { key: 'k1', id: '1', name: 'A', detail: '' },
+      { key: 'k2', id: '2', name: 'B', detail: '' },
+    ],
+  };
+
+  it('합계가 3000자를 넘으면 넘은 글자 수를 알려 준다 (AC09)', async () => {
+    await render(
+      <QueryClientProvider client={new QueryClient()}>
+        <BasicInfoForm values={twoChars} onChange={jest.fn()} />
+      </QueryClientProvider>,
+    );
+    expect(screen.getByText(/3,001 \/ 3,000자/)).toBeOnTheScreen();
+    expect(screen.getByText(/1자 넘었어요/)).toBeOnTheScreen();
+  });
+
+  it('↓ 버튼으로 캐릭터 순서를 바꾼다 (AC14 보조 조작)', async () => {
+    const onChange = jest.fn();
+    await render(
+      <QueryClientProvider client={new QueryClient()}>
+        <BasicInfoForm values={twoChars} onChange={onChange} />
+      </QueryClientProvider>,
+    );
+    await fireEvent.press(screen.getByLabelText('캐릭터 1 아래로 이동'));
+    const update = onChange.mock.calls[0][0] as (v: BasicInfoValues) => BasicInfoValues;
+    expect(update(twoChars).characters.map((c) => c.key)).toEqual(['k2', 'k1']);
+    expect(screen.getByLabelText('캐릭터 1 위로 이동')).toBeDisabled();
+  });
+});
