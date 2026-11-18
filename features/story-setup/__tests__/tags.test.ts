@@ -59,6 +59,9 @@ describe('해시태그 규칙 (CREATE-US-01)', () => {
   it('앞쪽 # 기호는 떼고 추가한다 (서버와 같은 처리)', () => {
     expect(normalizeTagInput(' ##로맨스 ')).toBe('로맨스');
     expect(normalizeTagInput('# 로맨스')).toBe('로맨스');
+    expect(normalizeTagInput(' #로맨스')).toBe('로맨스');
+    expect(normalizeTagInput('\t# 로맨스 ')).toBe('로맨스');
+    expect(normalizeTagInput('  ')).toBe('');
     expect(normalizeTagInput('C#')).toBe('C#');
     expect(addTag({ ...base, tags: [] }, '#판타지').values.tags).toEqual(['판타지']);
     expect(addTag(base, '#로맨스').result).toBe('duplicate');
