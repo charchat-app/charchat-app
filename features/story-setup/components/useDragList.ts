@@ -8,6 +8,8 @@ const SHIFT_MS = 150;
 export const LONG_PRESS_MS = 250;
 /** 길게 누르기 전에 이만큼 움직이면 드래그가 아니라 스크롤로 본다 */
 const SCROLL_SLOP = 8;
+/** 놓은 뒤 이 시간 안에 순서가 바뀌지 않으면 카드를 제자리로 되돌린다 */
+const UNCHANGED_ORDER_FALLBACK_MS = 100;
 
 export type DragList = {
   /** 지금 들고 있는 항목 key. 없으면 null */
@@ -105,6 +107,8 @@ export function useDragList({
   };
 
   const arm = (key: string) => {
+    // 다른 카드를 이미 들고 있으면(두 손가락) 새로 들지 않는다.
+    if (armedKey.current !== null && armedKey.current !== key) return;
     armedKey.current = key;
     offsetOf(key).stopAnimation();
     setDraggingKey(key);
@@ -126,6 +130,13 @@ export function useDragList({
     // 다른 카드는 이미 비켜난 위치 = 새 위치라 0으로 두고, 놓은 카드만 손가락 위치에서 새 자리로 미끄러진다.
     pendingDrop.current = { key, residual: dy - slotOffset(order, key, target, g) };
     latest.current.onMove(key, target);
+    // 순서가 실제로 바뀌지 않으면(그사이 캐릭터가 지워지는 등) useLayoutEffect가 돌지 않아
+    // 카드가 밀린 채 남는다. 잠시 뒤에도 처리되지 않았으면 제자리로 되돌린다.
+    setTimeout(() => {
+      if (pendingDrop.current?.key !== key) return;
+      pendingDrop.current = null;
+      resetAll(true);
+    }, UNCHANGED_ORDER_FALLBACK_MS);
   };
 
   /** source 카드가 target 자리에 들어갈 때 원래 위치에서 움직일 거리 */
@@ -143,7 +154,8 @@ export function useDragList({
       responder = PanResponder.create({
         // 카드 머리를 누르면 일단 받아 두고, 길게 누르면 드래그를 시작한다.
         // 안쪽 버튼(↑·↓·삭제)은 더 안쪽에서 먼저 응답하므로 여기로 오지 않는다.
-        onStartShouldSetPanResponder: () => !latest.current.disabled,
+        // 다른 카드를 들고 있는 동안에는 새 제스처를 받지 않는다(두 손가락으로 두 카드를 잡는 경우).
+        onStartShouldSetPanResponder: () => !latest.current.disabled && armedKey.current === null,
         onPanResponderGrant: () => {
           clearPressTimer();
           pressTimer.current = setTimeout(() => arm(key), LONG_PRESS_MS);
@@ -174,7 +186,18 @@ export function useDragList({
     return responder;
   };
 
-  useEffect(() => () => clearPressTimer(), []);
+  // 드래그 중에 목록이 사라지면(탭 전환 등) 바깥 스크롤 잠금을 풀어 둔다.
+  useEffect(
+    () => () => {
+      clearPressTimer();
+      if (armedKey.current !== null) {
+        armedKey.current = null;
+        latest.current.onDragActiveChange?.(false);
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
 
   const orderSignature = keys.join('|');
   useLayoutEffect(() => {

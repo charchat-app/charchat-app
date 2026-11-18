@@ -55,7 +55,7 @@ export function DraggableItem({
         styles.wrap,
         style,
         { transform: [{ translateY: drag.offsetOf(itemKey) }, { scale: lifted ? 1.02 : 1 }] },
-        lifted && [styles.lifted, { borderColor: c.accent }],
+        lifted && [styles.lifted, { borderColor: c.accent, shadowColor: c.text }],
       ]}
     >
       <View style={styles.header} {...drag.responderOf(itemKey).panHandlers}>
@@ -134,7 +134,6 @@ const styles = StyleSheet.create({
   lifted: {
     zIndex: 10,
     elevation: 8,
-    shadowColor: '#000',
     shadowOpacity: 0.18,
     shadowRadius: 10,
     shadowOffset: { width: 0, height: 4 },
