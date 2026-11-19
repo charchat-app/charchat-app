@@ -126,16 +126,23 @@ export function useCommonSave(repository: CommonSaveRepository, options: Options
     setError(null);
     try {
       const result = await repository.save(operation.document, operation.state, operation.mode, operation.key);
+      // 저장 상태(임시 저장→비공개·공개)와 저장 시각이 바뀌므로 스토리 목록·상세 캐시를 다시 받게 한다.
+      // 응답 전에 화면을 떠났어도 서버에는 저장됐으므로 무효화는 항상 한다.
+      void queryClient.invalidateQueries({ queryKey: storyKeys.all });
       if (!alive.current) return false;
       operation.commit(result, operation.document);
       pending.current = null;
       setPendingSave(false);
-      // 저장 상태(임시 저장→비공개·공개)와 저장 시각이 바뀌므로 스토리 목록·상세 캐시를 다시 받게 한다.
-      void queryClient.invalidateQueries({ queryKey: storyKeys.all });
       return true;
     } catch (failure) {
       if (!alive.current) return false;
-      const rejected = failure instanceof ApiError && failure.status >= 400 && failure.status < 500;
+      // 408(시간 초과)·429(요청 과다)는 같은 요청으로 다시 시도할 수 있는 실패로 본다.
+      const rejected =
+        failure instanceof ApiError &&
+        failure.status >= 400 &&
+        failure.status < 500 &&
+        failure.status !== 408 &&
+        failure.status !== 429;
       if (rejected) pending.current = null;
       setPendingSave(!rejected);
       setError(

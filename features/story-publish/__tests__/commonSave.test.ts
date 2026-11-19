@@ -221,3 +221,43 @@ it('거절 안내 문구: detail이 비었으면 일반 문구를 쓴다', () =>
   expect(rejectionMessage(new ApiError(422, 'UNKNOWN', '  '))).toBe('저장이 거절되었습니다. 입력은 유지됩니다.');
   expect(rejectionMessage(new ApiError(422, 'UNKNOWN', '서버 안내'))).toBe('서버 안내');
 });
+
+it('저장 응답 전에 화면을 떠나도 성공하면 스토리 캐시를 무효화한다', async () => {
+  const doc = document();
+  let finish!: (value: CreationSaveDocument) => void;
+  const save = jest.fn(
+    () =>
+      new Promise<CreationSaveDocument>((resolve) => {
+        finish = resolve;
+      }),
+  );
+  queryClient.setQueryData(storyKeys.list(), [{ id: '1', title: '가상', saveState: '임시 저장', updatedAt: '' }]);
+  const options = { document: doc, dirty: true, loading: false, pendingInput: false, captureCommit: () => jest.fn() };
+  const { result, unmount } = await renderHook(() => useCommonSave(repo(save), options));
+  let operation!: Promise<boolean>;
+  await act(() => {
+    operation = result.current.save('draft');
+  });
+  await unmount();
+  await act(async () => {
+    finish({ ...doc, updatedAt: '2026-11-18T00:00:00Z' });
+    await operation;
+  });
+  expect(queryClient.getQueryState(storyKeys.list())?.isInvalidated).toBe(true);
+});
+
+it('429·408 실패는 같은 요청으로 재시도할 수 있게 남겨 둔다', async () => {
+  const doc = document();
+  const save = jest
+    .fn()
+    .mockRejectedValueOnce(new ApiError(429, 'TOO_MANY_REQUESTS', '잠시 후 다시 시도해 주세요.'))
+    .mockResolvedValueOnce(doc);
+  const options = { document: doc, dirty: true, loading: false, pendingInput: false, captureCommit: () => jest.fn() };
+  const { result } = await renderHook(() => useCommonSave(repo(save), options));
+  await act(() => result.current.save('draft'));
+  expect(result.current.pendingSave).toBe(true);
+  await act(() => result.current.save('draft'));
+  expect(save).toHaveBeenCalledTimes(2);
+  expect(save.mock.calls[1][3]).toBe(save.mock.calls[0][3]);
+  expect(result.current.pendingSave).toBe(false);
+});
