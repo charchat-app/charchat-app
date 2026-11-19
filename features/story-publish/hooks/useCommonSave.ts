@@ -1,3 +1,4 @@
+import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 import { ApiError } from '@/lib/api-client';
 import { countRawText } from '@/lib/rawText';
@@ -11,6 +12,7 @@ import {
   type CreationSaveMode,
 } from '@/shared/story-types';
 import type { CommonSaveRepository } from '../commonRepository';
+import { storyKeys } from './useStories';
 
 export function completionIssues(document: CreationSaveDocument): string[] {
   const issues: string[] = [];
@@ -67,7 +69,18 @@ type Operation = {
   key: string;
   commit: ReturnType<Options['captureCommit']>;
 };
+/**
+ * 거절 응답의 안내 문구. 매핑한 코드는 앱 문구를, 매핑에 없는 코드는 서버 Problem Details의 detail을 보여 준다.
+ * detail이 없어 api-client가 채운 기본값(`요청 실패: 상태 코드`)이면 일반 문구를 쓴다.
+ */
+export function rejectionMessage(failure: ApiError): string {
+  const mapped = messages[failure.code];
+  if (mapped) return mapped;
+  const detail = failure.detail.trim();
+  return detail && detail !== `요청 실패: ${failure.status}` ? detail : '저장이 거절되었습니다. 입력은 유지됩니다.';
+}
 export function useCommonSave(repository: CommonSaveRepository, options: Options) {
+  const queryClient = useQueryClient();
   const [saving, setSaving] = useState(false),
     [error, setError] = useState<string | null>(null),
     [pendingSave, setPendingSave] = useState(false);
@@ -117,6 +130,8 @@ export function useCommonSave(repository: CommonSaveRepository, options: Options
       operation.commit(result, operation.document);
       pending.current = null;
       setPendingSave(false);
+      // 저장 상태(임시 저장→비공개·공개)와 저장 시각이 바뀌므로 스토리 목록·상세 캐시를 다시 받게 한다.
+      void queryClient.invalidateQueries({ queryKey: storyKeys.all });
       return true;
     } catch (failure) {
       if (!alive.current) return false;
@@ -125,7 +140,7 @@ export function useCommonSave(repository: CommonSaveRepository, options: Options
       setPendingSave(!rejected);
       setError(
         rejected
-          ? (messages[failure.code ?? ''] ?? '저장이 거절되었습니다. 입력은 유지됩니다.')
+          ? rejectionMessage(failure)
           : '저장 성공 여부를 확인하지 못했습니다. 입력을 유지하고 같은 요청으로 재시도할 수 있습니다.',
       );
       return false;
