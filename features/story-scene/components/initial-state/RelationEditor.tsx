@@ -28,6 +28,8 @@ export function RelationEditor({
     everyone.find((p) => p.key === personKey(kind, id))?.label ?? '삭제된 인물';
   const [source, setSource] = useState<string | null>(null);
   const [target, setTarget] = useState<string | null>(null);
+  // 인물을 바꾸는 중인 관계 카드. 평소에는 접어 두어 목록을 짧게 유지한다.
+  const [editing, setEditing] = useState<string | null>(null);
   const taken = new Set(
     relations
       .filter((r) => personKey(r.sourceKind, r.sourceCharacterId) === source)
@@ -38,6 +40,46 @@ export function RelationEditor({
   const sources = everyone.filter((p) => p.key !== target);
   const update = (key: string, patch: Partial<InitialRelation>) =>
     onChange((current) => current.map((r) => (r.clientKey === key ? { ...r, ...patch } : r)));
+  const sourceKey = (r: InitialRelation) => personKey(r.sourceKind, r.sourceCharacterId);
+  const targetKey = (r: InitialRelation) => personKey(r.targetKind, r.targetCharacterId);
+  /**
+   * 이미 만든 관계의 시작·대상 인물을 바꾼다(CREATE-US-04-AC10 "나중에 변경해도").
+   * 자기 자신과의 관계나 다른 카드와 같은 방향 관계가 되면 바꾸지 않는다. 최신 목록 기준으로 다시 확인한다.
+   */
+  /** 시작·대상을 한 번에 맞바꾼다. 한쪽씩 바꾸면 자기 자신 관계를 거쳐야 해서 막히는 경우(A→B를 B→A로)를 위해 둔다. */
+  const swap = (key: string) =>
+    onChange((current) => {
+      const relation = current.find((r) => r.clientKey === key);
+      if (!relation) return current;
+      const next = {
+        ...relation,
+        sourceKind: relation.targetKind,
+        sourceCharacterId: relation.targetCharacterId,
+        targetKind: relation.sourceKind,
+        targetCharacterId: relation.sourceCharacterId,
+      };
+      const duplicate = current.some(
+        (r) => r.clientKey !== key && sourceKey(r) === sourceKey(next) && targetKey(r) === targetKey(next),
+      );
+      return duplicate ? current : current.map((r) => (r.clientKey === key ? next : r));
+    });
+  const changePerson = (key: string, side: 'source' | 'target', personKeyValue: string | undefined) => {
+    const person = everyone.find((p) => p.key === personKeyValue);
+    if (!person) return;
+    onChange((current) => {
+      const relation = current.find((r) => r.clientKey === key);
+      if (!relation) return current;
+      const next =
+        side === 'source'
+          ? { ...relation, sourceKind: person.kind, sourceCharacterId: person.characterId }
+          : { ...relation, targetKind: person.kind, targetCharacterId: person.characterId };
+      if (sourceKey(next) === targetKey(next)) return current;
+      const duplicate = current.some(
+        (r) => r.clientKey !== key && sourceKey(r) === sourceKey(next) && targetKey(r) === targetKey(next),
+      );
+      return duplicate ? current : current.map((r) => (r.clientKey === key ? next : r));
+    });
+  };
   return (
     <View style={styles.wrap}>
       <Text variant="subheading">🤝 초기 관계</Text>
@@ -52,6 +94,60 @@ export function RelationEditor({
             <Text variant="subheading">
               관계 {index + 1} · {title}
             </Text>
+            <Button
+              label={editing === r.clientKey ? `관계 ${index + 1} 인물 바꾸기 닫기` : `관계 ${index + 1} 인물 바꾸기`}
+              variant="secondary"
+              onPress={() => setEditing((value) => (value === r.clientKey ? null : r.clientKey))}
+            />
+            {editing === r.clientKey ? (
+              <>
+                <Text variant="caption">시작 캐릭터</Text>
+                <ChipGroup
+                  accessibilityLabel={`관계 ${index + 1} 시작 캐릭터`}
+                  // 대상과 같은 인물, 그 대상으로 이미 다른 관계가 있는 인물은 고를 수 없다.
+                  options={everyone
+                    .filter(
+                      (p) =>
+                        p.key !== targetKey(r) &&
+                        !relations.some(
+                          (o) => o.clientKey !== r.clientKey && sourceKey(o) === p.key && targetKey(o) === targetKey(r),
+                        ),
+                    )
+                    .map((p) => p.label)}
+                  value={everyone.filter((p) => p.key === sourceKey(r)).map((p) => p.label)}
+                  onChange={(next) =>
+                    changePerson(r.clientKey, 'source', everyone.find((p) => p.label === next[0])?.key)
+                  }
+                />
+                <Text variant="caption">대상 캐릭터</Text>
+                <ChipGroup
+                  accessibilityLabel={`관계 ${index + 1} 대상 캐릭터`}
+                  options={everyone
+                    .filter(
+                      (p) =>
+                        p.key !== sourceKey(r) &&
+                        !relations.some(
+                          (o) => o.clientKey !== r.clientKey && sourceKey(o) === sourceKey(r) && targetKey(o) === p.key,
+                        ),
+                    )
+                    .map((p) => p.label)}
+                  value={everyone.filter((p) => p.key === targetKey(r)).map((p) => p.label)}
+                  onChange={(next) =>
+                    changePerson(r.clientKey, 'target', everyone.find((p) => p.label === next[0])?.key)
+                  }
+                />
+                <Button
+                  label={`관계 ${index + 1} 방향 바꾸기`}
+                  variant="secondary"
+                  // 반대 방향 관계가 이미 있으면 같은 방향 중복이 되므로 바꾸지 않는다.
+                  disabled={relations.some(
+                    (o) =>
+                      o.clientKey !== r.clientKey && sourceKey(o) === targetKey(r) && targetKey(o) === sourceKey(r),
+                  )}
+                  onPress={() => swap(r.clientKey)}
+                />
+              </>
+            ) : null}
             <LimitedField
               label="🤝 관계명 · 선택"
               accessibilityLabel={`관계 ${index + 1} 관계명`}

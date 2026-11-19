@@ -1,5 +1,5 @@
 import { notifyManager, QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { act, fireEvent, render as baseRender, screen, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, render as baseRender, screen, waitFor, within } from '@testing-library/react-native';
 import type { ReactElement, ReactNode } from 'react';
 import { defaultExpression, emptyScene, type CreationSaveDocument, type FewshotCharacter } from '@/shared/story-types';
 import type { CommonSaveRepository, EditorStory } from '@/features/story-publish';
@@ -361,3 +361,41 @@ it('CREATE-US-04-AC11·AC12: 착장·속마음은 한도를 넘어도 자르지 
   expect(screen.getByLabelText('하린 착장').props.value).toBe(long);
   expect(screen.getByText('301 / 300자 · 1자 초과')).toBeTruthy();
 });
+
+it('CREATE-US-04-AC10: 이미 만든 관계의 시작·대상 인물을 바꿀 수 있고, 자기 자신이나 같은 방향 중복으로는 바꿀 수 없다', async () => {
+  const { repository, stored } = fixture();
+  await render(<CommonCreationWorkspace repository={repository} storyId="1" />);
+  await waitFor(() => expect(screen.getByRole('tab', { name: '초기 상태' })).toBeTruthy());
+  await openTab('초기 상태');
+  const add = async (from: string, to: string) => {
+    await fireEvent.press(within(screen.getByLabelText('시작 캐릭터')).getByRole('radio', { name: from }));
+    await fireEvent.press(within(screen.getByLabelText('대상 캐릭터')).getByRole('radio', { name: to }));
+    await press('관계 추가');
+  };
+  await add('하린', '유저');
+  await add('하린', '도윤');
+  await type('관계 1 관계명', '소꿉친구');
+
+  await press('관계 1 인물 바꾸기');
+  const targets = within(screen.getByLabelText('관계 1 대상 캐릭터'));
+  // 자기 자신(하린)과 이미 있는 하린→도윤 방향은 고를 수 없다.
+  expect(targets.queryByRole('radio', { name: '하린' })).toBeNull();
+  expect(targets.queryByRole('radio', { name: '도윤' })).toBeNull();
+  // 시작 인물을 도윤으로 바꾸면 도윤→유저가 되고 관계명은 유지된다.
+  await fireEvent.press(within(screen.getByLabelText('관계 1 시작 캐릭터')).getByRole('radio', { name: '도윤' }));
+  expect(screen.getByText('관계 1 · 도윤 → 유저')).toBeTruthy();
+  expect(screen.getByLabelText('관계 1 관계명').props.value).toBe('소꿉친구');
+  // 방향을 한 번에 바꿀 수 있다(유저→도윤).
+  await press('관계 1 방향 바꾸기');
+  expect(screen.getByText('관계 1 · 유저 → 도윤')).toBeTruthy();
+  await press('관계 1 방향 바꾸기');
+  expect(screen.getByText('관계 1 · 도윤 → 유저')).toBeTruthy();
+
+  await openTab('저장·공개');
+  await waitFor(() =>
+    expect(stored().relations.map((r) => [r.sourceCharacterId, r.targetKind, r.targetCharacterId, r.label])).toEqual([
+      ['6', 'user', null, '소꿉친구'],
+      ['5', 'character', '6', ''],
+    ]),
+  );
+}, 30000);
