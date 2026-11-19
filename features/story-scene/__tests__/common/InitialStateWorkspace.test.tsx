@@ -385,6 +385,11 @@ it('CREATE-US-04-AC10: 이미 만든 관계의 시작·대상 인물을 바꿀 �
   await fireEvent.press(within(screen.getByLabelText('관계 1 시작 캐릭터')).getByRole('radio', { name: '도윤' }));
   expect(screen.getByText('관계 1 · 도윤 → 유저')).toBeTruthy();
   expect(screen.getByLabelText('관계 1 관계명').props.value).toBe('소꿉친구');
+  // 방향을 한 번에 바꿀 수 있다(유저→도윤).
+  await press('관계 1 방향 바꾸기');
+  expect(screen.getByText('관계 1 · 유저 → 도윤')).toBeTruthy();
+  await press('관계 1 방향 바꾸기');
+  expect(screen.getByText('관계 1 · 도윤 → 유저')).toBeTruthy();
 
   await openTab('저장·공개');
   await waitFor(() =>

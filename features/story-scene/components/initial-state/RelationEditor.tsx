@@ -46,6 +46,23 @@ export function RelationEditor({
    * 이미 만든 관계의 시작·대상 인물을 바꾼다(CREATE-US-04-AC10 "나중에 변경해도").
    * 자기 자신과의 관계나 다른 카드와 같은 방향 관계가 되면 바꾸지 않는다. 최신 목록 기준으로 다시 확인한다.
    */
+  /** 시작·대상을 한 번에 맞바꾼다. 한쪽씩 바꾸면 자기 자신 관계를 거쳐야 해서 막히는 경우(A→B를 B→A로)를 위해 둔다. */
+  const swap = (key: string) =>
+    onChange((current) => {
+      const relation = current.find((r) => r.clientKey === key);
+      if (!relation) return current;
+      const next = {
+        ...relation,
+        sourceKind: relation.targetKind,
+        sourceCharacterId: relation.targetCharacterId,
+        targetKind: relation.sourceKind,
+        targetCharacterId: relation.sourceCharacterId,
+      };
+      const duplicate = current.some(
+        (r) => r.clientKey !== key && sourceKey(r) === sourceKey(next) && targetKey(r) === targetKey(next),
+      );
+      return duplicate ? current : current.map((r) => (r.clientKey === key ? next : r));
+    });
   const changePerson = (key: string, side: 'source' | 'target', personKeyValue: string | undefined) => {
     const person = everyone.find((p) => p.key === personKeyValue);
     if (!person) return;
@@ -118,6 +135,16 @@ export function RelationEditor({
                   onChange={(next) =>
                     changePerson(r.clientKey, 'target', everyone.find((p) => p.label === next[0])?.key)
                   }
+                />
+                <Button
+                  label={`관계 ${index + 1} 방향 바꾸기`}
+                  variant="secondary"
+                  // 반대 방향 관계가 이미 있으면 같은 방향 중복이 되므로 바꾸지 않는다.
+                  disabled={relations.some(
+                    (o) =>
+                      o.clientKey !== r.clientKey && sourceKey(o) === targetKey(r) && targetKey(o) === sourceKey(r),
+                  )}
+                  onPress={() => swap(r.clientKey)}
                 />
               </>
             ) : null}
