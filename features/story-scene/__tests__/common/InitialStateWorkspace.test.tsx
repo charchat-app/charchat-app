@@ -350,3 +350,14 @@ it('호감도를 바꿨다가 원래 값으로 되돌리면 행 순서가 달라
   await openTab('저장·공개');
   expect(save).not.toHaveBeenCalled();
 });
+
+it('CREATE-US-04-AC11·AC12: 착장·속마음은 한도를 넘어도 자르지 않고 글자 수와 초과량을 보여 준다', async () => {
+  const { repository } = fixture();
+  await render(<CommonCreationWorkspace repository={repository} storyId="1" />);
+  await waitFor(() => expect(screen.getByRole('tab', { name: '초기 상태' })).toBeTruthy());
+  await openTab('초기 상태');
+  const long = '가'.repeat(301);
+  await type('하린 착장', long);
+  expect(screen.getByLabelText('하린 착장').props.value).toBe(long);
+  expect(screen.getByText('301 / 300자 · 1자 초과')).toBeTruthy();
+});

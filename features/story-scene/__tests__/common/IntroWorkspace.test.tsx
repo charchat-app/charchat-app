@@ -149,7 +149,7 @@ it('인트로를 작성·정렬·삭제하고 완성 조건을 지킨 뒤 비공
   await waitFor(() => expect(screen.getByLabelText('인트로 2 상황 제목').props.value).toBe('비 오는 골목'));
   await fireEvent.press(screen.getByRole('button', { name: '인트로 2 본문 편집' }));
   // 이름표와 하단 상태 카드에 모두 이름이 보인다.
-  expect(screen.getAllByText('하린').length).toBeGreaterThan(1);
+  expect(screen.getAllByText(/^(👤 )?하린$/).length).toBeGreaterThan(1);
   expect(screen.getByText('저장한 설정과 같습니다.')).toBeTruthy();
   // 단계가 많은 전체 흐름 검사라 기본 5초보다 넉넉히 둔다.
 }, 30000);
