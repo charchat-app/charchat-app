@@ -157,3 +157,19 @@ it('공통 저장 중 추가한 표현·퓨샷을 늦은 응답으로 덮어쓰�
   expect(stored().speech.style).toEqual({ mode: 'custom', text: '저장 중 새 문체' });
   expect(stored().fewshots[0].messages[0].body).toBe('저장 중 새 퓨샷');
 });
+it('저장 성패를 모르면 상단 실패 안내에 재시도 버튼을 보여 주고 어느 탭에서든 같은 요청으로 다시 저장한다', async () => {
+  const { repository, save, stored } = fixture();
+  save.mockRejectedValueOnce(new Error('lost'));
+  await render(<CommonCreationWorkspace repository={repository} storyId="1" />);
+  await waitFor(() => expect(screen.getByLabelText('커스텀 문체')).toBeTruthy());
+  expect(screen.queryByRole('button', { name: '실패한 저장 다시 시도' })).toBeNull();
+  await fireEvent.changeText(screen.getByLabelText('커스텀 문체'), '재시도할 문체');
+  await fireEvent.press(screen.getByRole('tab', { name: '대화 예시' }));
+  await waitFor(() => expect(screen.getByText(/저장 성공 여부를 확인하지 못했습니다/)).toBeTruthy());
+  // 저장·공개 탭이 아닌 곳에서도 상단 안내의 버튼으로 재시도한다.
+  await fireEvent.press(screen.getByRole('button', { name: '실패한 저장 다시 시도' }));
+  await waitFor(() => expect(save).toHaveBeenCalledTimes(2));
+  expect(save.mock.calls[1]).toEqual(save.mock.calls[0]);
+  await waitFor(() => expect(screen.queryByRole('button', { name: '실패한 저장 다시 시도' })).toBeNull());
+  expect(stored().speech.style).toEqual({ mode: 'custom', text: '재시도할 문체' });
+});

@@ -119,6 +119,15 @@ export function CommonCreationWorkspace({
         {few.loading ? <Text accessibilityRole="progressbar">제작 설정을 불러오는 중입니다.</Text> : null}
         {few.error ? <Notice tone="alert" message={few.error} /> : null}
         {common.error ? <Notice tone="alert" message={common.error} /> : null}
+        {common.pendingSave ? (
+          // 재시도를 기다리는 동안 자동 저장이 멈추므로 어느 탭에서든 바로 다시 시도할 수 있게 한다.
+          <Button
+            label="실패한 저장 다시 시도"
+            variant="secondary"
+            disabled={common.saving || few.loading}
+            onPress={() => void common.save(target)}
+          />
+        ) : null}
         <Text variant="caption" accessibilityLiveRegion="polite">
           {common.saving
             ? '공통 저장 중입니다.'
