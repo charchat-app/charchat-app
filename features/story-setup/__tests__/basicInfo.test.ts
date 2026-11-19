@@ -1,15 +1,7 @@
-import {
-  addCharacter,
-  fromDraft,
-  MAX_CHARACTERS,
-  parseTags,
-  removeCharacter,
-  toDraftPatch,
-  updateCharacter,
-} from '../basicInfo';
+import { addCharacter, fromDraft, MAX_CHARACTERS, removeCharacter, toDraftPatch, updateCharacter } from '../basicInfo';
 import type { BasicInfoValues } from '../types';
 
-const empty: BasicInfoValues = { title: '', subtitle: '', world: '', tagsText: '', characters: [] };
+const empty: BasicInfoValues = { title: '', subtitle: '', world: '', tags: [], tagInput: '', characters: [] };
 
 describe('기본 설정 저장 조각 (CREATE-US-01)', () => {
   it('저장본 → 입력값 → 저장 조각이 원문을 바꾸지 않는다 (AC01·AC04)', () => {
@@ -36,12 +28,6 @@ describe('기본 설정 저장 조각 (CREATE-US-01)', () => {
       characters: [{ id: undefined, name: '', detail: '' }],
     });
   });
-
-  it('해시태그는 쉼표로 나누고 빈 항목만 버린다 (AC06 태그 없음 허용)', () => {
-    expect(parseTags('로맨스, 일상 ,, 로판 ')).toEqual(['로맨스', '일상', '로판']);
-    expect(parseTags('')).toEqual([]);
-    expect(parseTags(' , ')).toEqual([]);
-  });
 });
 
 describe('캐릭터 추가·삭제·수정 (AC08·AC12)', () => {
@@ -62,5 +48,13 @@ describe('캐릭터 추가·삭제·수정 (AC08·AC12)', () => {
     let v = empty;
     for (let i = 0; i < MAX_CHARACTERS + 2; i += 1) v = addCharacter(v);
     expect(v.characters).toHaveLength(MAX_CHARACTERS);
+  });
+
+  it('추가 버튼을 누르지 않은 입력창의 태그도 저장 조각에 넣는다 (입력 보존)', () => {
+    expect(toDraftPatch({ ...empty, tags: ['로맨스'], tagInput: ' 서점물 ' }).tags).toEqual(['로맨스', '서점물']);
+    expect(toDraftPatch({ ...empty, tags: ['Romance'], tagInput: 'romance' }).tags).toEqual(['Romance']);
+    expect(toDraftPatch({ ...empty, tags: ['로맨스'], tagInput: '  ' }).tags).toEqual(['로맨스']);
+    expect(toDraftPatch({ ...empty, tags: ['로맨스'], tagInput: '#로맨스' }).tags).toEqual(['로맨스']);
+    expect(toDraftPatch({ ...empty, tags: [], tagInput: '#서점물' }).tags).toEqual(['서점물']);
   });
 });

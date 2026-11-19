@@ -265,3 +265,43 @@ it('INVALID_AFFINITY_PERSON 거절은 삭제된 캐릭터의 호감도 안내를
     '삭제된 캐릭터의 호감도가 남아 있습니다. 다시 불러온 뒤 저장해 주세요.',
   );
 });
+
+it('저장 응답 전에 화면을 떠나도 성공하면 스토리 캐시를 무효화한다', async () => {
+  const doc = document();
+  let finish!: (value: CreationSaveDocument) => void;
+  const save = jest.fn(
+    () =>
+      new Promise<CreationSaveDocument>((resolve) => {
+        finish = resolve;
+      }),
+  );
+  queryClient.setQueryData(storyKeys.list(), [{ id: '1', title: '가상', saveState: '임시 저장', updatedAt: '' }]);
+  const options = { document: doc, dirty: true, loading: false, pendingInput: false, captureCommit: () => jest.fn() };
+  const { result, unmount } = await renderHook(() => useCommonSave(repo(save), options));
+  let operation!: Promise<boolean>;
+  await act(() => {
+    operation = result.current.save('draft');
+  });
+  await unmount();
+  await act(async () => {
+    finish({ ...doc, updatedAt: '2026-11-18T00:00:00Z' });
+    await operation;
+  });
+  expect(queryClient.getQueryState(storyKeys.list())?.isInvalidated).toBe(true);
+});
+
+it('429·408 실패는 같은 요청으로 재시도할 수 있게 남겨 둔다', async () => {
+  const doc = document();
+  const save = jest
+    .fn()
+    .mockRejectedValueOnce(new ApiError(429, 'TOO_MANY_REQUESTS', '잠시 후 다시 시도해 주세요.'))
+    .mockResolvedValueOnce(doc);
+  const options = { document: doc, dirty: true, loading: false, pendingInput: false, captureCommit: () => jest.fn() };
+  const { result } = await renderHook(() => useCommonSave(repo(save), options));
+  await act(() => result.current.save('draft'));
+  expect(result.current.pendingSave).toBe(true);
+  await act(() => result.current.save('draft'));
+  expect(save).toHaveBeenCalledTimes(2);
+  expect(save.mock.calls[1][3]).toBe(save.mock.calls[0][3]);
+  expect(result.current.pendingSave).toBe(false);
+});

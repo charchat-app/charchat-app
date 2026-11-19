@@ -6,6 +6,7 @@ import { useTheme } from '@/hooks/use-theme';
 
 import { addCharacter, MAX_CHARACTERS, removeCharacter, updateCharacter } from '../basicInfo';
 import type { BasicInfoValues, CharacterValues } from '../types';
+import { TagInput } from './TagInput';
 
 export type BasicInfoFormProps = {
   values: BasicInfoValues;
@@ -16,7 +17,7 @@ export type BasicInfoFormProps = {
   onChange: (update: (values: BasicInfoValues) => BasicInfoValues) => void;
   /**
    * 위치별 안내 문구. key는 'title' | 'subtitle' | 'world' | 'characters' |
-   * '<캐릭터 key>.name' | '<캐릭터 key>.detail'.
+   * 'tags' | '<캐릭터 key>.name' | '<캐릭터 key>.detail'.
    */
   errors?: Record<string, string>;
   editable?: boolean;
@@ -28,8 +29,7 @@ export type BasicInfoFormProps = {
  * 스토리·캐릭터 사진은 CREATE-US-06, 캐릭터 순서 변경은 limits-order 피처에서 추가한다.
  */
 export function BasicInfoForm({ values, onChange, errors = {}, editable = true }: BasicInfoFormProps) {
-  const set = (field: 'title' | 'subtitle' | 'world' | 'tagsText') => (text: string) =>
-    onChange((v) => ({ ...v, [field]: text }));
+  const set = (field: 'title' | 'subtitle' | 'world') => (text: string) => onChange((v) => ({ ...v, [field]: text }));
   const full = values.characters.length >= MAX_CHARACTERS;
 
   return (
@@ -63,15 +63,13 @@ export function BasicInfoForm({ values, onChange, errors = {}, editable = true }
             accessibilityLabel="세계관 · 서사"
           />
         </FormField>
-        <FormField label="해시태그 · 선택" hint="검색·노출·대화에 활용되니 입력을 권장해요. 쉼표로 구분해 주세요.">
-          <TextField
-            value={values.tagsText}
-            onChangeText={set('tagsText')}
-            editable={editable}
-            placeholder="로맨스, 일상처럼 쉼표로 구분"
-            accessibilityLabel="해시태그"
-          />
-        </FormField>
+        <TagInput
+          tags={values.tags}
+          input={values.tagInput}
+          onChange={onChange}
+          error={errors.tags}
+          editable={editable}
+        />
       </Section>
 
       <Section title="등장 캐릭터" description="이야기에 등장할 인물을 1~10명 등록해 주세요.">

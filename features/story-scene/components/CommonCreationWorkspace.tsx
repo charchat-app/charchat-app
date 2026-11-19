@@ -252,6 +252,8 @@ export function CommonCreationWorkspace({
             <Button label="변경 유지" onPress={() => setConfirmReload(false)} />
             <Button
               label="변경 버리고 전체 불러오기"
+              // 저장이 진행 중이거나 재시도를 기다리는 동안 다시 불러오면 늦게 도착한 조회가 저장 결과를 덮을 수 있다.
+              disabled={common.saving || common.pendingSave || few.loading}
               onPress={() => {
                 setConfirmReload(false);
                 void few.reload();

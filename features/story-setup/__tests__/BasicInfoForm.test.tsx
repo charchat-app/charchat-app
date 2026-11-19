@@ -1,3 +1,4 @@
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { fireEvent, render, screen } from '@testing-library/react-native';
 
 import { BasicInfoForm } from '../components/BasicInfoForm';
@@ -7,14 +8,19 @@ const rendered: BasicInfoValues = {
   title: '',
   subtitle: '',
   world: '',
-  tagsText: '',
+  tags: [],
+  tagInput: '',
   characters: [{ key: 'new-1', name: '', detail: '' }],
 };
 
 describe('BasicInfoForm 입력 변경', () => {
   it('입력은 최신 값 기준으로 반영돼 저장 응답이 붙인 id를 지우지 않는다', async () => {
     const onChange = jest.fn();
-    await render(<BasicInfoForm values={rendered} onChange={onChange} />);
+    await render(
+      <QueryClientProvider client={new QueryClient()}>
+        <BasicInfoForm values={rendered} onChange={onChange} />
+      </QueryClientProvider>,
+    );
 
     await fireEvent.changeText(screen.getByLabelText('캐릭터 1 상세'), '서점 주인');
 

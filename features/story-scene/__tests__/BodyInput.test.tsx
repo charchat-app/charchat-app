@@ -70,6 +70,16 @@ describe('parseFormatted', () => {
       { text: ' 말했다', bold: true, italic: false },
     ]);
   });
+  it('겹친 서식이 끝에서 별표 세 개로 함께 닫혀도 둘 다 표시한다 (AC11)', () => {
+    expect(parseFormatted('**굵게 *기울임***')).toEqual([
+      { text: '굵게 ', bold: true, italic: false },
+      { text: '기울임', bold: true, italic: true },
+    ]);
+    expect(parseFormatted('*기울임 **굵게***')).toEqual([
+      { text: '기울임 ', bold: false, italic: true },
+      { text: '굵게', bold: true, italic: true },
+    ]);
+  });
   it('공백으로 둘러싸인 별표와 짝 없는 기호는 원문 그대로 둔다', () => {
     expect(parseFormatted('3 * 4 * 5')).toEqual([plain('3 * 4 * 5')]);
     expect(parseFormatted('별표 하나* 와 **열린 채')).toEqual([plain('별표 하나* 와 **열린 채')]);
