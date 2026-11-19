@@ -6,6 +6,7 @@ import {
   type ExpressionRow,
   type StoryExpressionDocument,
 } from '@/shared/story-types';
+import { isSameId } from './fewshotRepository';
 import type { StoryRepository } from './fixtureRepository';
 
 type Authorization = () => Promise<HeadersInit>;
@@ -18,7 +19,7 @@ export function readServerSnapshot(value: unknown, id: string, requestId?: strin
   const response = record(value);
   const expression = record(response.expression);
   if (
-    response.story_id !== id ||
+    !isSameId(response.story_id, id) ||
     (response.title !== null && typeof response.title !== 'string') ||
     typeof response.saved_at !== 'string' ||
     !Number.isFinite(Date.parse(response.saved_at)) ||

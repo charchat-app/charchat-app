@@ -52,3 +52,11 @@ it('Problem Details 코드와 잘못된 경로/응답을 성공으로 취급하�
   mock.mockResolvedValueOnce({ ok: true, json: async () => ({ ...response(), story_id: '1' }) } as Response);
   await expect(repo.load(id)).rejects.toThrow('응답');
 });
+
+it('서버가 story_id를 숫자로 응답해도 같은 스토리로 복원한다', async () => {
+  jest
+    .spyOn(globalThis, 'fetch')
+    .mockResolvedValue({ ok: true, json: async () => ({ ...response(), story_id: 42 }) } as Response);
+  const document = await createServerExpressionRepository('http://localhost:8000/api/v1').load('42');
+  expect(document.id).toBe('42');
+});
