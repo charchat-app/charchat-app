@@ -20,7 +20,8 @@ export function RelationEditor({
 }: {
   relations: InitialRelation[];
   characters: FewshotCharacter[];
-  onChange: (relations: InitialRelation[]) => void;
+  /** 최신 목록을 받아 바꾸는 업데이트 함수. 화면에 그려진 시점의 목록으로 덮어쓰지 않게 한다. */
+  onChange: (update: (relations: InitialRelation[]) => InitialRelation[]) => void;
 }) {
   const everyone = people(characters);
   const name = (kind: PersonKind, id: string | null) =>
@@ -36,7 +37,7 @@ export function RelationEditor({
   const targets = everyone.filter((p) => p.key !== source && !taken.has(p.key));
   const sources = everyone.filter((p) => p.key !== target);
   const update = (key: string, patch: Partial<InitialRelation>) =>
-    onChange(relations.map((r) => (r.clientKey === key ? { ...r, ...patch } : r)));
+    onChange((current) => current.map((r) => (r.clientKey === key ? { ...r, ...patch } : r)));
   return (
     <View style={styles.wrap}>
       <Text variant="subheading">🤝 초기 관계</Text>
@@ -62,7 +63,7 @@ export function RelationEditor({
             <Button
               label={`관계 ${index + 1} 삭제`}
               variant="danger"
-              onPress={() => onChange(relations.filter((item) => item.clientKey !== r.clientKey))}
+              onPress={() => onChange((current) => current.filter((item) => item.clientKey !== r.clientKey))}
             />
           </Card>
         );
@@ -91,17 +92,24 @@ export function RelationEditor({
             const from = everyone.find((p) => p.key === source);
             const to = everyone.find((p) => p.key === target);
             if (!from || !to || from.key === to.key) return;
-            onChange([
-              ...relations,
-              {
-                clientKey: newFewshotKey('relation'),
-                sourceKind: from.kind,
-                sourceCharacterId: from.characterId,
-                targetKind: to.kind,
-                targetCharacterId: to.characterId,
-                label: '',
-              },
-            ]);
+            const relation: InitialRelation = {
+              clientKey: newFewshotKey('relation'),
+              sourceKind: from.kind,
+              sourceCharacterId: from.characterId,
+              targetKind: to.kind,
+              targetCharacterId: to.characterId,
+              label: '',
+            };
+            // 같은 방향 관계가 그사이 생겼으면 다시 만들지 않는다.
+            onChange((current) =>
+              current.some(
+                (r) =>
+                  personKey(r.sourceKind, r.sourceCharacterId) === from.key &&
+                  personKey(r.targetKind, r.targetCharacterId) === to.key,
+              )
+                ? current
+                : [...current, relation],
+            );
             setSource(null);
             setTarget(null);
           }}

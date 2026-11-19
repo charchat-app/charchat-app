@@ -23,7 +23,8 @@ export function AffinityEditor({
 }: {
   affinities: InitialAffinity[];
   characters: FewshotCharacter[];
-  onChange: (affinities: InitialAffinity[]) => void;
+  /** 최신 목록을 받아 바꾸는 업데이트 함수. 화면에 그려진 시점의 목록으로 덮어쓰지 않게 한다. */
+  onChange: (update: (affinities: InitialAffinity[]) => InitialAffinity[]) => void;
 }) {
   const everyone = people(characters);
   const sources = everyone.filter((p) => p.kind === 'character');
@@ -56,7 +57,7 @@ export function AffinityEditor({
                   hint="-100~100 정수"
                   error={affinityIssue(value)}
                   keyboardType="numbers-and-punctuation"
-                  onChange={(next) => onChange(setAffinity(affinities, { ...direction, value: next }))}
+                  onChange={(next) => onChange((current) => setAffinity(current, { ...direction, value: next }))}
                 />
               );
             })}

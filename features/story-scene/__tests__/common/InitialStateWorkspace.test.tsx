@@ -43,7 +43,7 @@ const narrator = (id: string) => ({
   characterId: null,
   body: '*비*',
 });
-function fixture() {
+function fixture(overrides: Partial<CreationSaveDocument> = {}) {
   let data: CreationSaveDocument = {
     id: '1',
     title: '가상',
@@ -61,6 +61,7 @@ function fixture() {
     ],
     relations: [],
     affinities: [],
+    ...overrides,
   };
   const save = jest.fn(async (document: CreationSaveDocument, state: CreationSaveDocument['saveState']) => {
     data = { ...document, saveState: state };
@@ -270,3 +271,82 @@ it('새 캐릭터를 추가하면 착장·속마음은 미지정, 호감도는 0
   expect(stored().intros[0].scene.characters).toEqual([{ characterId: '5', clothing: '코트', innerThought: '긴장' }]);
   expect(stored().intros[1].scene.characters).toEqual([]);
 }, 30000);
+
+it('CREATE-US-04-AC03·AC18: 시만 입력한 미완성 시각은 상태 카드에 완성된 값으로 채워 보이지 않는다', async () => {
+  const { repository } = fixture();
+  await render(<CommonCreationWorkspace repository={repository} storyId="1" />);
+  await waitFor(() => expect(screen.getByRole('tab', { name: '초기 상태' })).toBeTruthy());
+  await openTab('초기 상태');
+  expect(screen.getByText(/시각 · 미지정/)).toBeTruthy();
+  await type('시', '7');
+  expect(screen.getByText(/시각 · 7시 \(미완성\)/)).toBeTruthy();
+  expect(screen.queryByText(/7:00/)).toBeNull();
+  await type('분', '5');
+  expect(screen.getByText(/시각 · 7:05/)).toBeTruthy();
+});
+
+it('캐릭터 삭제 정리와 겹친 늦은 변경도 최신 상태에 반영해 삭제된 인물의 행을 되살리지 않는다', async () => {
+  const { repository, stored } = fixture();
+  await render(<CommonCreationWorkspace repository={repository} storyId="1" />);
+  await waitFor(() => expect(screen.getByRole('tab', { name: '초기 상태' })).toBeTruthy());
+  await openTab('초기 상태');
+  await type('하린 착장', '코트');
+  await type('하린→도윤 호감도', '40');
+  await type('도윤→하린 호감도', '30');
+  for (const [from, to] of [
+    ['하린', '도윤'],
+    ['도윤', '유저'],
+  ]) {
+    await fireEvent.press(screen.getAllByRole('radio', { name: from })[0]);
+    await fireEvent.press(screen.getAllByRole('radio', { name: to }).slice(-1)[0]);
+    await press('관계 추가');
+  }
+  // 삭제 정리 전에 그려진 화면의 입력 핸들러(그 시점의 값을 들고 있음)를 잡아 둔다.
+  const handler = (label: string): ((value: string) => void) => screen.getByLabelText(label).props.onChangeText;
+  const stalePlace = handler('장소');
+  const staleAffinity = handler('도윤→유저 호감도');
+  const staleRelation = handler('관계 2 관계명');
+  const staleDeletedClothing = handler('하린 착장');
+  const staleDeletedAffinity = handler('하린→유저 호감도');
+
+  await act(() => setStoryCharacters([{ id: '6', name: '도윤', position: 0 }]));
+  await waitFor(() => expect(screen.queryByLabelText('하린 착장')).toBeNull());
+  await act(() => {
+    stalePlace('골목');
+    staleAffinity('7');
+    staleRelation('친구');
+    staleDeletedClothing('되살리면 안 됨');
+    staleDeletedAffinity('9');
+  });
+
+  expect(screen.getByLabelText('장소').props.value).toBe('골목');
+  expect(screen.queryByText(/하린/)).toBeNull();
+  await openTab('저장·공개');
+  await waitFor(() => expect(stored().intros[0].scene.place).toBe('골목'));
+  expect(stored().intros[0].scene.characters).toEqual([]);
+  expect(stored().affinities).toEqual([
+    { sourceCharacterId: '6', targetKind: 'user', targetCharacterId: null, value: '7' },
+  ]);
+  expect(stored().relations).toHaveLength(1);
+  expect(stored().relations[0]).toMatchObject({ sourceCharacterId: '6', targetKind: 'user', label: '친구' });
+}, 30000);
+
+it('호감도를 바꿨다가 원래 값으로 되돌리면 행 순서가 달라져도 변경 없음으로 본다', async () => {
+  const { repository, save } = fixture({
+    affinities: [
+      { sourceCharacterId: '5', targetKind: 'user', targetCharacterId: null, value: '10' },
+      { sourceCharacterId: '6', targetKind: 'user', targetCharacterId: null, value: '20' },
+    ],
+  });
+  await render(<CommonCreationWorkspace repository={repository} storyId="1" />);
+  await waitFor(() => expect(screen.getByRole('tab', { name: '초기 상태' })).toBeTruthy());
+  await openTab('초기 상태');
+  expect(screen.getByText('저장한 설정과 같습니다.')).toBeTruthy();
+  await type('하린→유저 호감도', '30');
+  expect(screen.getByText('저장하지 않은 변경이 있습니다.')).toBeTruthy();
+  await type('하린→유저 호감도', '10');
+  expect(screen.getByText('저장한 설정과 같습니다.')).toBeTruthy();
+  // 변경이 없으므로 탭을 옮겨도 자동 저장하지 않는다.
+  await openTab('저장·공개');
+  expect(save).not.toHaveBeenCalled();
+});

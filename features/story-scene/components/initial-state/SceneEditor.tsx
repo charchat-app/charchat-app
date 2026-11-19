@@ -55,20 +55,21 @@ export function SceneEditor({
 }: {
   scene: IntroScene;
   characters: FewshotCharacter[];
-  onChange: (scene: IntroScene) => void;
+  /** 최신 장면을 받아 바꾸는 업데이트 함수. 화면에 그려진 시점의 장면으로 덮어쓰지 않게 한다. */
+  onChange: (update: (scene: IntroScene) => IntroScene) => void;
 }) {
   const [pending, setPending] = useState<Pending>(null);
-  const set = (patch: Partial<IntroScene>) => onChange({ ...scene, ...patch });
+  const set = (patch: Partial<IntroScene>) => onChange((current) => ({ ...current, ...patch }));
   const chooseMode = (mode: DateMode | null) => {
     if (mode === scene.dateMode) return;
     // 기존 날짜 입력이 있으면 지워진다는 확인을 먼저 보여준다(AC07).
     if (hasDateInput(scene)) setPending({ kind: 'date', mode });
-    else onChange(switchDateMode(scene, mode));
+    else onChange((current) => switchDateMode(current, mode));
   };
   const chooseFormat = (format: TimeFormat) => {
     if (format === scene.timeFormat) return;
     if (hasTimeInput(scene)) setPending({ kind: 'time', format });
-    else onChange(switchTimeFormat(scene, format));
+    else onChange((current) => switchTimeFormat(current, format));
   };
   const date = dateIssue(scene),
     time = timeIssue(scene),
@@ -103,7 +104,8 @@ export function SceneEditor({
               label="날짜 지우고 바꾸기"
               variant="danger"
               onPress={() => {
-                onChange(switchDateMode(scene, pending.mode));
+                const mode = pending.mode;
+                onChange((current) => switchDateMode(current, mode));
                 setPending(null);
               }}
             />
@@ -189,7 +191,8 @@ export function SceneEditor({
               label="시각 지우고 바꾸기"
               variant="danger"
               onPress={() => {
-                onChange(switchTimeFormat(scene, pending.format));
+                const format = pending.format;
+                onChange((current) => switchTimeFormat(current, format));
                 setPending(null);
               }}
             />
@@ -241,7 +244,9 @@ export function SceneEditor({
               accessibilityLabel={`${name} 착장`}
               value={state?.clothing ?? ''}
               maxLength={SCENE_LIMITS.clothing}
-              onChangeText={(clothing) => onChange(withCharacterState(scene, characters, person.id, { clothing }))}
+              onChangeText={(clothing) =>
+                onChange((current) => withCharacterState(current, characters, person.id, { clothing }))
+              }
             />
             <Text variant="caption">💭 속마음 · 선택</Text>
             <TextArea
@@ -249,7 +254,7 @@ export function SceneEditor({
               value={state?.innerThought ?? ''}
               maxLength={SCENE_LIMITS.innerThought}
               onChangeText={(innerThought) =>
-                onChange(withCharacterState(scene, characters, person.id, { innerThought }))
+                onChange((current) => withCharacterState(current, characters, person.id, { innerThought }))
               }
             />
           </View>
