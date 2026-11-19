@@ -39,7 +39,7 @@ export function useFewshotEditor(repository: FewshotRepository, storyId: string)
   const cached = useRef<{ characters: FewshotCharacter[]; updatedAt: number } | null>(null);
   const adoptServerPeople = (characters: FewshotCharacter[], requestedAt: number) => {
     const cache = cached.current;
-    if (cache && cache.updatedAt > requestedAt && (people.current === null || cache.updatedAt >= rosterAt.current)) {
+    if (cache && cache.updatedAt >= requestedAt && (people.current === null || cache.updatedAt >= rosterAt.current)) {
       // 요청 뒤에 받은 스토리 조회 결과가 더 새 정보다.
       people.current = cache.characters;
       rosterAt.current = cache.updatedAt;
@@ -53,7 +53,8 @@ export function useFewshotEditor(repository: FewshotRepository, storyId: string)
     cached.current = { characters: next, updatedAt };
     if (!alive.current || people.current === null) return;
     // 이미 반영한 퓨샷 응답보다 오래된 스토리 조회 결과는 버린다(다른 기기에서 추가한 인물의 말풍선을 지우지 않게).
-    if (updatedAt <= rosterAt.current) return;
+    // 같은 밀리초면 스토리 조회 결과를 더 새 정보로 본다(빠른 환경에서 시각이 겹칠 수 있음).
+    if (updatedAt < rosterAt.current) return;
     rosterAt.current = updatedAt;
     if (sameRoster(people.current, next)) return;
     setCharacterNotice('캐릭터 변경을 반영했습니다. 삭제된 발화자의 말풍선만 제거했습니다.');

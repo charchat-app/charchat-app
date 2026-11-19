@@ -97,3 +97,5 @@ export type StoryDraft = {
 export type StoryExpressionDocument = Pick<StoryDraft, 'id' | 'title' | 'speech' | 'saveState' | 'updatedAt'>;
 
 export * from './fewshots';
+export * from './intros';
+export * from './creationSave';
