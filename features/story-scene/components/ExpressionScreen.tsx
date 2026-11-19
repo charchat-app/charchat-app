@@ -12,6 +12,7 @@ import { useExpressionEditor } from '../hooks/useExpressionEditor';
 import { ExpressionSettings } from './ExpressionSettings';
 
 const apiUrl = process.env.EXPO_PUBLIC_API_URL;
+// 서버 주소가 없으면 로컬 예제 서버(기본 8787)에 연결한다. 예제 서버는 `npm run fixture:stories`로 켜며 Node 24 이상이 필요하다.
 const defaultRepository = apiUrl
   ? createServerExpressionRepository(apiUrl)
   : createFixtureRepository(process.env.EXPO_PUBLIC_STORY_FIXTURE_URL ?? 'http://127.0.0.1:8787');
@@ -44,6 +45,8 @@ function ExpressionEditor({
 }) {
   const editor = useExpressionEditor(repository, storyId);
   const [confirmReload, setConfirmReload] = useState(false);
+  // 완성(비공개·공개)된 스토리는 이 화면의 임시 저장 요청을 서버가 거절(409)하므로 퓨샷처럼 저장을 막는다.
+  const completed = !!editor.draft && editor.draft.saveState !== '임시 저장';
   return (
     <Surface style={styles.screen}>
       {!hideHeader ? <ScreenHeader eyebrow="CHAR / CHAT" title="표현 설정" /> : null}
@@ -76,9 +79,10 @@ function ExpressionEditor({
               {editor.saveError ? <Notice tone="alert" message={editor.saveError} /> : null}
               <Button
                 label={editor.hasPendingSave ? '이전 저장 재시도' : '표현 설정 임시 저장'}
-                disabled={editor.saving || (!editor.dirty && !editor.hasPendingSave)}
+                disabled={editor.saving || (!editor.dirty && !editor.hasPendingSave) || completed}
                 onPress={() => void editor.save()}
               />
+              {completed ? <Notice message="완성된 스토리는 공통 저장 흐름에서 수정해야 합니다." /> : null}
               <Button
                 label="저장한 설정 다시 불러오기"
                 variant="secondary"

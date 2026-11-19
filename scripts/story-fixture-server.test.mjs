@@ -1,3 +1,4 @@
+// 실행 환경: Node 24 이상(검증 v24.20.0). `npm run test:fixtures`로 실행한다(Jest 대상 아님).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
