@@ -12,7 +12,12 @@ import type { FewshotCharacter } from '@/shared/story-types';
  * - 아직 id가 없는(저장하지 않은) 캐릭터는 발화자로 고를 수 없어 제외한다.
  * - 순서는 서버 응답 순서이고 position은 그 순서 번호다.
  */
-export function useStoryCharacters(storyId: string): { characters: FewshotCharacter[] | null; failed: boolean } {
+export function useStoryCharacters(storyId: string): {
+  characters: FewshotCharacter[] | null;
+  /** characters를 서버에서 받아 온 시각(ms). 다른 응답보다 오래된 목록인지 비교할 때 쓴다. */
+  updatedAt: number;
+  failed: boolean;
+} {
   const story = useStory(storyId);
   const settled = story.status === 'success' && !story.isFetching;
   const source = settled ? story.data.characters : null;
@@ -24,5 +29,5 @@ export function useStoryCharacters(storyId: string): { characters: FewshotCharac
       null,
     [source],
   );
-  return { characters, failed: story.isError };
+  return { characters, updatedAt: story.dataUpdatedAt, failed: story.isError };
 }

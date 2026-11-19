@@ -27,18 +27,37 @@ export function useFewshotEditor(repository: FewshotRepository, storyId: string)
   const [pendingSave, setPendingSave] = useState(false);
   const [characterNotice, setCharacterNotice] = useState<string | null>(null);
   const people = useRef<FewshotCharacter[] | null>(null);
-  const characterEpoch = useRef(0);
+  // 지금 쓰는 발화자 목록이 서버 기준 언제 시점의 정보인지(ms). 더 오래된 목록으로 말풍선을 지우지 않기 위해 비교한다.
+  const rosterAt = useRef(0);
   const alive = useRef(false),
     generation = useRef(0),
     busy = useRef(false);
   const abort = useRef<AbortController | null>(null);
-  const pending = useRef<{ document: FewshotsDocument; key: string; characterEpoch: number } | null>(null);
-  const applyPeople = useCallback((next: FewshotCharacter[]) => {
-    if (!alive.current || sameRoster(people.current, next)) return;
-    if (people.current !== null)
-      setCharacterNotice('캐릭터 변경을 반영했습니다. 삭제된 발화자의 말풍선만 제거했습니다.');
+  const pending = useRef<{ document: FewshotsDocument; key: string; issuedAt: number } | null>(null);
+  /** 서버 응답(퓨샷 조회·저장)에 들어 있는 발화자 목록을 요청 시각 기준 정보로 채택한다. 더 새 목록이 이미 있으면 유지한다. */
+  // 스토리 조회 캐시에서 마지막으로 받은 목록. 퓨샷 조회가 끝나기 전에 도착해도 버리지 않고 비교에 쓴다.
+  const cached = useRef<{ characters: FewshotCharacter[]; updatedAt: number } | null>(null);
+  const adoptServerPeople = (characters: FewshotCharacter[], requestedAt: number) => {
+    const cache = cached.current;
+    if (cache && cache.updatedAt > requestedAt && (people.current === null || cache.updatedAt >= rosterAt.current)) {
+      // 요청 뒤에 받은 스토리 조회 결과가 더 새 정보다.
+      people.current = cache.characters;
+      rosterAt.current = cache.updatedAt;
+    } else if (people.current === null || rosterAt.current <= requestedAt) {
+      people.current = characters;
+      rosterAt.current = requestedAt;
+    }
+    return people.current;
+  };
+  const applyPeople = useCallback((next: FewshotCharacter[], updatedAt: number) => {
+    cached.current = { characters: next, updatedAt };
+    if (!alive.current || people.current === null) return;
+    // 이미 반영한 퓨샷 응답보다 오래된 스토리 조회 결과는 버린다(다른 기기에서 추가한 인물의 말풍선을 지우지 않게).
+    if (updatedAt <= rosterAt.current) return;
+    rosterAt.current = updatedAt;
+    if (sameRoster(people.current, next)) return;
+    setCharacterNotice('캐릭터 변경을 반영했습니다. 삭제된 발화자의 말풍선만 제거했습니다.');
     people.current = next;
-    ++characterEpoch.current;
     setSnapshot(
       (value) => value && { ...value, characters: next, fewshots: removeMissingSpeakers(value.fewshots, next) },
     );
@@ -52,18 +71,15 @@ export function useFewshotEditor(repository: FewshotRepository, storyId: string)
     abort.current = controller;
     setLoading(true);
     setError(null);
-    const epoch = characterEpoch.current;
+    const requestedAt = Date.now();
     try {
       const data = await repository.load(storyId, controller.signal);
       if (!alive.current || current !== generation.current) return;
-      if (epoch === characterEpoch.current || people.current === null) {
-        people.current = data.characters;
-        ++characterEpoch.current;
-      }
+      const currentPeople = adoptServerPeople(data.characters, requestedAt);
       const reconciled = {
         ...data,
-        characters: people.current,
-        fewshots: removeMissingSpeakers(data.fewshots, people.current),
+        characters: currentPeople,
+        fewshots: removeMissingSpeakers(data.fewshots, currentPeople),
       };
       setSnapshot(reconciled);
       setGroups(reconciled.fewshots);
@@ -79,7 +95,8 @@ export function useFewshotEditor(repository: FewshotRepository, storyId: string)
     busy.current = false;
     pending.current = null;
     people.current = null;
-    ++characterEpoch.current;
+    rosterAt.current = 0;
+    cached.current = null;
     setCharacterNotice(null);
     setSnapshot(null);
     setGroups([]);
@@ -95,15 +112,11 @@ export function useFewshotEditor(repository: FewshotRepository, storyId: string)
   // 캐릭터 추가·삭제·이름 변경은 스토리 조회 캐시 구독으로 반영한다(폴링 없음).
   const storyCharacters = useStoryCharacters(storyId);
   useEffect(() => {
-    if (storyCharacters.characters) applyPeople(storyCharacters.characters);
-  }, [storyCharacters.characters, applyPeople]);
-  const acceptSaved = (result: FewshotsDocument, epoch: number, current: number) => {
+    if (storyCharacters.characters) applyPeople(storyCharacters.characters, storyCharacters.updatedAt);
+  }, [storyCharacters.characters, storyCharacters.updatedAt, applyPeople]);
+  const acceptSaved = (result: FewshotsDocument, requestedAt: number, current: number) => {
     if (!alive.current || current !== generation.current) return;
-    if (epoch === characterEpoch.current || people.current === null) {
-      people.current = result.characters;
-      ++characterEpoch.current;
-    }
-    const currentPeople = people.current;
+    const currentPeople = adoptServerPeople(result.characters, requestedAt);
     setSnapshot({
       ...result,
       characters: currentPeople,
@@ -116,11 +129,11 @@ export function useFewshotEditor(repository: FewshotRepository, storyId: string)
     const operation = pending.current ?? {
       document: { ...snapshot, fewshots: groups },
       key: newFewshotKey('fewshots-write'),
-      characterEpoch: characterEpoch.current,
+      issuedAt: Date.now(),
     };
     const current = generation.current;
-    // 재시도 응답은 최초 저장 시점의 원장일 수 있어 최초 캐릭터 버전과 비교한다.
-    const epoch = operation.characterEpoch;
+    // 재시도 응답은 최초 저장 시점의 원장일 수 있어 최초 요청 시각을 기준으로 비교한다.
+    const epoch = operation.issuedAt;
     pending.current = operation;
     busy.current = true;
     setSaving(true);
@@ -157,7 +170,7 @@ export function useFewshotEditor(repository: FewshotRepository, storyId: string)
     error,
     pendingSave,
     captureCommit: () => {
-      const epoch = characterEpoch.current,
+      const epoch = Date.now(),
         current = generation.current;
       return (result: FewshotsDocument) => acceptSaved(result, epoch, current);
     },
