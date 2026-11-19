@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
-import { Button, ChipGroup, Notice, Text, TextArea } from '@/components/ui';
+import { Button, Card, ChipGroup, Notice, Text, TextArea } from '@/components/ui';
+import { countRawText } from '@/lib/rawText';
 import { Spacing } from '@/constants/theme';
 import {
   dateIssue,
@@ -76,192 +77,209 @@ export function SceneEditor({
     preview = formatSceneDate(scene);
   return (
     <View style={styles.wrap}>
-      <Text variant="subheading">🌿 이야기의 무대</Text>
-      <LimitedField
-        label="📍 장소 · 선택"
-        accessibilityLabel="장소"
-        value={scene.place}
-        limit={SCENE_LIMITS.place}
-        onChange={(place) => set({ place })}
-      />
-
-      <Text variant="subheading">📅 날짜 방식</Text>
-      <ChipGroup
-        accessibilityLabel="날짜 방식"
-        options={Object.values(MODE_LABELS)}
-        value={[MODE_LABELS[scene.dateMode ?? 'none']]}
-        onChange={(next) => {
-          const key = (Object.keys(MODE_LABELS) as ('none' | DateMode)[]).find((k) => MODE_LABELS[k] === next[0]);
-          if (key) chooseMode(key === 'none' ? null : key);
-        }}
-      />
-      {pending?.kind === 'date' ? (
-        <View style={styles.wrap}>
-          <Notice tone="alert" message="방식을 바꾸면 지금 입력한 날짜가 지워져요. 다시 되돌려도 나타나지 않아요." />
-          <View style={styles.row}>
-            <Button label="날짜 바꾸지 않기" variant="secondary" onPress={() => setPending(null)} />
-            <Button
-              label="날짜 지우고 바꾸기"
-              variant="danger"
-              onPress={() => {
-                const mode = pending.mode;
-                onChange((current) => switchDateMode(current, mode));
-                setPending(null);
-              }}
-            />
-          </View>
-        </View>
-      ) : null}
-      {scene.dateMode === 'world' ? (
+      {/* CREATE-US-04-AC18: 공통 장면(날짜·시간·장소)과 캐릭터별 착장·속마음을 다른 영역으로 나눈다. */}
+      <Card tone="state" accessibilityLabel="공통 장면 입력" style={styles.wrap}>
+        <Text variant="subheading">🌿 공통 장면</Text>
         <LimitedField
-          label="연호"
-          accessibilityLabel="연호"
-          value={scene.era}
-          limit={SCENE_LIMITS.era}
-          onChange={(era) => set({ era })}
+          label="📍 장소 · 선택"
+          accessibilityLabel="장소"
+          value={scene.place}
+          limit={SCENE_LIMITS.place}
+          onChange={(place) => set({ place })}
         />
-      ) : null}
-      {scene.dateMode === 'calendar' || scene.dateMode === 'world' ? (
-        <View style={styles.row}>
-          {(
-            [
-              ['year', '연'],
-              ['month', '월'],
-              ['day', '일'],
-            ] as const
-          ).map(([key, label]) => (
-            <View key={key} style={styles.cell}>
-              <LimitedField
-                label={label}
-                accessibilityLabel={`날짜 ${label}`}
-                value={scene[key]}
-                keyboardType="number-pad"
-                onChange={(value) => set({ [key]: value })}
+
+        <Text variant="subheading">📅 날짜 방식</Text>
+        <ChipGroup
+          accessibilityLabel="날짜 방식"
+          options={Object.values(MODE_LABELS)}
+          value={[MODE_LABELS[scene.dateMode ?? 'none']]}
+          onChange={(next) => {
+            const key = (Object.keys(MODE_LABELS) as ('none' | DateMode)[]).find((k) => MODE_LABELS[k] === next[0]);
+            if (key) chooseMode(key === 'none' ? null : key);
+          }}
+        />
+        {pending?.kind === 'date' ? (
+          <View style={styles.wrap}>
+            <Notice tone="alert" message="방식을 바꾸면 지금 입력한 날짜가 지워져요. 다시 되돌려도 나타나지 않아요." />
+            <View style={styles.row}>
+              <Button label="날짜 바꾸지 않기" variant="secondary" onPress={() => setPending(null)} />
+              <Button
+                label="날짜 지우고 바꾸기"
+                variant="danger"
+                onPress={() => {
+                  const mode = pending.mode;
+                  onChange((current) => switchDateMode(current, mode));
+                  setPending(null);
+                }}
               />
             </View>
-          ))}
-        </View>
-      ) : null}
-      {scene.dateMode === 'elapsed' ? (
+          </View>
+        ) : null}
+        {scene.dateMode === 'world' ? (
+          <LimitedField
+            label="연호"
+            accessibilityLabel="연호"
+            value={scene.era}
+            limit={SCENE_LIMITS.era}
+            onChange={(era) => set({ era })}
+          />
+        ) : null}
+        {scene.dateMode === 'calendar' || scene.dateMode === 'world' ? (
+          <View style={styles.row}>
+            {(
+              [
+                ['year', '연'],
+                ['month', '월'],
+                ['day', '일'],
+              ] as const
+            ).map(([key, label]) => (
+              <View key={key} style={styles.cell}>
+                <LimitedField
+                  label={label}
+                  accessibilityLabel={`날짜 ${label}`}
+                  value={scene[key]}
+                  keyboardType="number-pad"
+                  onChange={(value) => set({ [key]: value })}
+                />
+              </View>
+            ))}
+          </View>
+        ) : null}
+        {scene.dateMode === 'elapsed' ? (
+          <View style={styles.row}>
+            <View style={styles.cell}>
+              <LimitedField
+                label="기준 사건"
+                accessibilityLabel="기준 사건"
+                value={scene.referenceEvent}
+                limit={SCENE_LIMITS.referenceEvent}
+                placeholder="감금"
+                onChange={(referenceEvent) => set({ referenceEvent })}
+              />
+            </View>
+            <View style={styles.cell}>
+              <LimitedField
+                label="시작 일차"
+                accessibilityLabel="시작 일차"
+                value={scene.elapsedDay}
+                keyboardType="number-pad"
+                placeholder="3"
+                onChange={(elapsedDay) => set({ elapsedDay })}
+              />
+            </View>
+          </View>
+        ) : null}
+        {scene.dateMode ? (
+          <Text variant="caption" color={date ? 'danger' : 'textSecondary'} accessibilityLiveRegion="polite">
+            {date ?? (preview ? `표시: ${preview}` : '날짜는 비워 둘 수 있어요 · 숫자로 직접 입력')}
+          </Text>
+        ) : null}
+
+        <Text variant="subheading">⏰ 시간</Text>
+        <ChipGroup
+          accessibilityLabel="시간제"
+          options={Object.values(FORMAT_LABELS)}
+          value={[FORMAT_LABELS[scene.timeFormat]]}
+          onChange={(next) => {
+            const format = (Object.keys(FORMAT_LABELS) as TimeFormat[]).find((k) => FORMAT_LABELS[k] === next[0]);
+            if (format) chooseFormat(format);
+          }}
+        />
+        {pending?.kind === 'time' ? (
+          <View style={styles.wrap}>
+            <Notice tone="alert" message="시간제를 바꾸면 지금 입력한 시각이 지워져요." />
+            <View style={styles.row}>
+              <Button label="시간제 바꾸지 않기" variant="secondary" onPress={() => setPending(null)} />
+              <Button
+                label="시각 지우고 바꾸기"
+                variant="danger"
+                onPress={() => {
+                  const format = pending.format;
+                  onChange((current) => switchTimeFormat(current, format));
+                  setPending(null);
+                }}
+              />
+            </View>
+          </View>
+        ) : null}
+        {scene.timeFormat === '12h' ? (
+          <ChipGroup
+            accessibilityLabel="오전 오후"
+            options={['오전', '오후']}
+            value={scene.meridiem === 'am' ? ['오전'] : scene.meridiem === 'pm' ? ['오후'] : []}
+            onChange={(next) => set({ meridiem: next[0] === '오전' ? 'am' : next[0] === '오후' ? 'pm' : null })}
+          />
+        ) : null}
         <View style={styles.row}>
           <View style={styles.cell}>
             <LimitedField
-              label="기준 사건"
-              accessibilityLabel="기준 사건"
-              value={scene.referenceEvent}
-              limit={SCENE_LIMITS.referenceEvent}
-              placeholder="감금"
-              onChange={(referenceEvent) => set({ referenceEvent })}
+              label="시"
+              accessibilityLabel="시"
+              value={scene.hour}
+              keyboardType="number-pad"
+              onChange={(hour) => set({ hour })}
             />
           </View>
           <View style={styles.cell}>
             <LimitedField
-              label="시작 일차"
-              accessibilityLabel="시작 일차"
-              value={scene.elapsedDay}
+              label="분"
+              accessibilityLabel="분"
+              value={scene.minute}
               keyboardType="number-pad"
-              placeholder="3"
-              onChange={(elapsedDay) => set({ elapsedDay })}
+              onChange={(minute) => set({ minute })}
             />
           </View>
         </View>
-      ) : null}
-      {scene.dateMode ? (
-        <Text variant="caption" color={date ? 'danger' : 'textSecondary'} accessibilityLiveRegion="polite">
-          {date ?? (preview ? `표시: ${preview}` : '날짜는 비워 둘 수 있어요 · 숫자로 직접 입력')}
+        <Text variant="caption" color={time ? 'danger' : 'textSecondary'} accessibilityLiveRegion="polite">
+          {time ?? '시간은 비워 둘 수 있어요. 시·분을 숫자로 입력해요.'}
         </Text>
-      ) : null}
+      </Card>
 
-      <Text variant="subheading">⏰ 시간</Text>
-      <ChipGroup
-        accessibilityLabel="시간제"
-        options={Object.values(FORMAT_LABELS)}
-        value={[FORMAT_LABELS[scene.timeFormat]]}
-        onChange={(next) => {
-          const format = (Object.keys(FORMAT_LABELS) as TimeFormat[]).find((k) => FORMAT_LABELS[k] === next[0]);
-          if (format) chooseFormat(format);
-        }}
-      />
-      {pending?.kind === 'time' ? (
-        <View style={styles.wrap}>
-          <Notice tone="alert" message="시간제를 바꾸면 지금 입력한 시각이 지워져요." />
-          <View style={styles.row}>
-            <Button label="시간제 바꾸지 않기" variant="secondary" onPress={() => setPending(null)} />
-            <Button
-              label="시각 지우고 바꾸기"
-              variant="danger"
-              onPress={() => {
-                const format = pending.format;
-                onChange((current) => switchTimeFormat(current, format));
-                setPending(null);
-              }}
-            />
-          </View>
-        </View>
-      ) : null}
-      {scene.timeFormat === '12h' ? (
-        <ChipGroup
-          accessibilityLabel="오전 오후"
-          options={['오전', '오후']}
-          value={scene.meridiem === 'am' ? ['오전'] : scene.meridiem === 'pm' ? ['오후'] : []}
-          onChange={(next) => set({ meridiem: next[0] === '오전' ? 'am' : next[0] === '오후' ? 'pm' : null })}
-        />
-      ) : null}
-      <View style={styles.row}>
-        <View style={styles.cell}>
-          <LimitedField
-            label="시"
-            accessibilityLabel="시"
-            value={scene.hour}
-            keyboardType="number-pad"
-            onChange={(hour) => set({ hour })}
-          />
-        </View>
-        <View style={styles.cell}>
-          <LimitedField
-            label="분"
-            accessibilityLabel="분"
-            value={scene.minute}
-            keyboardType="number-pad"
-            onChange={(minute) => set({ minute })}
-          />
-        </View>
-      </View>
-      <Text variant="caption" color={time ? 'danger' : 'textSecondary'} accessibilityLiveRegion="polite">
-        {time ?? '시간은 비워 둘 수 있어요. 시·분을 숫자로 입력해요.'}
-      </Text>
-
-      <Text variant="subheading">캐릭터별 상태</Text>
-      {characters.length === 0 ? <Text variant="caption">등록된 등장 캐릭터가 없어요.</Text> : null}
-      {characters.map((person, index) => {
-        const name = person.name || `캐릭터 ${index + 1}`;
-        const state = scene.characters.find((c) => c.characterId === person.id);
-        return (
-          <View key={person.id} style={styles.wrap}>
-            <Text>{name}</Text>
-            <Text variant="caption">👔 착장 · 선택</Text>
-            <TextArea
-              accessibilityLabel={`${name} 착장`}
-              value={state?.clothing ?? ''}
-              maxLength={SCENE_LIMITS.clothing}
-              onChangeText={(clothing) =>
-                onChange((current) => withCharacterState(current, characters, person.id, { clothing }))
-              }
-            />
-            <Text variant="caption">💭 속마음 · 선택</Text>
-            <TextArea
-              accessibilityLabel={`${name} 속마음`}
-              value={state?.innerThought ?? ''}
-              maxLength={SCENE_LIMITS.innerThought}
-              onChangeText={(innerThought) =>
-                onChange((current) => withCharacterState(current, characters, person.id, { innerThought }))
-              }
-            />
-          </View>
-        );
-      })}
-      <Text variant="caption">유저 캐릭터의 착장·속마음은 이용자가 정하므로 여기서 입력하지 않아요.</Text>
+      <Card tone="state" accessibilityLabel="캐릭터별 상태 입력" style={styles.wrap}>
+        <Text variant="subheading">👥 캐릭터별 상태</Text>
+        {characters.length === 0 ? <Text variant="caption">등록된 등장 캐릭터가 없어요.</Text> : null}
+        {characters.map((person, index) => {
+          const name = person.name || `캐릭터 ${index + 1}`;
+          const state = scene.characters.find((c) => c.characterId === person.id);
+          return (
+            <Card key={person.id} accessibilityLabel={`${name} 상태 입력`} style={styles.wrap}>
+              <Text>👤 {name}</Text>
+              <Text variant="caption">👔 착장 · 선택</Text>
+              {/* AC11·12: 초과해도 입력을 막거나 자르지 않고 글자 수와 초과만 표시한다. */}
+              <TextArea
+                accessibilityLabel={`${name} 착장`}
+                value={state?.clothing ?? ''}
+                onChangeText={(clothing) =>
+                  onChange((current) => withCharacterState(current, characters, person.id, { clothing }))
+                }
+              />
+              <LengthNote value={state?.clothing ?? ''} limit={SCENE_LIMITS.clothing} />
+              <Text variant="caption">💭 속마음 · 선택</Text>
+              <TextArea
+                accessibilityLabel={`${name} 속마음`}
+                value={state?.innerThought ?? ''}
+                onChangeText={(innerThought) =>
+                  onChange((current) => withCharacterState(current, characters, person.id, { innerThought }))
+                }
+              />
+              <LengthNote value={state?.innerThought ?? ''} limit={SCENE_LIMITS.innerThought} />
+            </Card>
+          );
+        })}
+        <Text variant="caption">유저 캐릭터의 착장·속마음은 이용자가 정하므로 여기서 입력하지 않아요.</Text>
+      </Card>
     </View>
+  );
+}
+
+/** 원문 글자 수와 초과량. 초과는 공개·비공개 저장만 막고 임시 저장은 허용한다(CREATE-US-04-AC12). */
+function LengthNote({ value, limit }: { value: string; limit: number }) {
+  const length = countRawText(value);
+  const over = length > limit;
+  return (
+    <Text variant="caption" color={over ? 'danger' : 'textSecondary'}>
+      {`${length} / ${limit}자${over ? ` · ${length - limit}자 초과` : ''}`}
+    </Text>
   );
 }
 const styles = StyleSheet.create({
