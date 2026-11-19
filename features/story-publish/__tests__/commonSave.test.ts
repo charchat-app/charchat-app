@@ -259,3 +259,9 @@ it('거절 안내 문구: detail이 비었으면 일반 문구를 쓴다', () =>
   expect(rejectionMessage(new ApiError(422, 'UNKNOWN', '  '))).toBe('저장이 거절되었습니다. 입력은 유지됩니다.');
   expect(rejectionMessage(new ApiError(422, 'UNKNOWN', '서버 안내'))).toBe('서버 안내');
 });
+
+it('INVALID_AFFINITY_PERSON 거절은 삭제된 캐릭터의 호감도 안내를 보여 준다', () => {
+  expect(rejectionMessage(new ApiError(422, 'INVALID_AFFINITY_PERSON', '서버 문구'))).toBe(
+    '삭제된 캐릭터의 호감도가 남아 있습니다. 다시 불러온 뒤 저장해 주세요.',
+  );
+});

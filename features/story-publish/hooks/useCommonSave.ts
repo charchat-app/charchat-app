@@ -79,6 +79,7 @@ const messages: Record<string, string> = {
   AFFINITY_INVALID: '초기 호감도는 -100~100 사이 정수로 입력해 주세요.',
   INVALID_SCENE_CHARACTER: '삭제된 캐릭터의 상태가 남아 있습니다. 다시 불러온 뒤 저장해 주세요.',
   INVALID_RELATION_PERSON: '삭제된 캐릭터의 관계가 남아 있습니다. 다시 불러온 뒤 저장해 주세요.',
+  INVALID_AFFINITY_PERSON: '삭제된 캐릭터의 호감도가 남아 있습니다. 다시 불러온 뒤 저장해 주세요.',
 };
 type Options = {
   document: CreationSaveDocument | null;
