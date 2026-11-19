@@ -12,14 +12,24 @@ export type BasicInfoDraft = Pick<StoryDraft, 'title' | 'subtitle' | 'world' | '
 /** 입력 중인 캐릭터 한 명. key는 화면 목록용 고유값이고 저장되지 않는다. */
 export type CharacterValues = CharacterDraft & { key: string };
 
-/**
- * 기본 설정 탭의 입력 상태. 해시태그는 입력 중인 원문(`tagsText`)을 그대로 들고 있다가
- * 저장 조각을 만들 때만 목록으로 나눈다. 쉼표 입력은 해시태그 피처(칩 입력·자동검색) 전까지의 임시 방식이다.
- */
+/** 기본 설정 탭의 입력 상태. */
 export type BasicInfoValues = {
   title: string;
   subtitle: string;
   world: string;
-  tagsText: string;
+  /** 칩으로 추가한 해시태그 원문 */
+  tags: string[];
+  /**
+   * 해시태그 입력창에 쓰고 아직 '추가'하지 않은 글자. 저장할 때 태그로 포함해
+   * 추가 버튼을 누르지 않고 저장해도 입력이 사라지지 않게 한다.
+   */
+  tagInput: string;
   characters: CharacterValues[];
+};
+
+/** 해시태그 자동검색 후보 (CREATE-US-01-AC17) */
+export type TagSuggestion = {
+  name: string;
+  /** 이 태그가 붙은 공개 스토리 수. 비공개·임시 저장 제외 */
+  publicStoryCount: number;
 };
