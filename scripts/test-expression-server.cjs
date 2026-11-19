@@ -1,4 +1,11 @@
-/** 실제 앱 어댑터 → 로컬 FastAPI → 격리 PostgreSQL 계약 검사. Node24, TypeScript 의존성 사용. */
+/**
+ * 실제 앱 어댑터 → 로컬 FastAPI → 격리 PostgreSQL 계약 검사. TypeScript 의존성 사용.
+ * 실행 환경: Node 24 이상(검증 v24.20.0). 사용: node scripts/test-expression-server.cjs <API 주소> <스토리 id>
+ */
+if (Number(process.versions.node.split('.')[0]) < 24) {
+  console.error(`Node 24 이상이 필요합니다. 현재: ${process.version}`);
+  process.exit(1);
+}
 const fs = require('node:fs');
 const path = require('node:path');
 const Module = require('node:module');
