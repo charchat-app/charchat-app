@@ -1,12 +1,38 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
+import { notifyManager, QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { act, fireEvent, render as baseRender, screen, waitFor } from '@testing-library/react-native';
+import type { ReactElement, ReactNode } from 'react';
 import { FewshotScreen } from '../components/FewshotScreen';
-import type { FewshotRepository } from '@/features/story-publish';
-import { publishStoryCharacters } from '@/features/story-setup';
-import type { FewshotsDocument } from '@/shared/story-types';
+import type { EditorStory, FewshotRepository } from '@/features/story-publish';
+import type { FewshotCharacter, FewshotsDocument } from '@/shared/story-types';
 
 jest.mock('react-native-safe-area-context', () => require('react-native-safe-area-context/jest/mock').default);
 // 화면 전체 흐름(입력·정렬·저장·재진입)이라 느린 CI에서 기본 5초를 넘을 수 있다.
 jest.setTimeout(30000);
+// 캐시 변경 알림을 다음 틱으로 미루지 않아 act 안에서 바로 화면에 반영되게 한다.
+notifyManager.setScheduler((callback) => callback());
+// story-publish의 storyKeys.detail(id)와 같은 키. 기본 정보 저장이 성공하면 story-publish가 이 캐시를 갱신한다.
+const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
+function setStoryCharacters(people: FewshotCharacter[]) {
+  client.setQueryData<EditorStory>(['stories', 'detail', '1'], {
+    id: '1',
+    title: '가상 스토리',
+    subtitle: '',
+    world: '',
+    tags: [],
+    characters: people.map((person) => ({ id: person.id, name: person.name ?? '', detail: '' })),
+    saveState: '임시 저장',
+    updatedAt: '2026-11-17T00:00:00Z',
+    issues: [],
+  });
+}
+const wrapper = ({ children }: { children: ReactNode }) => (
+  <QueryClientProvider client={client}>{children}</QueryClientProvider>
+);
+const render = (element: ReactElement) => baseRender(element, { wrapper });
+beforeEach(() => {
+  client.clear();
+  setStoryCharacters([{ id: '5', name: '하린', position: 0 }]);
+});
 function fixture() {
   let value: FewshotsDocument = {
     id: '1',
@@ -160,10 +186,10 @@ it('열린 편집의 캐릭터 이름표·선택 목록을 갱신하고 삭제�
   await fireEvent.changeText(screen.getByLabelText('새 말풍선 본문'), '남겨야 할 새 입력');
   await fireEvent.press(screen.getByRole('button', { name: '1번 본문 수정' }));
   await fireEvent.changeText(screen.getByLabelText('말풍선 본문 수정'), '삭제될 인물 수정 중');
-  await act(() => publishStoryCharacters('1', [{ id: '5', name: '변경된 이름', position: 0 }]));
+  await act(() => setStoryCharacters([{ id: '5', name: '변경된 이름', position: 0 }]));
   expect(screen.getByText('변경된 이름')).toBeTruthy();
   expect(screen.getByLabelText('말풍선 본문 수정').props.value).toBe('삭제될 인물 수정 중');
-  await act(() => publishStoryCharacters('1', []));
+  await act(() => setStoryCharacters([]));
   await waitFor(() => expect(screen.queryByLabelText('말풍선 본문 수정')).toBeNull());
   expect(screen.getByLabelText('새 말풍선 본문').props.value).toBe('남겨야 할 새 입력');
   expect(screen.queryByRole('button', { name: '1번 말풍선 삭제' })).toBeNull();

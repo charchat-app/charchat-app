@@ -42,8 +42,6 @@ async function main() {
   assert.equal(Object.hasOwn(restored, 'characters'), false);
   const { createServerFewshotRepository } = require('../features/story-publish/fewshotRepository.ts');
   const fewRepo = createServerFewshotRepository(base);
-  const liveCharacters = await fewRepo.loadCharacters(id);
-  assert.ok(liveCharacters.length > 0);
   const empty = await fewRepo.load(id);
   assert.equal(empty.fewshots.length, 0);
   const character = empty.characters[0];

@@ -1,8 +1,33 @@
+import { notifyManager, QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, renderHook, waitFor } from '@testing-library/react-native';
-import { newFewshotGroup, type FewshotsDocument } from '@/shared/story-types';
-import type { FewshotRepository } from '@/features/story-publish';
-import { publishStoryCharacters } from '@/features/story-setup';
+import { createElement, type ReactNode } from 'react';
+import { newFewshotGroup, type FewshotCharacter, type FewshotsDocument } from '@/shared/story-types';
+import type { EditorStory, FewshotRepository } from '@/features/story-publish';
 import { useFewshotEditor } from '../hooks/useFewshotEditor';
+
+// 캐시 변경 알림을 다음 틱으로 미루지 않아 act 안에서 바로 화면에 반영되게 한다.
+notifyManager.setScheduler((callback) => callback());
+// story-publish의 storyKeys.detail(id)와 같은 키. 기본 정보 저장이 성공하면 story-publish가 이 캐시를 갱신한다.
+const detailKey = (id: string) => ['stories', 'detail', id];
+/** 스토리 조회 캐시를 준비하고, 기본 정보 저장 성공처럼 캐릭터 목록을 바꾸는 함수를 돌려준다. */
+function storyCache(characters: FewshotCharacter[] | null) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
+  const setCharacters = (people: FewshotCharacter[], id = '1') =>
+    client.setQueryData<EditorStory>(detailKey(id), {
+      id,
+      title: '가상 스토리',
+      subtitle: '',
+      world: '',
+      tags: [],
+      characters: people.map((person) => ({ id: person.id, name: person.name ?? '', detail: '' })),
+      saveState: '임시 저장',
+      updatedAt: '2026-11-17T00:00:00Z',
+      issues: [],
+    });
+  if (characters) setCharacters(characters);
+  const wrapper = ({ children }: { children: ReactNode }) => createElement(QueryClientProvider, { client }, children);
+  return { client, wrapper, setCharacters };
+}
 
 const initial = (): FewshotsDocument => ({
   id: '1',
@@ -21,7 +46,7 @@ it('저장 중 편집한 미발급 메시지에 ID를 합쳐 후속 저장의 �
         finish = resolve;
       }),
   );
-  const { result } = await renderHook(() => useFewshotEditor(repo, '1'));
+  const { result } = await renderHook(() => useFewshotEditor(repo, '1'), { wrapper: storyCache([]).wrapper });
   await waitFor(() => expect(result.current.loading).toBe(false));
   const draft = {
     ...newFewshotGroup(),
@@ -51,7 +76,7 @@ it('성패 불명확 재시도는 같은 키·본문으로 실행하고 새 입�
     load: jest.fn().mockResolvedValue(initial()),
     save: jest.fn().mockRejectedValueOnce(new Error('disconnected')),
   };
-  const { result } = await renderHook(() => useFewshotEditor(repo, '1'));
+  const { result } = await renderHook(() => useFewshotEditor(repo, '1'), { wrapper: storyCache([]).wrapper });
   await waitFor(() => expect(result.current.loading).toBe(false));
   const draft = newFewshotGroup();
   await act(() => result.current.setGroups([draft]));
@@ -90,7 +115,8 @@ const characterDocument = (): FewshotsDocument => ({
 it('같은 스토리의 이름·삭제를 즉시 반영하면서 미저장 본문과 남은 순서를 보존한다', async () => {
   const document = characterDocument();
   const repo: FewshotRepository = { load: jest.fn().mockResolvedValue(document), save: jest.fn() };
-  const { result, unmount } = await renderHook(() => useFewshotEditor(repo, '1'));
+  const cache = storyCache(document.characters);
+  const { result, unmount } = await renderHook(() => useFewshotEditor(repo, '1'), { wrapper: cache.wrapper });
   await waitFor(() => expect(result.current.loading).toBe(false));
   await act(() =>
     result.current.setGroups((groups) => [
@@ -106,14 +132,13 @@ it('같은 스토리의 이름·삭제를 즉시 반영하면서 미저장 본�
       },
     ]),
   );
-  await act(() => publishStoryCharacters('other-story', []));
+  await act(() => cache.setCharacters([], 'other-story'));
   expect(result.current.groups[0].messages).toHaveLength(5);
-  await act(() =>
-    publishStoryCharacters('1', [{ ...document.characters[0], name: '새 이름' }, document.characters[1]]),
-  );
+  expect(result.current.characterNotice).toBeNull();
+  await act(() => cache.setCharacters([{ ...document.characters[0], name: '새 이름' }, document.characters[1]]));
   expect(result.current.snapshot?.characters[0].name).toBe('새 이름');
   expect(result.current.groups[0].messages[1].body).toBe('하린 원문');
-  await act(() => publishStoryCharacters('1', [document.characters[1]]));
+  await act(() => cache.setCharacters([document.characters[1]]));
   expect(result.current.groups[0].messages.map((message) => message.clientKey)).toEqual(['mn', 'mu', 'other']);
   expect(result.current.groups[0].messages.map((message) => message.body)).toEqual([
     '수정한 하린 서술',
@@ -139,13 +164,14 @@ it('캐릭터 삭제 뒤 도착한 저장 응답이 발화자·삭제 메시지�
         }),
     ),
   };
-  const { result } = await renderHook(() => useFewshotEditor(repo, '1'));
+  const cache = storyCache(document.characters);
+  const { result } = await renderHook(() => useFewshotEditor(repo, '1'), { wrapper: cache.wrapper });
   await waitFor(() => expect(result.current.loading).toBe(false));
   let operation!: Promise<void>;
   await act(() => {
     operation = result.current.save();
   });
-  await act(() => publishStoryCharacters('1', [document.characters[1]]));
+  await act(() => cache.setCharacters([document.characters[1]]));
   await act(() =>
     result.current.setGroups((groups) => [
       {
@@ -166,49 +192,51 @@ it('캐릭터 삭제 뒤 도착한 저장 응답이 발화자·삭제 메시지�
   expect(result.current.groups[0].messages[2].body).toBe('저장 중 입력');
 });
 
-it('자동 조회 실패 시 입력을 보존하고 늦은 캐릭터 응답으로 즉시 변경을 덮어쓰지 않는다', async () => {
+it('스토리 조회에 실패하면 불러온 발화자와 입력을 유지하고, 캐시가 갱신되면 반영한다', async () => {
+  const document = characterDocument();
+  const repo: FewshotRepository = { load: jest.fn().mockResolvedValue(document), save: jest.fn() };
+  // 캐시가 비어 있으면 스토리를 조회한다. 테스트에는 서버 주소가 없어 조회가 실패한다.
+  const cache = storyCache(null);
+  const { result } = await renderHook(() => useFewshotEditor(repo, '1'), { wrapper: cache.wrapper });
+  await waitFor(() => expect(result.current.characterSyncError).toMatch(/기존 입력과 발화자 목록을 유지/));
+  await waitFor(() => expect(result.current.loading).toBe(false));
+  expect(result.current.snapshot?.characters.map((person) => person.id)).toEqual(['5', '6']);
+  expect(result.current.groups[0].messages).toHaveLength(3);
+  await act(() => cache.setCharacters([document.characters[1]]));
+  expect(result.current.characterSyncError).toBeNull();
+  expect(result.current.groups[0].messages.map((message) => message.clientKey)).toEqual(['mu', 'mn']);
+});
+
+it('주기 조회 없이 캐시 구독만 한다(숨긴 화면에서도 요청하지 않음)', async () => {
   jest.useFakeTimers();
+  const fetchSpy = jest.spyOn(globalThis, 'fetch');
   try {
     const document = characterDocument();
-    let finish!: (people: FewshotsDocument['characters']) => void;
-    const loadCharacters = jest
-      .fn()
-      .mockImplementationOnce(
-        () =>
-          new Promise((resolve) => {
-            finish = resolve;
-          }),
-      )
-      .mockRejectedValueOnce(new Error('offline'))
-      .mockResolvedValue([]);
-    const repo: FewshotRepository = { load: jest.fn().mockResolvedValue(document), save: jest.fn(), loadCharacters };
-    const { result, unmount } = await renderHook(() => useFewshotEditor(repo, '1'));
+    const repo: FewshotRepository = { load: jest.fn().mockResolvedValue(document), save: jest.fn() };
+    const cache = storyCache(document.characters);
+    const { result, unmount } = await renderHook(() => useFewshotEditor(repo, '1'), { wrapper: cache.wrapper });
     await waitFor(() => expect(result.current.loading).toBe(false));
-    await act(() =>
-      publishStoryCharacters('1', [{ ...document.characters[0], name: '즉시 이름' }, document.characters[1]]),
-    );
-    await act(async () => finish(document.characters));
-    expect(result.current.snapshot?.characters[0].name).toBe('즉시 이름');
     await act(async () => {
-      jest.advanceTimersByTime(2000);
+      jest.advanceTimersByTime(60000);
     });
-    expect(result.current.characterSyncError).toMatch(/기존 입력을 유지/);
-    expect(result.current.groups[0].messages).toHaveLength(3);
-    await act(async () => {
-      jest.advanceTimersByTime(2000);
-    });
-    expect(result.current.snapshot?.characters).toEqual([]);
-    expect(result.current.groups[0].messages.map((message) => message.clientKey)).toEqual(['mu', 'mn']);
-    expect(result.current.characterSyncError).toBeNull();
-    const calls = loadCharacters.mock.calls.length;
+    expect(repo.load).toHaveBeenCalledTimes(1);
+    expect(fetchSpy).not.toHaveBeenCalled();
     await unmount();
-    await act(async () => {
-      jest.advanceTimersByTime(10000);
-    });
-    expect(loadCharacters).toHaveBeenCalledTimes(calls);
   } finally {
+    fetchSpy.mockRestore();
     jest.useRealTimers();
   }
+});
+
+it('이름·순서가 같은 캐시 갱신은 변경 안내를 띄우지 않는다', async () => {
+  const document = characterDocument();
+  const repo: FewshotRepository = { load: jest.fn().mockResolvedValue(document), save: jest.fn() };
+  const cache = storyCache(document.characters);
+  const { result } = await renderHook(() => useFewshotEditor(repo, '1'), { wrapper: cache.wrapper });
+  await waitFor(() => expect(result.current.loading).toBe(false));
+  await act(() => cache.setCharacters(document.characters.map((person) => ({ ...person, position: 9 }))));
+  expect(result.current.characterNotice).toBeNull();
+  expect(result.current.dirty).toBe(false);
 });
 
 it('캐릭터 변경이 있어도 성패 불명확한 저장의 재시도 키·본문을 바꾸지 않는다', async () => {
@@ -217,11 +245,12 @@ it('캐릭터 변경이 있어도 성패 불명확한 저장의 재시도 키·�
     load: jest.fn().mockResolvedValue(document),
     save: jest.fn().mockRejectedValueOnce(new Error('disconnected')).mockResolvedValueOnce(document),
   };
-  const { result } = await renderHook(() => useFewshotEditor(repo, '1'));
+  const cache = storyCache(document.characters);
+  const { result } = await renderHook(() => useFewshotEditor(repo, '1'), { wrapper: cache.wrapper });
   await waitFor(() => expect(result.current.loading).toBe(false));
   await act(() => result.current.save());
   const [sent, key] = repo.save.mock.calls[0];
-  await act(() => publishStoryCharacters('1', []));
+  await act(() => cache.setCharacters([]));
   expect(result.current.groups[0].messages.map((message) => message.clientKey)).toEqual(['mu', 'mn']);
   await act(() => result.current.save());
   expect(repo.save.mock.calls[1]).toEqual([sent, key]);
@@ -240,8 +269,9 @@ it('최초 조회 중 받은 삭제 알림을 늦은 전체 조회 결과가 덮
     ),
     save: jest.fn(),
   };
-  const { result } = await renderHook(() => useFewshotEditor(repo, '1'));
-  await act(() => publishStoryCharacters('1', []));
+  const cache = storyCache(characterDocument().characters);
+  const { result } = await renderHook(() => useFewshotEditor(repo, '1'), { wrapper: cache.wrapper });
+  await act(() => cache.setCharacters([]));
   await act(async () => finish(characterDocument()));
   expect(result.current.loading).toBe(false);
   expect(result.current.snapshot?.characters).toEqual([]);
