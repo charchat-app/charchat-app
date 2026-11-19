@@ -57,3 +57,33 @@ it('발화자 목록의 중복 ID·잘못된 목록을 거절한다', async () =
   );
   await expect(repo.load('1')).rejects.toThrow('발화자 응답');
 });
+
+it('서버가 id를 숫자로 응답해도 같은 문자열 id로 복원한다', async () => {
+  const numeric = {
+    ...response(),
+    story_id: 1,
+    characters: [{ id: 5, name: '하린', position: 0 }],
+    fewshots: [
+      {
+        id: 10,
+        client_key: 'g',
+        messages: [{ id: 20, client_key: 'm', speaker_kind: 'character', character_id: 5, body: '안녕' }],
+      },
+    ],
+  };
+  jest.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: true, json: async () => numeric } as Response);
+  const document = await createServerFewshotRepository('http://localhost:8000/api/v1').load('1');
+  expect(document.fewshots[0]).toMatchObject({ id: '10', messages: [{ id: '20', characterId: '5' }] });
+});
+
+it('다른 스토리 id나 안전하지 않은 숫자 id는 거절한다', async () => {
+  const mock = jest.spyOn(globalThis, 'fetch');
+  const repo = createServerFewshotRepository('http://localhost:8000/api/v1');
+  mock.mockResolvedValueOnce({ ok: true, json: async () => ({ ...response(), story_id: 2 }) } as Response);
+  await expect(repo.load('1')).rejects.toThrow('퓨샷 저장 응답');
+  mock.mockResolvedValueOnce({
+    ok: true,
+    json: async () => ({ ...response(), characters: [{ id: 2 ** 53, name: '큰 id', position: 0 }] }),
+  } as Response);
+  await expect(repo.load('1')).rejects.toThrow('퓨샷 ID');
+});

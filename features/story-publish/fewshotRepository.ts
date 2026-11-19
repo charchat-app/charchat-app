@@ -10,10 +10,23 @@ function object(value: unknown): Record<string, unknown> {
     throw new Error('퓨샷 응답 형식이 올바르지 않습니다.');
   return value as Record<string, unknown>;
 }
+/**
+ * 서버 DB id를 화면용 문자열로 읽는다. 서버는 id를 숫자(int)로 응답하고, 예전 응답·시드는 숫자 문자열이다.
+ * 둘 다 받되 안전한 양의 정수만 허용한다(JSON 숫자는 2^53 이상에서 정밀도를 잃음).
+ */
 function id(value: unknown): string {
+  if (typeof value === 'number' && Number.isSafeInteger(value) && value > 0) return String(value);
   if (typeof value !== 'string' || !/^[1-9]\d{0,18}$/.test(value) || BigInt(value) > 9223372036854775807n)
     throw new Error('퓨샷 ID가 올바르지 않습니다.');
   return value;
+}
+/** 응답의 story_id가 요청한 스토리와 같은지 숫자·문자열 구분 없이 확인한다. */
+function sameId(value: unknown, expected: string): boolean {
+  try {
+    return id(value) === expected;
+  } catch {
+    return false;
+  }
 }
 function key(value: unknown): string {
   if (typeof value !== 'string' || !/^[A-Za-z0-9_-]{1,120}$/.test(value))
@@ -37,7 +50,7 @@ function parseCharacters(value: unknown): FewshotCharacter[] {
     return { id: characterId, name: c.name as string | null, position: c.position as number };
   });
 }
-export { object as readObject, id as readId, key as readKey };
+export { object as readObject, id as readId, key as readKey, sameId as isSameId };
 function unique(set: Set<string>, value: string) {
   if (set.has(value)) throw new Error('중복된 응답 항목입니다.');
   set.add(value);
@@ -71,7 +84,7 @@ export function readMessage(
 export function readFewshotsSnapshot(value: unknown, storyId: string, requestId?: string): FewshotsDocument {
   const source = object(value);
   if (
-    source.story_id !== storyId ||
+    !sameId(source.story_id, storyId) ||
     (typeof source.title !== 'string' && source.title !== null) ||
     typeof source.saved_at !== 'string' ||
     !Number.isFinite(Date.parse(source.saved_at)) ||
