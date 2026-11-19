@@ -18,6 +18,7 @@ export function TopTabs({ tabs, activeIndex, onChange }: TopTabsProps) {
   return (
     <ScrollView
       horizontal
+      style={styles.scroller}
       showsHorizontalScrollIndicator={false}
       contentContainerStyle={styles.content}
       accessibilityRole="tablist"
@@ -30,6 +31,7 @@ export function TopTabs({ tabs, activeIndex, onChange }: TopTabsProps) {
             key={tab}
             accessibilityRole="tab"
             accessibilityState={{ selected: active }}
+            aria-selected={active}
             onPress={() => onChange(index)}
             style={[styles.tab, { borderBottomColor: active ? c.accent : 'transparent' }]}
           >
@@ -48,6 +50,8 @@ export function TopTabs({ tabs, activeIndex, onChange }: TopTabsProps) {
 }
 
 const styles = StyleSheet.create({
+  // 본문과 남는 세로 공간을 나누지 않고 글자·터치 영역의 자연 높이만 사용한다.
+  scroller: { flexGrow: 0, flexShrink: 0 },
   content: { paddingHorizontal: Spacing.four, gap: Spacing.four },
   tab: {
     minHeight: MinTouchSize,

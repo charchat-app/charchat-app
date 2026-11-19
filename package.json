@@ -12,7 +12,9 @@
     "typecheck": "tsc --noEmit",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "test": "jest"
+    "test": "jest",
+    "fixture:stories": "node scripts/story-fixture-server.mjs",
+    "test:fixtures": "node --test scripts/story-fixture-server.test.mjs"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.107.2",
