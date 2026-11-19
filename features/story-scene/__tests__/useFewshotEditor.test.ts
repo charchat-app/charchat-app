@@ -277,3 +277,39 @@ it('최초 조회 중 받은 삭제 알림을 늦은 전체 조회 결과가 덮
   expect(result.current.snapshot?.characters).toEqual([]);
   expect(result.current.groups[0].messages.map((message) => message.clientKey)).toEqual(['mu', 'mn']);
 });
+
+it('퓨샷 조회보다 오래된 스토리 조회 결과로는 다른 기기에서 추가한 발화자의 말풍선을 지우지 않는다 (AC15)', async () => {
+  const harin = { id: '5', name: '하린', position: 0 };
+  const doyun = { id: '6', name: '도윤', position: 1 };
+  const cache = storyCache(null);
+  // 화면을 열기 전에 받아 둔 오래된 스토리 조회 결과(도윤 추가 전).
+  cache.client.setQueryData<EditorStory>(
+    detailKey('1'),
+    {
+      id: '1',
+      title: '가상 스토리',
+      subtitle: '',
+      world: '',
+      tags: [],
+      characters: [{ id: '5', name: '하린', detail: '' }],
+      saveState: '임시 저장',
+      updatedAt: '2026-11-17T00:00:00Z',
+      issues: [],
+    },
+    { updatedAt: Date.now() - 60_000 },
+  );
+  const message = { id: '20', clientKey: 'm', body: '도윤 대사', speakerKind: 'character' as const, characterId: '6' };
+  const loaded: FewshotsDocument = {
+    ...initial(),
+    characters: [harin, doyun],
+    fewshots: [{ ...newFewshotGroup(), id: '10', messages: [message] }],
+  };
+  const repo: jest.Mocked<FewshotRepository> = { load: jest.fn().mockResolvedValue(loaded), save: jest.fn() };
+  const { result } = await renderHook(() => useFewshotEditor(repo, '1'), { wrapper: cache.wrapper });
+  await waitFor(() => expect(result.current.loading).toBe(false));
+  expect(result.current.groups[0].messages).toHaveLength(1);
+  expect(result.current.dirty).toBe(false);
+  // 이후 기본 정보 저장으로 도윤이 실제로 삭제되면(더 새 조회 결과) 그때 말풍선을 지운다.
+  await act(() => cache.setCharacters([harin]));
+  expect(result.current.groups[0].messages).toHaveLength(0);
+});

@@ -117,9 +117,18 @@ function findClose(text: string, from: number, marker: '*' | '**'): number {
       j = inner >= 0 ? inner + 1 : j + 1;
       continue;
     }
-    if (text.startsWith(marker, j) && !isSpace(text[j - 1])) return j;
+    if (text.startsWith(marker, j) && !isSpace(text[j - 1])) {
+      // `**굵게 *기울임***`: 닫는 별표 세 개 중 첫 번째는 안쪽 기울임을 닫고 뒤의 두 개가 굵게를 닫는다.
+      if (marker === '**' && text[j + 2] === '*' && hasOpenItalic(text.slice(from, j))) return j + 1;
+      return j;
+    }
   }
   return -1;
+}
+
+/** 굵게 기호(`**`)를 뺀 단일 별표가 홀수 개면 닫히지 않은 기울임이 있다. */
+function hasOpenItalic(segment: string): boolean {
+  return (segment.replaceAll('**', '').match(/\*/g)?.length ?? 0) % 2 === 1;
 }
 
 /** `**굵게**`·`*기울임*`과 한 단계 겹침만 해석한다. 짝이 없는 기호는 원문 그대로 둔다. */
