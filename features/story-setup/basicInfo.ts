@@ -3,6 +3,8 @@ import { findSameTag, normalizeTagInput } from './tags';
 import type { BasicInfoDraft, BasicInfoValues, CharacterValues } from './types';
 
 export const MAX_CHARACTERS = 10;
+/** 제목·한 줄 소개·세계관과 모든 캐릭터 이름·상세의 합산 한도 (CREATE-US-01-AC09) */
+export const MAX_BASIC_TEXT_LENGTH = 3000;
 
 let keySeq = 0;
 /** 아직 저장하지 않은 캐릭터의 화면용 key */
@@ -58,4 +60,14 @@ export function updateCharacter(
   patch: Partial<Pick<CharacterValues, 'name' | 'detail'>>,
 ): BasicInfoValues {
   return { ...values, characters: values.characters.map((c) => (c.key === key ? { ...c, ...patch } : c)) };
+}
+
+/**
+ * AC09 합산 글자 수: 제목·한 줄 소개·세계관 + 모든 캐릭터 이름·상세.
+ * 공백·줄바꿈 포함, 코드 포인트 단위(이모지 1자, 서버 len()과 같음). 해시태그·퓨샷·인트로는 제외한다.
+ */
+export function basicTextLength(values: BasicInfoValues): number {
+  const parts = [values.title, values.subtitle, values.world];
+  for (const c of values.characters) parts.push(c.name, c.detail);
+  return parts.reduce((sum, part) => sum + Array.from(part).length, 0);
 }
