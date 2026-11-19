@@ -11,18 +11,22 @@ import { useUnsavedCreationGuard } from '../hooks/useUnsavedCreationGuard';
 import { Spacing } from '@/constants/theme';
 import {
   applyAllocatedIds,
+  sameAffinities,
   type CreationSaveDocument,
   type CreationSaveState,
   type ExpressionSettings as Expression,
   type FewshotsDocument,
+  type InitialAffinity,
+  type InitialRelation,
   type IntroItem,
 } from '@/shared/story-types';
-import { removeMissingSpeakers } from '../characterSync';
+import { removeMissingFromAffinities, removeMissingFromIntros, removeMissingFromRelations } from '../characterSync';
 import { useFewshotEditor } from '../hooks/useFewshotEditor';
 import { FewshotEditorView } from './FewshotScreen';
 import type { PendingInput } from './FewshotGroupEditor';
 import { ExpressionSettings } from './ExpressionSettings';
 import { IntroEditorView } from './IntroEditorView';
+import { InitialStateView } from './initial-state/InitialStateView';
 
 const idle: PendingInput = { active: false, lengthDelta: 0 };
 
@@ -41,6 +45,10 @@ export function CommonCreationWorkspace({
   const [introPending, setIntroPending] = useState<PendingInput>(idle);
   const [intros, setIntros] = useState<IntroItem[]>([]),
     [savedIntros, setSavedIntros] = useState<IntroItem[]>([]);
+  const [relations, setRelations] = useState<InitialRelation[]>([]),
+    [savedRelations, setSavedRelations] = useState<InitialRelation[]>([]);
+  const [affinities, setAffinities] = useState<InitialAffinity[]>([]),
+    [savedAffinities, setSavedAffinities] = useState<InitialAffinity[]>([]);
   const [confirmReload, setConfirmReload] = useState(false);
   const [loadCycle, setLoadCycle] = useState(0);
   const projection = useMemo<FewshotRepository>(
@@ -52,6 +60,10 @@ export function CommonCreationWorkspace({
           setSpeech(data.speech);
           setIntros(data.intros);
           setSavedIntros(data.intros);
+          setRelations(data.relations);
+          setSavedRelations(data.relations);
+          setAffinities(data.affinities);
+          setSavedAffinities(data.affinities);
           setTarget(data.saveState);
           setLoadCycle((cycle) => cycle + 1);
         }
@@ -66,21 +78,29 @@ export function CommonCreationWorkspace({
   const few = useFewshotEditor(projection, storyId);
   const characters = few.snapshot?.characters;
   useEffect(() => {
-    // 캐릭터 이름 변경은 이름표에만 반영되고, 삭제된 인물의 인트로 말풍선만 제거한다(CREATE-US-03-AC05·06).
-    // 저장본에도 같게 적용해 변경으로 보지 않는다.
+    // 캐릭터 이름 변경은 이름표에만 반영되고, 삭제된 인물의 인트로 말풍선·착장·속마음과
+    // 그 인물이 출발/도착인 관계·호감도만 제거한다. 저장본에도 같게 적용해 변경으로 보지 않는다.
     if (!characters) return;
-    setIntros((value) => removeMissingSpeakers(value, characters));
-    setSavedIntros((value) => removeMissingSpeakers(value, characters));
+    setIntros((value) => removeMissingFromIntros(value, characters));
+    setSavedIntros((value) => removeMissingFromIntros(value, characters));
+    setRelations((value) => removeMissingFromRelations(value, characters));
+    setSavedRelations((value) => removeMissingFromRelations(value, characters));
+    setAffinities((value) => removeMissingFromAffinities(value, characters));
+    setSavedAffinities((value) => removeMissingFromAffinities(value, characters));
   }, [characters]);
   const pendingInput: PendingInput = {
     active: fewPending.active || introPending.active,
     lengthDelta: 0,
   };
-  const document = few.snapshot && speech ? { ...few.snapshot, speech, fewshots: few.groups, intros } : null;
+  const document =
+    few.snapshot && speech ? { ...few.snapshot, speech, fewshots: few.groups, intros, relations, affinities } : null;
   const dirty =
     few.dirty ||
     (!!loaded && JSON.stringify(speech) !== JSON.stringify(loaded.speech)) ||
-    JSON.stringify(intros) !== JSON.stringify(savedIntros);
+    JSON.stringify(intros) !== JSON.stringify(savedIntros) ||
+    JSON.stringify(relations) !== JSON.stringify(savedRelations) ||
+    // 호감도는 값을 바꾸면 행이 끝으로 옮겨지므로 순서와 무관하게 비교한다.
+    !sameAffinities(affinities, savedAffinities);
   const common = useCommonSave(repository, {
     document,
     dirty,
@@ -97,6 +117,9 @@ export function CommonCreationWorkspace({
         // 저장 중 바뀐 인트로 입력·순서는 유지하고 새로 발급된 ID만 합친다.
         setSavedIntros(result.intros);
         setIntros((current) => applyAllocatedIds(current, result.intros));
+        // 관계는 ID 없이 전체 교체한다. 저장 중 바뀐 입력은 그대로 남아 변경으로 표시된다.
+        setSavedRelations(result.relations);
+        setSavedAffinities(result.affinities);
       };
     },
   });
@@ -107,7 +130,7 @@ export function CommonCreationWorkspace({
     <Surface style={styles.screen}>
       <ScreenHeader eyebrow="CHAR / CHAT" title="제작" />
       <TopTabs
-        tabs={['말투·서술', '대화 예시', '인트로', '저장·공개']}
+        tabs={['말투·서술', '대화 예시', '인트로', '초기 상태', '저장·공개']}
         activeIndex={tab}
         onChange={(index) => {
           if (index !== tab && few.snapshot?.saveState === 'draft') void common.save('draft', 'auto');
@@ -160,9 +183,24 @@ export function CommonCreationWorkspace({
           />
         ) : null}
       </View>
-      <ScrollView style={[styles.screen, tab !== 3 && styles.hidden]} contentContainerStyle={styles.content}>
+      <View style={[styles.screen, tab !== 3 && styles.hidden]}>
+        {few.snapshot && !few.loading ? (
+          <InitialStateView
+            key={loadCycle}
+            intros={intros}
+            setIntros={setIntros}
+            relations={relations}
+            setRelations={setRelations}
+            affinities={affinities}
+            setAffinities={setAffinities}
+            characters={few.snapshot.characters}
+            onAddIntro={() => setTab(2)}
+          />
+        ) : null}
+      </View>
+      <ScrollView style={[styles.screen, tab !== 4 && styles.hidden]} contentContainerStyle={styles.content}>
         <Text variant="heading">저장·공개</Text>
-        <Text>표현 설정·대화 예시·인트로를 함께 저장합니다.</Text>
+        <Text>표현 설정·대화 예시·인트로·초기 상태를 함께 저장합니다.</Text>
         <TopTabs
           tabs={['임시 저장', '비공개', '공개']}
           activeIndex={(['draft', 'private', 'public'] as const).indexOf(target)}

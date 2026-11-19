@@ -6,6 +6,7 @@ import {
   type CreationSaveMode,
 } from '@/shared/story-types';
 import { fewshotsPayload, readFewshotsSnapshot } from './fewshotRepository';
+import { affinitiesPayload, readAffinities, readRelations, relationsPayload } from './initialStateRepository';
 import { introsPayload, readIntros } from './introRepository';
 import { readServerSnapshot } from './serverRepository';
 
@@ -24,6 +25,8 @@ function parse(value: unknown, id: string, key?: string): CreationSaveDocument {
     ...few,
     speech: readServerSnapshot(value, id, key).speech,
     intros: readIntros((value as Record<string, unknown>).intros, few.characters),
+    relations: readRelations((value as Record<string, unknown>).relations, few.characters),
+    affinities: readAffinities((value as Record<string, unknown>).affinities, few.characters),
   };
 }
 export function createCommonSaveRepository(
@@ -52,6 +55,8 @@ export function createCommonSaveRepository(
               expression,
               ...fewshotsPayload(document.fewshots),
               ...introsPayload(document.intros),
+              ...relationsPayload(document.relations),
+              ...affinitiesPayload(document.affinities),
               save_state: state,
               mode,
             }),

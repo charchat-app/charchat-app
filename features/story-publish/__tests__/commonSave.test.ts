@@ -2,13 +2,42 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, renderHook as baseRenderHook } from '@testing-library/react-native';
 import { createElement, type ReactNode } from 'react';
 import { ApiError } from '@/lib/api-client';
-import { defaultExpression, type CreationSaveDocument } from '@/shared/story-types';
+import { defaultExpression, emptyScene, type CreationSaveDocument } from '@/shared/story-types';
 
 import { completionIssues, rejectionMessage, useCommonSave } from '../hooks/useCommonSave';
 import { storyKeys } from '../hooks/useStories';
 import type { CommonSaveRepository } from '../commonRepository';
 import { createCommonSaveRepository } from '../commonRepository';
 import { toExpressionRow } from '@/shared/story-types';
+
+// 서버 응답·요청의 빈 장면 형식. 빈 입력은 서버가 null(미지정)로 돌려준다.
+const serverScene = {
+  date_mode: null,
+  era: null,
+  year_input: null,
+  month_input: null,
+  day_input: null,
+  reference_event: null,
+  elapsed_day_input: null,
+  time_format: '24h',
+  hour_input: null,
+  minute_input: null,
+  meridiem: null,
+  place: null,
+  characters: [],
+};
+const requestScene = {
+  ...serverScene,
+  era: '',
+  year_input: '',
+  month_input: '',
+  day_input: '',
+  reference_event: '',
+  elapsed_day_input: '',
+  hour_input: '',
+  minute_input: '',
+  place: '',
+};
 
 const document = (): CreationSaveDocument => ({
   id: '1',
@@ -24,8 +53,11 @@ const document = (): CreationSaveDocument => ({
       clientKey: 'intro-30',
       title: '첫 만남',
       messages: [{ id: '31', clientKey: 'intro-message-31', speakerKind: 'narrator', characterId: null, body: '*비*' }],
+      scene: emptyScene(),
     },
   ],
+  relations: [],
+  affinities: [],
 });
 let queryClient = new QueryClient();
 beforeEach(() => {
@@ -76,8 +108,11 @@ it('표현·퓨샷을 같은 요청에 보내고 조회도 같은 공통 응답�
           messages: [
             { id: '31', client_key: 'intro-message-31', speaker_kind: 'narrator', character_id: null, body: '*비*' },
           ],
+          scene: serverScene,
         },
       ],
+      relations: [],
+      affinities: [],
       request_id: 'one',
     }),
   } as Response);
@@ -99,8 +134,11 @@ it('표현·퓨샷을 같은 요청에 보내고 조회도 같은 공통 응답�
           messages: [
             { id: '31', client_key: 'intro-message-31', speaker_kind: 'narrator', character_id: null, body: '*비*' },
           ],
+          scene: requestScene,
         },
       ],
+      relations: [],
+      affinities: [],
       save_state: 'private',
       mode: 'manual',
     });
@@ -220,6 +258,12 @@ it('매핑에 없는 거절 코드는 서버 detail을, 매핑된 코드는 앱 
 it('거절 안내 문구: detail이 비었으면 일반 문구를 쓴다', () => {
   expect(rejectionMessage(new ApiError(422, 'UNKNOWN', '  '))).toBe('저장이 거절되었습니다. 입력은 유지됩니다.');
   expect(rejectionMessage(new ApiError(422, 'UNKNOWN', '서버 안내'))).toBe('서버 안내');
+});
+
+it('INVALID_AFFINITY_PERSON 거절은 삭제된 캐릭터의 호감도 안내를 보여 준다', () => {
+  expect(rejectionMessage(new ApiError(422, 'INVALID_AFFINITY_PERSON', '서버 문구'))).toBe(
+    '삭제된 캐릭터의 호감도가 남아 있습니다. 다시 불러온 뒤 저장해 주세요.',
+  );
 });
 
 it('저장 응답 전에 화면을 떠나도 성공하면 스토리 캐시를 무효화한다', async () => {

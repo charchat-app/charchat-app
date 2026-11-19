@@ -1,6 +1,6 @@
 import { completionIssues, introLength } from '../hooks/useCommonSave';
 import { introsPayload, readIntros } from '../introRepository';
-import { defaultExpression, type CreationSaveDocument, type IntroItem } from '@/shared/story-types';
+import { defaultExpression, emptyScene, type CreationSaveDocument, type IntroItem } from '@/shared/story-types';
 
 const intro = (title: string, ...bodies: (string | null)[]): IntroItem => ({
   id: null,
@@ -13,6 +13,7 @@ const intro = (title: string, ...bodies: (string | null)[]): IntroItem => ({
     characterId: null,
     body,
   })),
+  scene: emptyScene(),
 });
 const doc = (intros: IntroItem[]): CreationSaveDocument => ({
   id: '1',
@@ -23,6 +24,8 @@ const doc = (intros: IntroItem[]): CreationSaveDocument => ({
   characters: [],
   fewshots: [],
   intros,
+  relations: [],
+  affinities: [],
 });
 
 it('인트로 완성 조건: 0개·빈 제목·제목 30자 초과·빈 본문·인트로별 2000자 초과를 각각 안내한다', () => {
@@ -48,6 +51,21 @@ it('경계값은 허용하고 여러 인트로 글자 수는 합산하지 않는
 });
 
 it('공통 응답의 인트로 순서·원문·발화자를 복원하고 요청에는 그대로 보낸다', () => {
+  const serverScene = {
+    date_mode: null,
+    era: null,
+    year_input: null,
+    month_input: null,
+    day_input: null,
+    reference_event: null,
+    elapsed_day_input: null,
+    time_format: '24h',
+    hour_input: null,
+    minute_input: null,
+    meridiem: null,
+    place: null,
+    characters: [],
+  };
   const characters = [{ id: '5', name: '하린', position: 0 }];
   const raw = [
     {
@@ -58,8 +76,9 @@ it('공통 응답의 인트로 순서·원문·발화자를 복원하고 요청�
         { id: '31', client_key: 'intro-message-31', speaker_kind: 'character', character_id: '5', body: ' {{user}} ' },
         { id: '32', client_key: 'intro-message-32', speaker_kind: 'user', character_id: null, body: '**강조**\n' },
       ],
+      scene: serverScene,
     },
-    { id: '33', client_key: 'intro-33', title: '둘째', messages: [] },
+    { id: '33', client_key: 'intro-33', title: '둘째', messages: [], scene: serverScene },
   ];
   const intros = readIntros(raw, characters);
   expect(intros.map((item) => item.title)).toEqual(['', '둘째']);
@@ -67,7 +86,9 @@ it('공통 응답의 인트로 순서·원문·발화자를 복원하고 요청�
     ['character', '5', ' {{user}} '],
     ['user', null, '**강조**\n'],
   ]);
-  expect(introsPayload(intros).intros[0]).toEqual({ ...raw[0], title: '' });
+  const { scene: _scene, ...sent } = introsPayload(intros).intros[0];
+  const { scene: _raw, ...original } = raw[0];
+  expect(sent).toEqual({ ...original, title: '' });
   expect(() => readIntros([raw[0], raw[0]], characters)).toThrow();
   expect(() => readIntros(raw, [])).toThrow('발화자 연결을 확인할 수 없습니다.');
   expect(() => readIntros(undefined, characters)).toThrow();

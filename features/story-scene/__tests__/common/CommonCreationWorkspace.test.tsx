@@ -1,7 +1,7 @@
 import { notifyManager, QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, fireEvent, render as baseRender, screen, waitFor } from '@testing-library/react-native';
 import type { ReactElement, ReactNode } from 'react';
-import { defaultExpression, type CreationSaveDocument, type FewshotCharacter } from '@/shared/story-types';
+import { defaultExpression, emptyScene, type CreationSaveDocument, type FewshotCharacter } from '@/shared/story-types';
 import type { CommonSaveRepository, EditorStory } from '@/features/story-publish';
 import { CommonCreationWorkspace } from '../../components/CommonCreationWorkspace';
 
@@ -59,8 +59,11 @@ function fixture(overlong = false) {
         messages: [
           { id: '31', clientKey: 'intro-message-31', speakerKind: 'narrator', characterId: null, body: '*비*' },
         ],
+        scene: emptyScene(),
       },
     ],
+    relations: [],
+    affinities: [],
   };
   const save = jest.fn(async (document: CreationSaveDocument, state: CreationSaveDocument['saveState']) => {
     data = {

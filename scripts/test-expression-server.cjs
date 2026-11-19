@@ -119,12 +119,24 @@ async function main() {
     (error) => error.status === 422 && error.code === 'INTRO_REQUIRED',
   );
   const characterId = draftSaved.characters[0].id;
-  // CREATE-US-03: 미완성·초과 제목도 임시 저장 원문으로 보존한다.
+  const { emptyScene } = require('../shared/story-types/initialState.ts');
+  // CREATE-US-04: 미완성 날짜·초과 장소·지운 호감도도 임시 저장 원문으로 보존한다.
+  const partialScene = {
+    ...emptyScene(),
+    dateMode: 'world',
+    era: '제국력',
+    year: '302',
+    timeFormat: '12h',
+    hour: '7',
+    meridiem: 'pm',
+    place: '가'.repeat(31),
+    characters: [{ characterId, clothing: '검은 코트\n', innerThought: '' }],
+  };
   const introDraft = {
     ...draftSaved,
     speech: fixedStyle,
     intros: [
-      { id: null, clientKey: 'live-intro-b', title: '😀'.repeat(31), messages: [] },
+      { id: null, clientKey: 'live-intro-b', title: '😀'.repeat(31), messages: [], scene: emptyScene() },
       {
         id: null,
         clientKey: 'live-intro-a',
@@ -133,8 +145,21 @@ async function main() {
           { id: null, clientKey: 'live-im-1', speakerKind: 'narrator', characterId: null, body: ' *비* \n' },
           { id: null, clientKey: 'live-im-2', speakerKind: 'character', characterId, body: '{{user}}?' },
         ],
+        scene: partialScene,
       },
     ],
+    relations: [
+      {
+        clientKey: 'live-rel-1',
+        sourceKind: 'character',
+        sourceCharacterId: characterId,
+        targetKind: 'user',
+        targetCharacterId: null,
+        label: '소꿉친구',
+      },
+    ],
+    // AC09: 호감도는 관계와 독립. 지운 값('')도 임시 저장한다.
+    affinities: [{ sourceCharacterId: characterId, targetKind: 'user', targetCharacterId: null, value: '' }],
   };
   const introSaved = await common.save(introDraft, 'draft', 'manual', 'live-intro-draft');
   const introLoaded = await common.load(id);
@@ -144,14 +169,31 @@ async function main() {
   );
   assert.equal(introLoaded.intros[0].title, '😀'.repeat(31));
   assert.equal(introLoaded.intros[1].messages[1].characterId, characterId);
+  assert.deepEqual(introLoaded.intros[1].scene, partialScene);
+  assert.deepEqual(introLoaded.intros[0].scene, emptyScene());
+  assert.deepEqual(
+    introLoaded.relations.map((r) => [r.sourceCharacterId, r.targetKind, r.label]),
+    [[characterId, 'user', '소꿉친구']],
+  );
+  assert.deepEqual(introLoaded.affinities, introDraft.affinities);
   await assert.rejects(
     () => common.save(introLoaded, 'private', 'manual', 'live-intro-title'),
     (error) => error.status === 422 && error.code === 'INTRO_TITLE_TOO_LONG',
   );
   const fixedIntro = { ...introLoaded.intros[1] };
-  // 제목 없는 첫 인트로를 삭제해 두 번째가 기본이 된 상태로 완성 저장한다.
+  await assert.rejects(
+    () => common.save({ ...introLoaded, intros: [fixedIntro] }, 'private', 'manual', 'live-scene-date'),
+    (error) => error.status === 422 && error.code === 'INITIAL_DATE_INVALID',
+  );
+  fixedIntro.scene = { ...fixedIntro.scene, month: '6', day: '1', minute: '05', place: '골목' };
+  await assert.rejects(
+    () => common.save({ ...introLoaded, intros: [fixedIntro] }, 'private', 'manual', 'live-affinity'),
+    (error) => error.status === 422 && error.code === 'AFFINITY_INVALID',
+  );
+  const fixedAffinities = [{ ...introLoaded.affinities[0], value: '-35' }];
+  // 두 번째를 첫 번째로 옮기고(기본 변경) 제목 없는 첫 인트로를 삭제해 완성 저장한다.
   const completed = await common.save(
-    { ...introLoaded, intros: [fixedIntro] },
+    { ...introLoaded, intros: [fixedIntro], affinities: fixedAffinities },
     'private',
     'manual',
     'live-common-private',
@@ -164,6 +206,9 @@ async function main() {
     [introLoaded.intros[1].id],
   );
   assert.equal(reloaded.intros[0].messages[0].body, ' *비* \n');
+  assert.deepEqual(reloaded.intros[0].scene, fixedIntro.scene);
+  assert.equal(reloaded.relations[0].label, '소꿉친구');
+  assert.deepEqual(reloaded.affinities, fixedAffinities);
   const published = await common.save(completed, 'public', 'manual', 'live-common-public');
   assert.equal(published.saveState, 'public');
   await assert.rejects(
@@ -182,6 +227,7 @@ async function main() {
       sharedDatabaseUsed: false,
       commonSaveAndCompletionValidation: true,
       introSaveRestoreAndValidation: true,
+      initialStateSaveRestoreAndValidation: true,
     }),
   );
 }
