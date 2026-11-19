@@ -60,7 +60,6 @@ export function CommonCreationWorkspace({
       save: async () => {
         throw new Error('7번 공통 저장을 사용해 주세요.');
       },
-      loadCharacters: repository.loadCharacters,
     }),
     [repository],
   );

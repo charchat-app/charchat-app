@@ -26,7 +26,6 @@ const document = (): CreationSaveDocument => ({
 const repo = (save: CommonSaveRepository['save']): CommonSaveRepository => ({
   load: jest.fn(),
   save,
-  loadCharacters: undefined,
 });
 it('원문 Unicode 분량을 계산하고 미선택 문체·빈 퓨샷은 허용한다', () => {
   expect(completionIssues(document())).toEqual([]);
