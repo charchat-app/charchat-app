@@ -1,4 +1,8 @@
-/** 로컬 개발 전용. 공식 API/공유 DB를 대체하거나 접속하지 않는다. */
+/**
+ * 로컬 개발 전용. 공식 API/공유 DB를 대체하거나 접속하지 않는다.
+ * 실행 환경: Node 24 이상(검증 v24.20.0). `.ts` 파일을 그대로 import하므로 TypeScript 타입 제거가 기본으로 켜진
+ * Node가 필요하다. 앱 빌드·CI(Node 22)와는 별개로 `npm run fixture:stories`, `npm run test:fixtures`에서만 쓴다.
+ */
 import { createServer } from 'node:http';
 import { createHash } from 'node:crypto';
 import { readFile, mkdir, writeFile, rename } from 'node:fs/promises';

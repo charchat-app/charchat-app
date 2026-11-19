@@ -1,5 +1,14 @@
-import { act, renderHook } from '@testing-library/react-native';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { act, renderHook as baseRenderHook } from '@testing-library/react-native';
+import { createElement, type ReactNode } from 'react';
+import { ApiError } from '@/lib/api-client';
 import { defaultExpression, emptyScene, type CreationSaveDocument } from '@/shared/story-types';
+
+import { completionIssues, rejectionMessage, useCommonSave } from '../hooks/useCommonSave';
+import { storyKeys } from '../hooks/useStories';
+import type { CommonSaveRepository } from '../commonRepository';
+import { createCommonSaveRepository } from '../commonRepository';
+import { toExpressionRow } from '@/shared/story-types';
 
 // 서버 응답·요청의 빈 장면 형식. 빈 입력은 서버가 null(미지정)로 돌려준다.
 const serverScene = {
@@ -29,10 +38,6 @@ const requestScene = {
   minute_input: '',
   place: '',
 };
-import { completionIssues, useCommonSave } from '../hooks/useCommonSave';
-import type { CommonSaveRepository } from '../commonRepository';
-import { createCommonSaveRepository } from '../commonRepository';
-import { toExpressionRow } from '@/shared/story-types';
 
 const document = (): CreationSaveDocument => ({
   id: '1',
@@ -54,10 +59,16 @@ const document = (): CreationSaveDocument => ({
   relations: [],
   affinities: [],
 });
+let queryClient = new QueryClient();
+beforeEach(() => {
+  queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
+});
+const wrapper = ({ children }: { children: ReactNode }) =>
+  createElement(QueryClientProvider, { client: queryClient }, children);
+const renderHook: typeof baseRenderHook = (callback, options) => baseRenderHook(callback, { wrapper, ...options });
 const repo = (save: CommonSaveRepository['save']): CommonSaveRepository => ({
   load: jest.fn(),
   save,
-  loadCharacters: undefined,
 });
 it('원문 Unicode 분량을 계산하고 미선택 문체·빈 퓨샷은 허용한다', () => {
   expect(completionIssues(document())).toEqual([]);
@@ -202,4 +213,49 @@ it('성패 불명확 재시도는 처음 표현·퓨샷·상태·키를 고정�
   await act(() => result.current.save('public'));
   expect(save.mock.calls[1]).toEqual(first);
   expect(commit).toHaveBeenCalledWith(doc, doc);
+});
+
+it('공통 저장이 성공하면 스토리 목록·상세 캐시를 무효화하고, 실패하면 그대로 둔다', async () => {
+  const doc = document();
+  const save = jest
+    .fn()
+    .mockRejectedValueOnce(new ApiError(409, 'SAVE_STATE_TRANSITION', '되돌릴 수 없습니다.'))
+    .mockResolvedValueOnce({ ...doc, saveState: 'public' });
+  queryClient.setQueryData(storyKeys.list(), [{ id: '1', title: '가상', saveState: '임시 저장', updatedAt: '' }]);
+  queryClient.setQueryData(storyKeys.detail('1'), { id: '1', saveState: '임시 저장' });
+  queryClient.setQueryData(['other'], 1);
+  const options = { document: doc, dirty: true, loading: false, pendingInput: false, captureCommit: () => jest.fn() };
+  const { result } = await renderHook(() => useCommonSave(repo(save), options));
+  const invalidated = (key: readonly unknown[]) => queryClient.getQueryState(key)?.isInvalidated;
+  await act(() => result.current.save('public'));
+  expect(invalidated(storyKeys.list())).toBe(false);
+  expect(invalidated(storyKeys.detail('1'))).toBe(false);
+  await act(() => result.current.save('public'));
+  expect(save).toHaveBeenCalledTimes(2);
+  expect(invalidated(storyKeys.list())).toBe(true);
+  expect(invalidated(storyKeys.detail('1'))).toBe(true);
+  expect(invalidated(['other'])).toBe(false);
+});
+
+it('매핑에 없는 거절 코드는 서버 detail을, 매핑된 코드는 앱 문구를 보여 준다', async () => {
+  const doc = document();
+  const save = jest
+    .fn()
+    .mockRejectedValueOnce(new ApiError(422, 'INVALID_SPEAKER', '같은 스토리의 인물을 선택해 주세요.'))
+    .mockRejectedValueOnce(new ApiError(422, 'MESSAGE_INTRO_CHANGED', '서버 문구'))
+    .mockRejectedValueOnce(new ApiError(409, 'HTTP_ERROR', '요청 실패: 409'));
+  const options = { document: doc, dirty: true, loading: false, pendingInput: false, captureCommit: () => jest.fn() };
+  const { result } = await renderHook(() => useCommonSave(repo(save), options));
+  await act(() => result.current.save('draft'));
+  expect(result.current.error).toBe('같은 스토리의 인물을 선택해 주세요.');
+  expect(result.current.pendingSave).toBe(false);
+  await act(() => result.current.save('draft'));
+  expect(result.current.error).toBe('말풍선은 다른 인트로로 옮길 수 없습니다.');
+  await act(() => result.current.save('draft'));
+  expect(result.current.error).toBe('저장이 거절되었습니다. 입력은 유지됩니다.');
+});
+
+it('거절 안내 문구: detail이 비었으면 일반 문구를 쓴다', () => {
+  expect(rejectionMessage(new ApiError(422, 'UNKNOWN', '  '))).toBe('저장이 거절되었습니다. 입력은 유지됩니다.');
+  expect(rejectionMessage(new ApiError(422, 'UNKNOWN', '서버 안내'))).toBe('서버 안내');
 });

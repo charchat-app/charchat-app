@@ -4,7 +4,6 @@ import type { FewshotCharacter, FewshotGroup, FewshotsDocument, FewshotMessage }
 export interface FewshotRepository {
   load(id: string, signal?: AbortSignal): Promise<FewshotsDocument>;
   save(document: FewshotsDocument, requestId: string): Promise<FewshotsDocument>;
-  loadCharacters?(id: string, signal?: AbortSignal): Promise<FewshotCharacter[]>;
 }
 function object(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value))
@@ -125,17 +124,6 @@ export function createServerFewshotRepository(
 ): FewshotRepository {
   const path = (storyId: string) => `/creation/stories/${id(storyId)}/fewshots`;
   return {
-    async loadCharacters(storyId, signal) {
-      const source = object(
-        await apiRequest<unknown>(
-          `/creation/stories/${id(storyId)}/fewshot-characters`,
-          { signal, headers: await authorization() },
-          baseUrl,
-        ),
-      );
-      if (source.story_id !== storyId) throw new Error('다른 스토리의 발화자 응답입니다.');
-      return parseCharacters(source.characters);
-    },
     async load(storyId, signal) {
       return readFewshotsSnapshot(
         await apiRequest<unknown>(path(storyId), { signal, headers: await authorization() }, baseUrl),

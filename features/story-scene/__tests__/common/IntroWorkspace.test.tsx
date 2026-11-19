@@ -1,12 +1,38 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
-import { defaultExpression, emptyScene, type CreationSaveDocument } from '@/shared/story-types';
-import type { CommonSaveRepository } from '@/features/story-publish';
-import { publishStoryCharacters } from '@/features/story-setup';
+import { notifyManager, QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { act, fireEvent, render as baseRender, screen, waitFor } from '@testing-library/react-native';
+import type { ReactElement, ReactNode } from 'react';
+import { defaultExpression, emptyScene, type CreationSaveDocument, type FewshotCharacter } from '@/shared/story-types';
+import type { CommonSaveRepository, EditorStory } from '@/features/story-publish';
 import { CommonCreationWorkspace } from '../../components/CommonCreationWorkspace';
 
 jest.mock('react-native-safe-area-context', () => require('react-native-safe-area-context/jest/mock').default);
 jest.mock('expo-router', () => ({ usePreventRemove: jest.fn() }));
 
+// 스토리 조회 캐시(story-publish의 storyKeys.detail(id)와 같은 키). 기본 정보 저장이 성공하면 이 캐시가 갱신된다.
+// 캐시 변경 알림을 다음 틱으로 미루지 않아 act 안에서 바로 화면에 반영되게 한다.
+notifyManager.setScheduler((callback) => callback());
+const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
+function setStoryCharacters(people: FewshotCharacter[]) {
+  client.setQueryData<EditorStory>(['stories', 'detail', '1'], {
+    id: '1',
+    title: '가상',
+    subtitle: '',
+    world: '',
+    tags: [],
+    characters: people.map((person) => ({ id: person.id, name: person.name ?? '', detail: '' })),
+    saveState: '임시 저장',
+    updatedAt: '2026-11-17T00:00:00Z',
+    issues: [],
+  });
+}
+const wrapper = ({ children }: { children: ReactNode }) => (
+  <QueryClientProvider client={client}>{children}</QueryClientProvider>
+);
+const render = (element: ReactElement) => baseRender(element, { wrapper });
+beforeEach(() => {
+  client.clear();
+  setStoryCharacters([{ id: '5', name: '하린', position: 0 }]);
+});
 function fixture(initial: Partial<CreationSaveDocument> = {}) {
   let data: CreationSaveDocument = {
     id: '1',
@@ -37,7 +63,6 @@ function fixture(initial: Partial<CreationSaveDocument> = {}) {
   const repository: CommonSaveRepository = {
     load: jest.fn(async () => structuredClone(data)),
     save,
-    loadCharacters: undefined,
   };
   return { repository, save, stored: () => data };
 }
@@ -155,11 +180,11 @@ it('캐릭터 삭제 시 그 인물의 인트로 말풍선만 제거하고 이�
   await waitFor(() => expect(screen.getByRole('tab', { name: '인트로' })).toBeTruthy());
   await fireEvent.press(screen.getByRole('tab', { name: '인트로' }));
   await fireEvent.press(screen.getByRole('button', { name: '인트로 1 본문 편집' }));
-  await act(() => publishStoryCharacters('1', [{ id: '5', name: '새 이름', position: 0 }]));
+  await act(() => setStoryCharacters([{ id: '5', name: '새 이름', position: 0 }]));
   expect(screen.getAllByText('새 이름').length).toBeGreaterThan(0);
   expect(screen.queryByText('하린')).toBeNull();
   expect(screen.getByText('하린 대사')).toBeTruthy();
-  await act(() => publishStoryCharacters('1', []));
+  await act(() => setStoryCharacters([]));
   await waitFor(() => expect(screen.queryByText('하린 대사')).toBeNull());
   expect(screen.getByText('하린이 웃는다.')).toBeTruthy();
   expect(screen.getByText('유저 대사')).toBeTruthy();

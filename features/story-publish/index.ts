@@ -2,6 +2,8 @@
 export { StoryEditorScreen } from './components/StoryEditorScreen';
 export { StoryListScreen } from './components/StoryListScreen';
 export type { EditorStory, StorySummary } from './types';
+// 스토리 조회 캐시(storyKeys.detail). 2~4번 화면은 이 캐시를 구독해 캐릭터 변경을 반영한다.
+export { useStory } from './hooks/useStories';
 
 // 생성 2~4번(표현·퓨샷·인트로·초기 상태) 저장
 export { createFixtureRepository } from './fixtureRepository';

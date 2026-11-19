@@ -5,12 +5,17 @@
  * 인증: 계정 설계 전까지 서버의 임시 인증에 맞춰 개발용 `X-User-Id` 헤더를 붙인다.
  * 값은 EXPO_PUBLIC_DEV_USER_ID에서 읽는다. 로그인이 생기면 authHeaders()만 토큰으로 바꾼다.
  *
- * 요청 취소(signal)와 15초 시간 제한을 지원한다. 실패해도 자동으로 다시 호출하지 않는다.
+ * 요청 취소(signal)와 시간 제한을 지원한다. 시간 제한은 기본 15초이고, 이미지 업로드처럼 오래 걸리는 호출은
+ * `timeoutMs`로 호출별로 바꾼다. 실패해도 자동으로 다시 호출하지 않는다.
  */
 
 const BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? '';
 const DEV_USER_ID = process.env.EXPO_PUBLIC_DEV_USER_ID ?? '';
-const TIMEOUT_MS = 15000;
+/** 호출 측이 `timeoutMs`를 넘기지 않을 때의 시간 제한 */
+export const DEFAULT_TIMEOUT_MS = 15000;
+
+/** fetch 옵션에 호출별 시간 제한(ms)을 더한 요청 옵션. 양의 유한한 값만 쓰고, 그 밖의 값은 기본값을 쓴다. */
+export type ApiRequestInit = RequestInit & { timeoutMs?: number };
 
 /** 서버가 필드 단위로 알려 주는 입력 문제. 예: { field: 'title', code: 'REQUIRED' } */
 export type FieldIssue = {
@@ -83,16 +88,20 @@ async function toApiError(response: Response): Promise<ApiError> {
 }
 
 /** `baseUrl`은 저장소별로 다른 주소를 쓸 때만 넘긴다. 기본은 EXPO_PUBLIC_API_URL. */
-export async function apiRequest<T>(path: string, init: RequestInit = {}, baseUrl = BASE_URL): Promise<T> {
+export async function apiRequest<T>(path: string, options: ApiRequestInit = {}, baseUrl = BASE_URL): Promise<T> {
   if (!baseUrl) {
     throw new ApiError(0, 'API_URL_MISSING', 'EXPO_PUBLIC_API_URL이 설정되지 않았습니다.');
   }
+
+  const { timeoutMs, ...init } = options;
+  const limit =
+    typeof timeoutMs === 'number' && Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : DEFAULT_TIMEOUT_MS;
 
   const controller = new AbortController();
   const abort = () => controller.abort();
   if (init.signal?.aborted) controller.abort();
   init.signal?.addEventListener('abort', abort, { once: true });
-  const timer = setTimeout(abort, TIMEOUT_MS);
+  const timer = setTimeout(abort, limit);
   try {
     let response: Response;
     try {

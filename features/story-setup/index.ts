@@ -3,5 +3,3 @@
 export { fromDraft, toDraftPatch } from './basicInfo';
 export { BasicInfoForm } from './components/BasicInfoForm';
 export type { BasicInfoDraft, BasicInfoValues, CharacterDraft } from './types';
-// 캐릭터 이름 변경·삭제를 생성 2~4번 화면(story-scene)에 알린다.
-export { publishStoryCharacters, subscribeStoryCharacters } from './characterUpdates';

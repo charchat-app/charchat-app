@@ -43,23 +43,17 @@ it('같은 스토리에 없는 발화자나 잘못된 응답을 복원 성공으
   await expect(createServerFewshotRepository('http://localhost:8000/api/v1').load('1')).rejects.toThrow('발화자 연결');
 });
 
-it('본문 없이 읽기 전용 캐릭터 투영을 조회하고 다른 스토리·중복 ID·잘못된 목록을 거절한다', async () => {
+it('발화자 목록의 중복 ID·잘못된 목록을 거절한다', async () => {
   const mock = jest.spyOn(globalThis, 'fetch');
-  const reply = (story_id: string, characters: unknown) =>
-    ({ ok: true, json: async () => ({ story_id, characters }) }) as Response;
-  mock.mockResolvedValueOnce(reply('1', [{ id: '5', name: '바뀐 이름', position: 0 }]));
+  const reply = (characters: unknown) => ({ ok: true, json: async () => ({ ...response(), characters }) }) as Response;
   const repo = createServerFewshotRepository('http://localhost:8000/api/v1');
-  expect(await repo.loadCharacters?.('1')).toEqual([{ id: '5', name: '바뀐 이름', position: 0 }]);
-  expect(mock.mock.calls[0][0]).toBe('http://localhost:8000/api/v1/creation/stories/1/fewshot-characters');
-  mock.mockResolvedValueOnce(reply('2', []));
-  await expect(repo.loadCharacters?.('1')).rejects.toThrow('다른 스토리');
-  mock.mockResolvedValueOnce(reply('1', null));
-  await expect(repo.loadCharacters?.('1')).rejects.toThrow('발화자 응답');
+  mock.mockResolvedValueOnce(reply(null));
+  await expect(repo.load('1')).rejects.toThrow('퓨샷 저장 응답');
   mock.mockResolvedValueOnce(
-    reply('1', [
+    reply([
       { id: '5', name: '이름', position: 0 },
       { id: '5', name: '중복', position: 1 },
     ]),
   );
-  await expect(repo.loadCharacters?.('1')).rejects.toThrow('발화자 응답');
+  await expect(repo.load('1')).rejects.toThrow('발화자 응답');
 });

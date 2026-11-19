@@ -1,7 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AppState } from 'react-native';
 import type { FewshotRepository } from '@/features/story-publish';
-import { subscribeStoryCharacters } from '@/features/story-setup';
 import { ApiError } from '@/lib/api-client';
 import {
   applyAllocatedIds,
@@ -12,6 +10,13 @@ import {
 } from '@/shared/story-types';
 import { removeMissingSpeakers } from '../characterSync';
 import { countRawText } from '@/lib/rawText';
+import { useStoryCharacters } from './useStoryCharacters';
+
+/** 발화자 목록이 같은지 본다. position은 서버 순서 번호라 비교하지 않고 id·이름·순서만 본다. */
+const sameRoster = (a: readonly FewshotCharacter[] | null, b: readonly FewshotCharacter[]) =>
+  !!a &&
+  a.length === b.length &&
+  a.every((person, index) => person.id === b[index].id && person.name === b[index].name);
 
 export function useFewshotEditor(repository: FewshotRepository, storyId: string) {
   const [snapshot, setSnapshot] = useState<FewshotsDocument | null>(null);
@@ -21,7 +26,6 @@ export function useFewshotEditor(repository: FewshotRepository, storyId: string)
   const [error, setError] = useState<string | null>(null);
   const [pendingSave, setPendingSave] = useState(false);
   const [characterNotice, setCharacterNotice] = useState<string | null>(null);
-  const [characterSyncError, setCharacterSyncError] = useState<string | null>(null);
   const people = useRef<FewshotCharacter[] | null>(null);
   const characterEpoch = useRef(0);
   const alive = useRef(false),
@@ -30,7 +34,7 @@ export function useFewshotEditor(repository: FewshotRepository, storyId: string)
   const abort = useRef<AbortController | null>(null);
   const pending = useRef<{ document: FewshotsDocument; key: string; characterEpoch: number } | null>(null);
   const applyPeople = useCallback((next: FewshotCharacter[]) => {
-    if (!alive.current || JSON.stringify(people.current) === JSON.stringify(next)) return;
+    if (!alive.current || sameRoster(people.current, next)) return;
     if (people.current !== null)
       setCharacterNotice('캐릭터 변경을 반영했습니다. 삭제된 발화자의 말풍선만 제거했습니다.');
     people.current = next;
@@ -77,7 +81,6 @@ export function useFewshotEditor(repository: FewshotRepository, storyId: string)
     people.current = null;
     ++characterEpoch.current;
     setCharacterNotice(null);
-    setCharacterSyncError(null);
     setSnapshot(null);
     setGroups([]);
     setSaving(false);
@@ -89,44 +92,11 @@ export function useFewshotEditor(repository: FewshotRepository, storyId: string)
       abort.current?.abort();
     };
   }, [reload]);
+  // 캐릭터 추가·삭제·이름 변경은 스토리 조회 캐시 구독으로 반영한다(폴링 없음).
+  const storyCharacters = useStoryCharacters(storyId);
   useEffect(() => {
-    let stopped = false;
-    let running = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    let request: AbortController | null = null;
-    const refresh = async () => {
-      if (stopped || running || !repository.loadCharacters) return;
-      if (timer !== undefined) clearTimeout(timer);
-      if (AppState.currentState === 'background' || AppState.currentState === 'inactive') return;
-      running = true;
-      request = new AbortController();
-      const epoch = characterEpoch.current;
-      try {
-        const next = await repository.loadCharacters(storyId, request.signal);
-        if (!stopped && epoch === characterEpoch.current) {
-          applyPeople(next);
-          setCharacterSyncError(null);
-        }
-      } catch {
-        if (!stopped) setCharacterSyncError('캐릭터 변경을 확인하지 못했습니다. 기존 입력을 유지하며 다시 확인합니다.');
-      } finally {
-        running = false;
-        if (!stopped) timer = setTimeout(() => void refresh(), 2000);
-      }
-    };
-    const unsubscribe = subscribeStoryCharacters(storyId, applyPeople);
-    const appState = AppState.addEventListener('change', (state) => {
-      if (state === 'active') void refresh();
-    });
-    void refresh();
-    return () => {
-      stopped = true;
-      if (timer !== undefined) clearTimeout(timer);
-      request?.abort();
-      unsubscribe();
-      appState.remove();
-    };
-  }, [repository, storyId, applyPeople]);
+    if (storyCharacters.characters) applyPeople(storyCharacters.characters);
+  }, [storyCharacters.characters, applyPeople]);
   const acceptSaved = (result: FewshotsDocument, epoch: number, current: number) => {
     if (!alive.current || current !== generation.current) return;
     if (epoch === characterEpoch.current || people.current === null) {
@@ -192,7 +162,9 @@ export function useFewshotEditor(repository: FewshotRepository, storyId: string)
       return (result: FewshotsDocument) => acceptSaved(result, epoch, current);
     },
     characterNotice,
-    characterSyncError,
+    characterSyncError: storyCharacters.failed
+      ? '캐릭터 변경을 확인하지 못했습니다. 기존 입력과 발화자 목록을 유지합니다.'
+      : null,
     reload,
     save,
     dirty: !!snapshot && JSON.stringify(groups) !== JSON.stringify(snapshot.fewshots),

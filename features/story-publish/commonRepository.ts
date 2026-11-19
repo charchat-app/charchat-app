@@ -5,7 +5,7 @@ import {
   type CreationSaveState,
   type CreationSaveMode,
 } from '@/shared/story-types';
-import { createServerFewshotRepository, fewshotsPayload, readFewshotsSnapshot } from './fewshotRepository';
+import { fewshotsPayload, readFewshotsSnapshot } from './fewshotRepository';
 import { affinitiesPayload, readAffinities, readRelations, relationsPayload } from './initialStateRepository';
 import { introsPayload, readIntros } from './introRepository';
 import { readServerSnapshot } from './serverRepository';
@@ -18,7 +18,6 @@ export interface CommonSaveRepository {
     mode: CreationSaveMode,
     requestId: string,
   ): Promise<CreationSaveDocument>;
-  loadCharacters: ReturnType<typeof createServerFewshotRepository>['loadCharacters'];
 }
 function parse(value: unknown, id: string, key?: string): CreationSaveDocument {
   const few = readFewshotsSnapshot(value, id, key);
@@ -39,7 +38,6 @@ export function createCommonSaveRepository(
     return `/creation/stories/${id}/creation`;
   };
   return {
-    loadCharacters: createServerFewshotRepository(baseUrl, authorization).loadCharacters,
     async load(id, signal) {
       return parse(await apiRequest(path(id), { signal, headers: await authorization() }, baseUrl), id);
     },

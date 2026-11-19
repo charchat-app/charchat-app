@@ -62,6 +62,55 @@ describe('apiRequest', () => {
     await expect(apiRequest('/x')).rejects.toMatchObject({ status: 0, code: 'NETWORK_ERROR' });
   });
 
+  describe('시간 제한', () => {
+    /** 응답하지 않다가 요청이 취소되면 fetch처럼 실패하는 서버 */
+    function hangingFetch() {
+      const fn = jest.fn(
+        (_url: string, init: RequestInit) =>
+          new Promise<Response>((_resolve, reject) => {
+            init.signal?.addEventListener('abort', () => reject(new Error('aborted')));
+          }),
+      );
+      globalThis.fetch = fn as unknown as typeof fetch;
+      return fn;
+    }
+
+    beforeEach(() => jest.useFakeTimers());
+    afterEach(() => jest.useRealTimers());
+
+    it('기본 15초가 지나면 요청을 취소한다', async () => {
+      const { apiRequest } = load(env);
+      hangingFetch();
+      const result = apiRequest('/x').catch((e: unknown) => e);
+      await jest.advanceTimersByTimeAsync(14999);
+      let settled = false;
+      void result.then(() => (settled = true));
+      await Promise.resolve();
+      expect(settled).toBe(false);
+      await jest.advanceTimersByTimeAsync(1);
+      await expect(result).resolves.toMatchObject({ code: 'NETWORK_ERROR' });
+    });
+
+    it('호출별 timeoutMs로 제한 시간을 늘리거나 줄인다', async () => {
+      const { apiRequest } = load(env);
+      const fetchMock = hangingFetch();
+      const long = apiRequest('/upload', { method: 'POST', timeoutMs: 60000 }).catch((e: unknown) => e);
+      const short = apiRequest('/x', { timeoutMs: 1000 }).catch((e: unknown) => e);
+      let longSettled = false;
+      void long.then(() => (longSettled = true));
+      await jest.advanceTimersByTimeAsync(1000);
+      await expect(short).resolves.toMatchObject({ code: 'NETWORK_ERROR' });
+      await jest.advanceTimersByTimeAsync(15000);
+      expect(longSettled).toBe(false);
+      await jest.advanceTimersByTimeAsync(44000);
+      await expect(long).resolves.toMatchObject({ code: 'NETWORK_ERROR' });
+      // timeoutMs는 fetch 옵션으로 넘기지 않는다.
+      const init = fetchMock.mock.calls[0][1];
+      expect(init).not.toHaveProperty('timeoutMs');
+      expect(init.method).toBe('POST');
+    });
+  });
+
   it('주소가 없으면 호출하지 않는다', async () => {
     const { apiRequest } = load({ EXPO_PUBLIC_API_URL: '' });
     const fetchMock = mockFetch({ ok: true, status: 200 });
