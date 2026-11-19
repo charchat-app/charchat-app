@@ -67,6 +67,18 @@ const sameAffinityDirection = (a: Omit<InitialAffinity, 'value'>, b: Omit<Initia
 export function affinityValue(affinities: InitialAffinity[], direction: Omit<InitialAffinity, 'value'>): string {
   return affinities.find((a) => sameAffinityDirection(a, direction))?.value ?? AFFINITY_DEFAULT;
 }
+/**
+ * 두 호감도 목록이 같은 시작값인지 본다. 행 순서는 의미가 없고(setAffinity가 바꾼 값을 끝에 붙인다),
+ * 기본값 0인 행은 미입력 조합과 같으므로 빼고 방향 기준으로 정렬해 비교한다.
+ */
+export function sameAffinities(a: InitialAffinity[], b: InitialAffinity[]): boolean {
+  const normalize = (list: InitialAffinity[]) =>
+    list
+      .filter((item) => item.value !== AFFINITY_DEFAULT)
+      .map((item) => `${item.sourceCharacterId}|${item.targetKind}|${item.targetCharacterId ?? ''}|${item.value}`)
+      .sort();
+  return JSON.stringify(normalize(a)) === JSON.stringify(normalize(b));
+}
 /** 한 방향의 값을 바꾼다. 기본값 0으로 되돌리면 행을 지워 미입력 조합과 같게 둔다. 다른 방향은 건드리지 않는다. */
 export function setAffinity(affinities: InitialAffinity[], next: InitialAffinity): InitialAffinity[] {
   const rest = affinities.filter((a) => !sameAffinityDirection(a, next));
@@ -166,10 +178,18 @@ export function formatSceneDate(s: IntroScene): string | null {
   const ymd = `${s.year}년 ${s.month}월 ${s.day}일`;
   return s.dateMode === 'world' ? `${s.era} ${ymd}` : ymd;
 }
+/**
+ * 시각 표시. 오전·오후(12시간제)와 시·분을 모두 입력한 경우에만 `7:05`처럼 시계 형식으로 보여 준다.
+ * 하나라도 비었으면 빈 칸을 0 등으로 채우지 않고 입력한 칸만 원문 그대로 보여 주며 미완성임을 표시한다(AC03·AC18).
+ */
 export function formatSceneTime(s: IntroScene): string | null {
   if (!hasTimeInput(s)) return null;
-  const clock = `${s.hour}:${s.minute.padStart(2, '0')}`;
-  return s.timeFormat === '12h'
-    ? `${s.meridiem === 'pm' ? '오후' : s.meridiem === 'am' ? '오전' : ''} ${clock}`.trim()
-    : clock;
+  const meridiem = s.meridiem === 'pm' ? '오후' : s.meridiem === 'am' ? '오전' : '';
+  const complete = s.hour !== '' && s.minute !== '' && (s.timeFormat === '24h' || s.meridiem !== null);
+  if (complete) {
+    const clock = `${s.hour}:${s.minute.padStart(2, '0')}`;
+    return s.timeFormat === '12h' ? `${meridiem} ${clock}` : clock;
+  }
+  const parts = [s.timeFormat === '12h' ? meridiem : '', s.hour && `${s.hour}시`, s.minute && `${s.minute}분`];
+  return `${parts.filter(Boolean).join(' ')} (미완성)`;
 }

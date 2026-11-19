@@ -11,6 +11,7 @@ import { useUnsavedCreationGuard } from '../hooks/useUnsavedCreationGuard';
 import { Spacing } from '@/constants/theme';
 import {
   applyAllocatedIds,
+  sameAffinities,
   type CreationSaveDocument,
   type CreationSaveState,
   type ExpressionSettings as Expression,
@@ -98,7 +99,8 @@ export function CommonCreationWorkspace({
     (!!loaded && JSON.stringify(speech) !== JSON.stringify(loaded.speech)) ||
     JSON.stringify(intros) !== JSON.stringify(savedIntros) ||
     JSON.stringify(relations) !== JSON.stringify(savedRelations) ||
-    JSON.stringify(affinities) !== JSON.stringify(savedAffinities);
+    // 호감도는 값을 바꾸면 행이 끝으로 옮겨지므로 순서와 무관하게 비교한다.
+    !sameAffinities(affinities, savedAffinities);
   const common = useCommonSave(repository, {
     document,
     dirty,

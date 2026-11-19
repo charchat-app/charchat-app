@@ -10,6 +10,7 @@ import {
 import {
   affinityValue,
   dateIssue,
+  sameAffinities,
   setAffinity,
   emptyScene,
   formatSceneDate,
@@ -69,6 +70,31 @@ it('시간: 24시간제 0~23, 12시간제 1~12와 오전·오후 필수, 분 0~5
   expect(timeIssue(scene({ timeFormat: '12h', hour: '0', minute: '30', meridiem: 'am' }))).toMatch('1~12');
   expect(timeIssue(scene({ hour: '7', minute: '60' }))).toMatch('0~59');
   expect(formatSceneTime(scene({ timeFormat: '12h', hour: '7', minute: '5', meridiem: 'pm' }))).toBe('오후 7:05');
+});
+
+it('CREATE-US-04-AC03·AC18: 미완성 시각은 빈 칸을 채우지 않고 입력한 원문만 미완성으로 표시한다', () => {
+  expect(formatSceneTime(scene({}))).toBeNull();
+  expect(formatSceneTime(scene({ hour: '7' }))).toBe('7시 (미완성)');
+  expect(formatSceneTime(scene({ minute: '05' }))).toBe('05분 (미완성)');
+  expect(formatSceneTime(scene({ timeFormat: '12h', hour: '7', minute: '30' }))).toBe('7시 30분 (미완성)');
+  expect(formatSceneTime(scene({ timeFormat: '12h', meridiem: 'am' }))).toBe('오전 (미완성)');
+  expect(formatSceneTime(scene({ timeFormat: '12h', hour: '7', meridiem: 'pm' }))).toBe('오후 7시 (미완성)');
+  // 모두 입력하면 시계 형식으로 보여 준다.
+  expect(formatSceneTime(scene({ hour: '7', minute: '0' }))).toBe('7:00');
+  expect(formatSceneTime(scene({ hour: '7' }))).not.toBe('7:00');
+});
+
+it('호감도 변경 여부는 행 순서와 무관하고, 기본값 0인 행은 미입력과 같게 본다', () => {
+  const a = { sourceCharacterId: '5', targetKind: 'user' as const, targetCharacterId: null, value: '10' };
+  const b = { sourceCharacterId: '6', targetKind: 'character' as const, targetCharacterId: '5', value: '20' };
+  const saved = [a, b];
+  // 바꿨다가 원래 값으로 되돌리면 setAffinity가 행을 끝으로 옮기지만 변경으로 보지 않는다.
+  const reverted = setAffinity(setAffinity(saved, { ...a, value: '30' }), { ...a, value: '10' });
+  expect(reverted).toEqual([b, a]);
+  expect(sameAffinities(reverted, saved)).toBe(true);
+  expect(sameAffinities([...saved, { ...a, sourceCharacterId: '7', value: '0' }], saved)).toBe(true);
+  expect(sameAffinities(setAffinity(saved, { ...a, value: '11' }), saved)).toBe(false);
+  expect(sameAffinities(setAffinity(saved, { ...b, value: '0' }), saved)).toBe(false);
 });
 
 it('방식·시간제 전환은 해당 입력만 지우고 다른 설정은 유지한다', () => {
