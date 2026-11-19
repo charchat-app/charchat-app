@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react';
 
 import { Colors } from '@/constants/theme';
 
-void SplashScreen.preventAutoHideAsync().catch(() => undefined);
+SplashScreen.preventAutoHideAsync();
 
 /**
  * 네비게이션 테마는 라이트로 고정한다. 디자인 시스템에 다크 모드가 아직 없고(constants/theme.ts),
@@ -28,9 +28,10 @@ export default function RootLayout() {
   // 서버 상태 캐시. 저장(mutation)은 실패해도 자동 재시도하지 않고 사용자가 다시 누른다.
   const [queryClient] = useState(() => new QueryClient({ defaultOptions: { mutations: { retry: false } } }));
 
-  // preventAutoHideAsync만 두면 시작 화면이 남으므로 첫 렌더 뒤 해제한다.
+  // 첫 화면이 그려지면 시작 화면(스플래시)을 닫는다. 닫지 않으면 실기기에서 스플래시가 계속 남아 조작할 수 없다.
+  // 웹에는 스플래시가 없어 실패해도 무시한다.
   useEffect(() => {
-    void SplashScreen.hideAsync().catch(() => undefined);
+    SplashScreen.hideAsync().catch(() => {});
   }, []);
 
   return (
