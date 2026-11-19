@@ -1,12 +1,41 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
-import { defaultExpression, emptyScene, type CreationSaveDocument } from '@/shared/story-types';
-import type { CommonSaveRepository } from '@/features/story-publish';
-import { publishStoryCharacters } from '@/features/story-setup';
+import { notifyManager, QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { act, fireEvent, render as baseRender, screen, waitFor } from '@testing-library/react-native';
+import type { ReactElement, ReactNode } from 'react';
+import { defaultExpression, emptyScene, type CreationSaveDocument, type FewshotCharacter } from '@/shared/story-types';
+import type { CommonSaveRepository, EditorStory } from '@/features/story-publish';
 import { CommonCreationWorkspace } from '../../components/CommonCreationWorkspace';
 
 jest.mock('react-native-safe-area-context', () => require('react-native-safe-area-context/jest/mock').default);
 jest.mock('expo-router', () => ({ usePreventRemove: jest.fn() }));
 
+// 스토리 조회 캐시(story-publish의 storyKeys.detail(id)와 같은 키). 기본 정보 저장이 성공하면 이 캐시가 갱신된다.
+// 캐시 변경 알림을 다음 틱으로 미루지 않아 act 안에서 바로 화면에 반영되게 한다.
+notifyManager.setScheduler((callback) => callback());
+const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
+function setStoryCharacters(people: FewshotCharacter[]) {
+  client.setQueryData<EditorStory>(['stories', 'detail', '1'], {
+    id: '1',
+    title: '가상',
+    subtitle: '',
+    world: '',
+    tags: [],
+    characters: people.map((person) => ({ id: person.id, name: person.name ?? '', detail: '' })),
+    saveState: '임시 저장',
+    updatedAt: '2026-11-17T00:00:00Z',
+    issues: [],
+  });
+}
+const wrapper = ({ children }: { children: ReactNode }) => (
+  <QueryClientProvider client={client}>{children}</QueryClientProvider>
+);
+const render = (element: ReactElement) => baseRender(element, { wrapper });
+beforeEach(() => {
+  client.clear();
+  setStoryCharacters([
+    { id: '5', name: '하린', position: 0 },
+    { id: '6', name: '도윤', position: 1 },
+  ]);
+});
 const narrator = (id: string) => ({
   id,
   clientKey: `m-${id}`,
@@ -40,7 +69,6 @@ function fixture() {
   const repository: CommonSaveRepository = {
     load: jest.fn(async () => structuredClone(data)),
     save,
-    loadCharacters: undefined,
   };
   return { repository, save, stored: () => data };
 }
@@ -180,7 +208,7 @@ it('캐릭터 삭제 시 그 인물의 착장·속마음과 출발/도착 관계
     await press('관계 추가');
   }
   expect(screen.getByText('관계 3 · 도윤 → 유저')).toBeTruthy();
-  await act(() => publishStoryCharacters('1', [{ id: '6', name: '도윤', position: 0 }]));
+  await act(() => setStoryCharacters([{ id: '6', name: '도윤', position: 0 }]));
   await waitFor(() => expect(screen.queryByLabelText('하린 착장')).toBeNull());
   expect(screen.getByLabelText('도윤 착장').props.value).toBe('교복');
   expect(screen.getByLabelText('장소').props.value).toBe('골목');
@@ -209,7 +237,7 @@ it('새 캐릭터를 추가하면 착장·속마음은 미지정, 호감도는 0
   await type('관계 1 관계명', '라이벌');
 
   await act(() =>
-    publishStoryCharacters('1', [
+    setStoryCharacters([
       { id: '5', name: '하린', position: 0 },
       { id: '6', name: '도윤', position: 1 },
       { id: '7', name: '서아', position: 2 },
