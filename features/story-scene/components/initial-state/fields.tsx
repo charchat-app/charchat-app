@@ -1,5 +1,6 @@
 import { FormField, TextField } from '@/components/ui';
 import { countRawText } from '@/lib/rawText';
+import { NUMBER_INPUT_MAX_LENGTH } from '@/shared/story-types';
 import type { TextInputProps } from 'react-native';
 
 /** 한 줄 입력 + 원문 글자 수. 초과해도 입력을 막거나 자르지 않고 표시만 한다(CREATE-US-04-AC11·12). */
@@ -40,6 +41,8 @@ export function LimitedField({
         onChangeText={onChange}
         invalid={over || !!error}
         keyboardType={keyboardType}
+        // 숫자 칸(날짜·시간·호감도)은 서버 상한을 넘겨 다른 변경까지 저장되지 않는 일을 막는다.
+        maxLength={keyboardType ? NUMBER_INPUT_MAX_LENGTH : undefined}
         placeholder={placeholder}
       />
     </FormField>

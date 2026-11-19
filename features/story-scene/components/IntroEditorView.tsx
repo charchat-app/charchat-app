@@ -66,7 +66,8 @@ export function IntroEditorView({
               onDragging={setDragging}
               onPending={setPending}
               onClose={() => setSelected(null)}
-              onChange={(value) => update(value.clientKey, () => value)}
+              // 편집기는 말풍선만 바꾼다. 이전 렌더의 인트로 전체로 덮으면 캐릭터 삭제 정리가 되살아나므로 말풍선만 합친다.
+              onChange={(value) => update(value.clientKey, (current) => ({ ...current, messages: value.messages }))}
             />
             {/* CREATE-US-04-AC08·18: 이 인트로의 초기 상태를 하단에서 확인한다. */}
             <SceneSummary scene={active.scene} characters={characters} />

@@ -8,6 +8,7 @@ import {
   scenePayload,
 } from '../initialStateRepository';
 import {
+  affinityIssue,
   affinityValue,
   dateIssue,
   sameAffinities,
@@ -207,4 +208,15 @@ it('AC09: 호감도는 관계와 독립이고, 입력하지 않은 조합은 0�
     [{ ...raw[0], value: null }],
   ])
     expect(() => readAffinities(bad, characters)).toThrow();
+});
+
+it('자릿수가 상한보다 긴 숫자는 앱에서도 완성 저장 오류로 본다(서버와 같은 기준)', () => {
+  const base = { ...emptyScene(), dateMode: 'calendar' as const, year: '2026', month: '3', day: '1' };
+  expect(dateIssue(base)).toBeNull();
+  expect(dateIssue({ ...base, month: '001' })).not.toBeNull();
+  expect(dateIssue({ ...base, year: '02026' })).not.toBeNull();
+  expect(timeIssue({ ...emptyScene(), timeFormat: '24h', hour: '007', minute: '05' })).not.toBeNull();
+  expect(timeIssue({ ...emptyScene(), timeFormat: '24h', hour: '07', minute: '05' })).toBeNull();
+  expect(affinityIssue('0001')).not.toBeNull();
+  expect(affinityIssue('-100')).toBeNull();
 });

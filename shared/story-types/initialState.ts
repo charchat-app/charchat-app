@@ -125,9 +125,11 @@ export const hasDateInput = (s: IntroScene) =>
 export const hasTimeInput = (s: IntroScene) => s.hour !== '' || s.minute !== '' || s.meridiem !== null;
 
 const length = (value: string) => Array.from(value).length;
-/** 0·음수·소수·기호 없이 쓴 정수인지. 앞자리 0은 허용한다. */
+/** 0·음수·소수·기호 없이 쓴 정수인지. 자릿수는 상한의 자릿수까지만 허용한다(서버 완성 검사와 같은 기준, 예: 월 `001`은 거절). */
 const integerIn = (value: string, min: number, max: number) =>
-  /^[0-9]+$/.test(value) && Number(value) >= min && Number(value) <= max;
+  new RegExp(`^[0-9]{1,${String(max).length}}$`).test(value) && Number(value) >= min && Number(value) <= max;
+/** 서버가 받는 숫자 입력 원문의 최대 길이. 넘으면 임시 저장 요청 전체가 거절되므로 입력 단계에서 막는다. */
+export const NUMBER_INPUT_MAX_LENGTH = 20;
 const DAYS_IN_MONTH = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
 
 /** 공개·비공개 저장 기준의 날짜 오류. 전부 비우면 미지정으로 허용한다. */
@@ -166,7 +168,7 @@ export function sceneTextOver(s: IntroScene): boolean {
   );
 }
 export function affinityIssue(value: string): string | null {
-  return /^-?[0-9]+$/.test(value) && Number(value) >= -100 && Number(value) <= 100
+  return /^-?[0-9]{1,3}$/.test(value) && Number(value) >= -100 && Number(value) <= 100
     ? null
     : '호감도는 -100~100 사이 정수로 입력해 주세요.';
 }
