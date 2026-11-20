@@ -3,3 +3,4 @@
 export { fromDraft, toDraftPatch } from './basicInfo';
 export { BasicInfoForm } from './components/BasicInfoForm';
 export type { BasicInfoDraft, BasicInfoValues, CharacterDraft } from './types';
+export { basicTextLength, MAX_BASIC_TEXT_LENGTH, MAX_CHARACTERS } from './basicInfo';
