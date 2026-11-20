@@ -7,3 +7,4 @@ export type { BasicInfoDraft, BasicInfoValues, CharacterDraft } from './types';
 export { StoryImagesEditor } from './components/StoryImagesEditor';
 export { mergeCharacters, requiredImageMessage, sameImages, toImagesPatch } from './images';
 export type { CharacterImagesValue, StoryImagesPatch, StoryImagesValues } from './images';
+export { basicTextLength, MAX_BASIC_TEXT_LENGTH, MAX_CHARACTERS } from './basicInfo';

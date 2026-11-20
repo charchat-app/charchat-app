@@ -20,7 +20,7 @@ import {
 } from '@/features/story-setup';
 
 import { toAppIssues } from '../api';
-import { applySavedIds, toFieldErrors } from '../formSync';
+import { applySavedIds, currentBasicIssues, toFieldErrors } from '../formSync';
 import { useSaveFlow } from '../hooks/useSaveFlow';
 import { useSaveStoryImages, useStoryImages } from '../hooks/useStoryImages';
 import { useSaveStoryBasic, useStory } from '../hooks/useStories';
@@ -85,8 +85,13 @@ export function StoryEditorScreen({ storyId, onBack }: StoryEditorScreenProps) {
 
   const saved = story.data;
   const failedIssues = save.error instanceof ApiError ? toAppIssues(save.error.issues) : [];
-  const issues: FieldIssue[] = failedIssues.length > 0 ? failedIssues : saved.issues;
-  const errors = toFieldErrors(issues, failedIssues.length > 0 ? attemptKeys : savedKeys);
+  const issueKeys = failedIssues.length > 0 ? attemptKeys : savedKeys;
+  const issues: FieldIssue[] = currentBasicIssues(
+    failedIssues.length > 0 ? failedIssues : saved.issues,
+    issueKeys,
+    values,
+  );
+  const errors = toFieldErrors(issues, issueKeys);
   const isDraft = saved.saveState === '임시 저장';
   /** 1단계: 기본 정보 저장. 실패 안내는 save.error로 보여 준다. */
   const saveBasic = async () => {
