@@ -9,7 +9,7 @@ export const LONG_PRESS_MS = 250;
 /** 길게 누르기 전에 이만큼 움직이면 드래그가 아니라 스크롤로 본다 */
 const SCROLL_SLOP = 8;
 /** 놓은 뒤 이 시간 안에 순서가 바뀌지 않으면 카드를 제자리로 되돌린다 */
-const UNCHANGED_ORDER_FALLBACK_MS = 100;
+export const UNCHANGED_ORDER_FALLBACK_MS = 100;
 
 export type DragList = {
   /** 지금 들고 있는 항목 key. 없으면 null */
@@ -33,6 +33,13 @@ export type DragList = {
  * - 제자리에 놓으면: 카드들이 원래 자리로 부드럽게 돌아간다.
  * 위치는 저장해 두지 않고 현재 순서와 높이로 계산한다(dropTargetKey 참고).
  */
+/** source를 target 자리로 옮긴 뒤의 순서(꺼내서 target이 있던 자리에 넣는다) */
+function movedOrder(order: string[], source: string, target: string): string[] {
+  const next = order.filter((k) => k !== source);
+  next.splice(order.indexOf(target), 0, source);
+  return next;
+}
+
 export function useDragList({
   keys,
   gap,
@@ -52,7 +59,9 @@ export function useDragList({
   const shifts = useRef(new Map<string, number>()).current; // 비켜난 목표 거리(같은 값이면 애니메이션을 다시 걸지 않음)
   const responders = useRef(new Map<string, PanResponderInstance>()).current;
   // 놓은 카드: 새 순서가 그려진 직후 그 카드를 손가락 위치에서 새 자리로 미끄러뜨린다.
-  const pendingDrop = useRef<{ key: string; residual: number } | null>(null);
+  // expected: 놓은 대로 순서가 바뀌었을 때의 순서. 실제 순서가 이와 같을 때만 남은 거리를 보정한다.
+  const pendingDrop = useRef<{ key: string; residual: number; expected: string } | null>(null);
+  const fallbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const armedKey = useRef<string | null>(null); // 길게 눌러 끌 준비가 된 카드
   const pressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // PanResponder는 항목마다 한 번만 만들어지므로 최신 값은 ref로 읽는다.
@@ -106,9 +115,25 @@ export function useDragList({
     pressTimer.current = null;
   };
 
+  const clearFallbackTimer = () => {
+    if (fallbackTimer.current) clearTimeout(fallbackTimer.current);
+    fallbackTimer.current = null;
+  };
+
+  /** 지금 이 카드를 끌 수 있는지: 편집 가능하고 목록에 아직 있어야 한다. */
+  const canDrag = (key: string) => !latest.current.disabled && latest.current.keys.includes(key);
+
   const arm = (key: string) => {
     // 다른 카드를 이미 들고 있으면(두 손가락) 새로 들지 않는다.
     if (armedKey.current !== null && armedKey.current !== key) return;
+    // 누르는 사이 편집 불가가 되었거나 카드가 지워졌으면 시작하지 않는다.
+    if (!canDrag(key)) return;
+    // 아직 처리되지 않은 지난 놓기는 정리한다(늦게 도는 되돌림 타이머가 새 끌기를 건드리지 않게).
+    if (pendingDrop.current) {
+      pendingDrop.current = null;
+      clearFallbackTimer();
+      resetAll(true);
+    }
     armedKey.current = key;
     offsetOf(key).stopAnimation();
     setDraggingKey(key);
@@ -118,7 +143,7 @@ export function useDragList({
   const end = (key: string, dy: number, cancelled: boolean) => {
     armedKey.current = null;
     const { keys: order, gap: g } = latest.current;
-    const target = cancelled ? key : dropTargetKey(heights, order, key, dy, g);
+    const target = cancelled || !canDrag(key) ? key : dropTargetKey(heights, order, key, dy, g);
     setDraggingKey(null);
     latest.current.onDragActiveChange?.(false);
     if (target === key) {
@@ -128,15 +153,30 @@ export function useDragList({
     // 순서는 놓는 즉시 확정한다(애니메이션이 끊기거나 멈춰도 변경이 사라지지 않게).
     // 화면 효과는 새 순서가 그려진 직후(useLayoutEffect) 처리한다:
     // 다른 카드는 이미 비켜난 위치 = 새 위치라 0으로 두고, 놓은 카드만 손가락 위치에서 새 자리로 미끄러진다.
-    pendingDrop.current = { key, residual: dy - slotOffset(order, key, target, g) };
+    const drop = {
+      key,
+      residual: dy - slotOffset(order, key, target, g),
+      expected: movedOrder(order, key, target).join('|'),
+    };
+    pendingDrop.current = drop;
     latest.current.onMove(key, target);
     // 순서가 실제로 바뀌지 않으면(그사이 캐릭터가 지워지는 등) useLayoutEffect가 돌지 않아
-    // 카드가 밀린 채 남는다. 잠시 뒤에도 처리되지 않았으면 제자리로 되돌린다.
-    setTimeout(() => {
-      if (pendingDrop.current?.key !== key) return;
+    // 카드가 밀린 채 남는다. 잠시 뒤에도 이 놓기가 처리되지 않았으면 제자리로 되돌린다.
+    clearFallbackTimer();
+    fallbackTimer.current = setTimeout(() => {
+      if (pendingDrop.current !== drop) return;
+      fallbackTimer.current = null;
       pendingDrop.current = null;
       resetAll(true);
     }, UNCHANGED_ORDER_FALLBACK_MS);
+  };
+
+  /** 끄는 중에 편집 불가가 되거나 그 카드가 지워지면 끌기를 취소한다. 이후 늦게 온 이벤트는 무시된다. */
+  const cancelActive = () => {
+    armedKey.current = null;
+    setDraggingKey(null);
+    latest.current.onDragActiveChange?.(false);
+    resetAll(true);
   };
 
   /** source 카드가 target 자리에 들어갈 때 원래 위치에서 움직일 거리 */
@@ -190,6 +230,7 @@ export function useDragList({
   useEffect(
     () => () => {
       clearPressTimer();
+      clearFallbackTimer();
       if (armedKey.current !== null) {
         armedKey.current = null;
         latest.current.onDragActiveChange?.(false);
@@ -200,10 +241,25 @@ export function useDragList({
   );
 
   const orderSignature = keys.join('|');
+
+  // 길게 누르는 중·끄는 중에 편집 불가가 되거나 그 카드가 지워지면 취소한다(잠금은 한 번만 푼다).
+  useEffect(() => {
+    if (disabled) clearPressTimer();
+    const active = armedKey.current;
+    if (active !== null && !canDrag(active)) cancelActive();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [disabled, orderSignature]);
+
   useLayoutEffect(() => {
     const drop = pendingDrop.current;
     if (!drop) return;
     pendingDrop.current = null;
+    clearFallbackTimer();
+    // 놓은 대로가 아닌 순서로 바뀌었으면(그사이 다른 변경·대상 삭제) 남은 거리 보정 없이 제자리로 돌린다.
+    if (orderSignature !== drop.expected) {
+      resetAll(true);
+      return;
+    }
     resetAll(false);
     offsetOf(drop.key).setValue(drop.residual);
     Animated.timing(offsetOf(drop.key), { toValue: 0, duration: SHIFT_MS, useNativeDriver: false }).start();
