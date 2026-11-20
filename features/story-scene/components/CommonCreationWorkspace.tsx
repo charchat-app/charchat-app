@@ -150,6 +150,9 @@ export function CommonCreationWorkspace({
             message={`임시 저장한 내용이에요(${new Date(loaded.workingCopySavedAt).toLocaleString('ko-KR')}). 이용자는 아직 이전에 저장한 내용을 봐요. 저장을 눌러야 반영돼요.`}
           />
         ) : null}
+        {completed && loaded?.imagesWorkingCopySavedAt ? (
+          <Notice message="임시 저장한 사진이 있어요. 저장을 누르면 사진도 함께 확인하고 반영해요." />
+        ) : null}
         {common.pendingSave ? (
           // 재시도를 기다리는 동안 자동 저장이 멈추므로 어느 탭에서든 바로 다시 시도할 수 있게 한다.
           <Button
@@ -166,7 +169,7 @@ export function CommonCreationWorkspace({
               ? '공통 저장 중입니다.'
               : dirty || pendingInput.active
                 ? '저장하지 않은 변경이 있습니다.'
-                : completed && loaded?.workingCopySavedAt
+                : completed && (loaded?.workingCopySavedAt || loaded?.imagesWorkingCopySavedAt)
                   ? '임시 저장한 내용과 같습니다.'
                   : '저장한 설정과 같습니다.'}
         </Text>
@@ -287,9 +290,9 @@ export function CommonCreationWorkspace({
     </Surface>
   );
 }
-/** 저장 범위 안내. 이 화면의 저장은 2~4번 설정만 반영하고, 기본 정보와 사진은 기본 설정 화면에서 따로 저장한다. */
+/** 저장 범위 안내. 이 화면의 저장은 2~4번 설정과 사진 임시 저장본을 함께 반영한다(안 B). 기본 정보는 따로 저장한다. */
 const SAVE_SCOPE_MESSAGE =
-  '여기서 저장하면 말투·서술, 대화 예시, 인트로, 초기 상태만 반영돼요. 기본 정보(제목·소개·캐릭터 등)와 사진은 포함되지 않아요. 기본 설정 화면에서 따로 저장해 주세요.';
+  '여기서 저장하면 말투·서술, 대화 예시, 인트로, 초기 상태와 임시 저장한 사진이 함께 반영돼요. 캐릭터마다 사진이 1장 이상인지도 함께 확인해요. 기본 정보(제목·소개·캐릭터 등)는 포함되지 않아요. 기본 설정 화면에서 따로 저장해 주세요.';
 /** 다시 불러오기 안내. 임시 저장본이 있으면 마지막으로 반영한 내용이 아니라 임시 저장본을 연다. */
 const RELOAD_MESSAGE =
   '임시 저장한 내용이 있으면 그 내용을, 없으면 마지막으로 저장한 내용을 불러와요. 이전에 반영한 내용으로 되돌리는 기능은 아니에요.';

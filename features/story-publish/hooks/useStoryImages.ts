@@ -2,7 +2,12 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import type { StoryImagesPatch } from '@/features/story-setup';
 
-import { getStoryImages, saveStoryImages, type StoryImagesSnapshot } from '../imagesRepository';
+import {
+  getStoryImages,
+  saveStoryImages,
+  type StoryImagesSaveKind,
+  type StoryImagesSnapshot,
+} from '../imagesRepository';
 
 export const storyImagesKey = (id: string) => ['stories', 'images', id] as const;
 
@@ -15,7 +20,8 @@ export function useStoryImages(id: string) {
 export function useSaveStoryImages(id: string) {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (patch: StoryImagesPatch) => saveStoryImages(id, patch),
+    mutationFn: ({ patch, kind }: { patch: StoryImagesPatch; kind: StoryImagesSaveKind }) =>
+      saveStoryImages(id, patch, kind),
     onSuccess: (snapshot: StoryImagesSnapshot) => client.setQueryData(storyImagesKey(id), snapshot),
   });
 }

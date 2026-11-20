@@ -303,8 +303,8 @@ it('저장 범위와 다시 불러오기 동작을 화면에서 알린다', asyn
   await render(<CommonCreationWorkspace repository={repository} storyId="1" />);
   await waitFor(() => expect(screen.getByLabelText('커스텀 문체')).toBeTruthy());
   await fireEvent.press(screen.getByRole('tab', { name: '저장·공개' }));
-  expect(screen.getByText(/말투·서술, 대화 예시, 인트로, 초기 상태만 반영돼요/)).toBeTruthy();
-  expect(screen.getByText(/기본 정보\(제목·소개·캐릭터 등\)와 사진은 포함되지 않아요/)).toBeTruthy();
+  expect(screen.getByText(/말투·서술, 대화 예시, 인트로, 초기 상태와 임시 저장한 사진이 함께 반영돼요/)).toBeTruthy();
+  expect(screen.getByText(/기본 정보\(제목·소개·캐릭터 등\)는 포함되지 않아요/)).toBeTruthy();
   expect(screen.queryByRole('button', { name: '저장한 전체 설정 다시 불러오기' })).toBeNull();
 
   // 바꾼 내용이 남아 있으면(자동 임시 저장이 거절된 경우) 확인창에서도 임시 저장본을 불러온다고 알린다.
@@ -318,4 +318,39 @@ it('저장 범위와 다시 불러오기 동작을 화면에서 알린다', asyn
   await fireEvent.press(screen.getByRole('button', { name: '최신 편집 내용 다시 불러오기' }));
   expect(screen.getByText(/저장하지 않은 변경 내용이 사라집니다\. 임시 저장한 내용이 있으면 그 내용을/)).toBeTruthy();
   expect(screen.getByRole('button', { name: '변경 버리고 최신 편집 내용 불러오기' })).toBeTruthy();
+}, 30000);
+
+it('사진만 임시 저장돼 있어도 저장을 보내 함께 반영하고, 안내를 보여 준다 (안 B)', async () => {
+  const { repository: base, stored } = fixture();
+  let data: CreationSaveDocument = {
+    ...stored(),
+    saveState: 'private',
+    workingCopySavedAt: null,
+    imagesWorkingCopySavedAt: '2026-11-20T08:00:00Z',
+  };
+  const save = jest.fn(
+    async (
+      document: CreationSaveDocument,
+      state: CreationSaveDocument['saveState'],
+      _mode?: string,
+      _key?: string,
+      _kind?: 'temporary' | 'save',
+    ) => {
+      // 서버처럼: 저장(반영)하면 사진 임시 저장본도 함께 반영되어 비워진다.
+      data = { ...document, saveState: state, workingCopySavedAt: null, imagesWorkingCopySavedAt: null };
+      return structuredClone(data);
+    },
+  );
+  const repository: CommonSaveRepository = { ...base, load: jest.fn(async () => structuredClone(data)), save };
+  await render(<CommonCreationWorkspace repository={repository} storyId="1" />);
+  await waitFor(() => expect(screen.getByText(/임시 저장한 사진이 있어요/)).toBeTruthy());
+  expect(screen.getByText('임시 저장한 내용과 같습니다.')).toBeTruthy();
+  await fireEvent.press(screen.getByRole('tab', { name: '저장·공개' }));
+  expect(screen.getByText(/임시 저장한 사진이 함께 반영돼요/)).toBeTruthy();
+
+  // 2~4번은 바뀐 것이 없지만 사진 임시 저장본이 있으므로 「저장」을 보낸다.
+  await fireEvent.press(screen.getByRole('button', { name: '비공개로 저장' }));
+  await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+  expect(save.mock.calls[0][4]).toBe('save');
+  await waitFor(() => expect(screen.queryByText(/임시 저장한 사진이 있어요/)).toBeNull());
 }, 30000);

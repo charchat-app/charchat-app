@@ -30,6 +30,7 @@ function parse(value: unknown, id: string, key?: string): CreationSaveDocument {
     relations: readRelations((value as Record<string, unknown>).relations, few.characters),
     affinities: readAffinities((value as Record<string, unknown>).affinities, few.characters),
     workingCopySavedAt: readSavedAt((value as Record<string, unknown>).working_copy_saved_at),
+    imagesWorkingCopySavedAt: readSavedAt((value as Record<string, unknown>).images_working_copy_saved_at),
   };
 }
 function readSavedAt(value: unknown): string | null {

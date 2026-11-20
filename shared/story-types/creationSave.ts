@@ -14,6 +14,11 @@ export type CreationSaveDocument = FewshotsDocument & {
    * 비공개·공개 스토리를 고치다 임시 저장했을 때만 생긴다(2026-11-20 결정).
    */
   workingCopySavedAt?: string | null;
+  /**
+   * 값이 있으면 6번 사진에 아직 반영하지 않은 임시 저장본이 있다. 「저장」하면 2~4번과 함께 검사·반영한다
+   * (안 B, 팀 확인 전).
+   */
+  imagesWorkingCopySavedAt?: string | null;
 };
 /** 공개 상태. draft는 미등록이다. */
 export type CreationSaveState = FewshotsDocument['saveState'];

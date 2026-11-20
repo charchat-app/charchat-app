@@ -169,9 +169,12 @@ export function useCommonSave(repository: CommonSaveRepository, options: Options
           return false;
         }
       }
-      // 바뀐 것이 없으면 보내지 않는다. 단, 임시 저장본이 남아 있으면 "저장"으로 반영해야 한다.
+      // 바뀐 것이 없으면 보내지 않는다. 단, 임시 저장본(2~4번 또는 사진)이 남아 있으면 "저장"으로 반영해야 한다.
       const unchanged =
-        kind === 'temporary' || (state === current.document.saveState && !current.document.workingCopySavedAt);
+        kind === 'temporary' ||
+        (state === current.document.saveState &&
+          !current.document.workingCopySavedAt &&
+          !current.document.imagesWorkingCopySavedAt);
       if (!current.dirty && unchanged) return true;
     }
     const operation = pending.current ?? {
