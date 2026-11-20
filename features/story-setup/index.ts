@@ -3,3 +3,7 @@
 export { fromDraft, toDraftPatch } from './basicInfo';
 export { BasicInfoForm } from './components/BasicInfoForm';
 export type { BasicInfoDraft, BasicInfoValues, CharacterDraft } from './types';
+// CREATE-US-06 이미지: 편집 화면과 저장 조각(목록 → 저장 요청 본문) 변환
+export { StoryImagesEditor } from './components/StoryImagesEditor';
+export { mergeCharacters, requiredImageMessage, sameImages, toImagesPatch } from './images';
+export type { CharacterImagesValue, StoryImagesPatch, StoryImagesValues } from './images';

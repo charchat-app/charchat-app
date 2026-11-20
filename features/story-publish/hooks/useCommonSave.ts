@@ -64,6 +64,7 @@ const messages: Record<string, string> = {
   BASIC_SETTINGS_INCOMPLETE: '1번의 제목·한 줄 소개·세계관과 캐릭터 1~10명의 이름·상세를 먼저 작성해 주세요.',
   BASIC_SETTINGS_TOO_LONG: '1번 기본 설정 전체가 3000자를 초과했습니다.',
   INVALID_CHARACTER_NAME: '캐릭터 이름의 앞뒤 공백과 중복을 확인해 주세요.',
+  CHARACTER_IMAGE_REQUIRED: '1번 기본 정보에서 등장 캐릭터마다 이미지를 1장 이상 등록해 주세요.',
   INVALID_TAGS: '해시태그는 최대10개, 각10자 이내로 작성해 주세요.',
   SAVE_STATE_TRANSITION: '완성 저장은 임시 저장으로, 공개는 비공개로 되돌릴 수 없습니다.',
   AUTO_SAVE_NOT_ALLOWED: '자동 저장은 임시 저장에만 적용됩니다.',
