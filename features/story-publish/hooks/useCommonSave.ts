@@ -111,11 +111,17 @@ export function useCommonSave(repository: CommonSaveRepository, options: Options
   const queryClient = useQueryClient();
   const [saving, setSaving] = useState(false),
     [error, setError] = useState<string | null>(null),
-    [pendingSave, setPendingSave] = useState(false);
+    [pendingSave, setPendingSave] = useState(false),
+    // 진행 중인 저장이 자동 임시 저장인지. 이때 누른 직접 저장은 막지 않고 끝난 뒤 이어서 보낸다.
+    [autoSaving, setAutoSaving] = useState(false),
+    // 직접 저장을 눌렀지만 앞선 자동 임시 저장이 끝나기를 기다리는 중
+    [waiting, setWaiting] = useState(false);
   const latest = useRef(options),
     busy = useRef(false),
     alive = useRef(false),
-    pending = useRef<Operation | null>(null);
+    pending = useRef<Operation | null>(null),
+    inflight = useRef<Promise<boolean> | null>(null),
+    queued = useRef(false);
   latest.current = options;
   useEffect(() => {
     alive.current = true;
@@ -131,9 +137,25 @@ export function useCommonSave(repository: CommonSaveRepository, options: Options
     state: CreationSaveState,
     mode: CreationSaveMode = 'manual',
     kind: CreationSaveKind = mode === 'auto' ? 'temporary' : 'save',
-  ) => {
+  ): Promise<boolean> => {
+    if (busy.current) {
+      // 자동 저장끼리는 겹쳐 보내지 않는다. 직접 저장은 조용히 버리지 않고, 앞선 저장이 끝나면 이어서 보낸다.
+      if (mode === 'auto' || queued.current || !inflight.current) return false;
+      queued.current = true;
+      setWaiting(true);
+      try {
+        await inflight.current;
+      } finally {
+        queued.current = false;
+        if (alive.current) setWaiting(false);
+      }
+      if (!alive.current) return false;
+      // 앞선 저장이 성패를 모른 채 끝났으면 그 재시도가 먼저다(실패 안내와 재시도 버튼이 이미 보인다).
+      if (pending.current) return false;
+      return save(state, mode, kind);
+    }
     const current = latest.current;
-    if (busy.current || current.loading || !current.document) return false;
+    if (current.loading || !current.document) return false;
     if (mode === 'auto' && (pending.current || !current.dirty)) return false;
     if (!pending.current) {
       if (mode === 'manual' && current.pendingInput) {
@@ -163,7 +185,13 @@ export function useCommonSave(repository: CommonSaveRepository, options: Options
     pending.current = operation;
     busy.current = true;
     setSaving(true);
+    setAutoSaving(operation.mode === 'auto');
     setError(null);
+    const run = send(operation);
+    inflight.current = run;
+    return run;
+  };
+  const send = async (operation: Operation): Promise<boolean> => {
     try {
       const result = await repository.save(
         operation.document,
@@ -198,9 +226,11 @@ export function useCommonSave(repository: CommonSaveRepository, options: Options
       );
       return false;
     } finally {
+      busy.current = false;
+      inflight.current = null;
       if (alive.current) {
-        busy.current = false;
         setSaving(false);
+        setAutoSaving(false);
       }
     }
   };
@@ -210,5 +240,5 @@ export function useCommonSave(repository: CommonSaveRepository, options: Options
     const timer = setInterval(() => void saveRef.current(latest.current.document?.saveState ?? 'draft', 'auto'), 60000);
     return () => clearInterval(timer);
   }, []);
-  return { saving, error, pendingSave, save };
+  return { saving, autoSaving, waiting, error, pendingSave, save };
 }

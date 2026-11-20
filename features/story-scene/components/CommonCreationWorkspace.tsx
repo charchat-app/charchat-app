@@ -126,6 +126,8 @@ export function CommonCreationWorkspace({
   const completed = !!few.snapshot && few.snapshot.saveState !== 'draft';
   useUnsavedCreationGuard(!!few.snapshot && completed && (dirty || pendingInput.active || common.pendingSave));
   const issues = document ? completionIssues(document) : [];
+  // 직접 저장이 진행 중이거나 기다리는 중. 자동 임시 저장만 진행 중일 때는 저장 버튼을 막지 않고, 누르면 이어서 저장한다.
+  const manualBusy = (common.saving && !common.autoSaving) || common.waiting;
   return (
     <Surface style={styles.screen}>
       <ScreenHeader eyebrow="CHAR / CHAT" title="제작" />
@@ -158,13 +160,15 @@ export function CommonCreationWorkspace({
           />
         ) : null}
         <Text variant="caption" accessibilityLiveRegion="polite">
-          {common.saving
-            ? '공통 저장 중입니다.'
-            : dirty || pendingInput.active
-              ? '저장하지 않은 변경이 있습니다.'
-              : completed && loaded?.workingCopySavedAt
-                ? '임시 저장한 내용과 같습니다.'
-                : '저장한 설정과 같습니다.'}
+          {common.waiting
+            ? '자동 임시 저장이 끝나면 이어서 저장합니다.'
+            : common.saving
+              ? '공통 저장 중입니다.'
+              : dirty || pendingInput.active
+                ? '저장하지 않은 변경이 있습니다.'
+                : completed && loaded?.workingCopySavedAt
+                  ? '임시 저장한 내용과 같습니다.'
+                  : '저장한 설정과 같습니다.'}
         </Text>
         {few.snapshot ? (
           <Text variant="caption">마지막 저장: {new Date(few.snapshot.updatedAt).toLocaleString('ko-KR')}</Text>
@@ -208,13 +212,13 @@ export function CommonCreationWorkspace({
       </View>
       <ScrollView style={[styles.screen, tab !== 4 && styles.hidden]} contentContainerStyle={styles.content}>
         <Text variant="heading">저장·공개</Text>
-        <Text>표현 설정·대화 예시·인트로·초기 상태를 함께 저장합니다.</Text>
+        <Notice message={SAVE_SCOPE_MESSAGE} />
         <Text variant="caption">공개 상태</Text>
         <TopTabs
           tabs={['미등록', '비공개', '공개']}
           activeIndex={(['draft', 'private', 'public'] as const).indexOf(target)}
           onChange={(index) => {
-            if (!common.saving && !common.pendingSave) setTarget((['draft', 'private', 'public'] as const)[index]);
+            if (!manualBusy && !common.pendingSave) setTarget((['draft', 'private', 'public'] as const)[index]);
           }}
         />
         {(completed && target === 'draft') || (few.snapshot?.saveState === 'public' && target === 'private') ? (
@@ -235,13 +239,13 @@ export function CommonCreationWorkspace({
             <Button
               label="임시 저장"
               variant="secondary"
-              disabled={common.saving || few.loading || !document || pendingInput.active}
+              disabled={manualBusy || few.loading || !document || pendingInput.active}
               onPress={() => void common.save(target, 'manual', 'temporary')}
             />
             <Button
               label={target === 'draft' ? '저장' : target === 'private' ? '비공개로 저장' : '공개로 저장'}
               disabled={
-                common.saving ||
+                manualBusy ||
                 few.loading ||
                 !document ||
                 pendingInput.active ||
@@ -257,18 +261,19 @@ export function CommonCreationWorkspace({
           임시 저장은 나만 보는 저장이에요. 확정된 변경은 1분마다, 탭을 바꿀 때 자동으로 임시 저장해요. 비공개·공개
           스토리는 저장을 눌러야 이용자에게 반영돼요.
         </Text>
+        <Text variant="caption">{RELOAD_MESSAGE}</Text>
         <Button
-          label="저장한 전체 설정 다시 불러오기"
+          label="최신 편집 내용 다시 불러오기"
           variant="secondary"
           disabled={common.saving || common.pendingSave || few.loading}
           onPress={() => (dirty || pendingInput.active ? setConfirmReload(true) : void few.reload())}
         />
         {confirmReload ? (
           <View style={styles.content}>
-            <Notice tone="alert" message="저장하지 않은 변경 내용이 사라집니다." />
+            <Notice tone="alert" message={`저장하지 않은 변경 내용이 사라집니다. ${RELOAD_MESSAGE}`} />
             <Button label="변경 유지" onPress={() => setConfirmReload(false)} />
             <Button
-              label="변경 버리고 전체 불러오기"
+              label="변경 버리고 최신 편집 내용 불러오기"
               // 저장이 진행 중이거나 재시도를 기다리는 동안 다시 불러오면 늦게 도착한 조회가 저장 결과를 덮을 수 있다.
               disabled={common.saving || common.pendingSave || few.loading}
               onPress={() => {
@@ -282,6 +287,12 @@ export function CommonCreationWorkspace({
     </Surface>
   );
 }
+/** 저장 범위 안내. 이 화면의 저장은 2~4번 설정만 반영하고, 기본 정보와 사진은 기본 설정 화면에서 따로 저장한다. */
+const SAVE_SCOPE_MESSAGE =
+  '여기서 저장하면 말투·서술, 대화 예시, 인트로, 초기 상태만 반영돼요. 기본 정보(제목·소개·캐릭터 등)와 사진은 포함되지 않아요. 기본 설정 화면에서 따로 저장해 주세요.';
+/** 다시 불러오기 안내. 임시 저장본이 있으면 마지막으로 반영한 내용이 아니라 임시 저장본을 연다. */
+const RELOAD_MESSAGE =
+  '임시 저장한 내용이 있으면 그 내용을, 없으면 마지막으로 저장한 내용을 불러와요. 이전에 반영한 내용으로 되돌리는 기능은 아니에요.';
 const styles = StyleSheet.create({
   screen: { flex: 1 },
   hidden: { display: 'none' },
