@@ -86,7 +86,7 @@ it('인트로를 작성·정렬·삭제하고 완성 조건을 지킨 뒤 비공
   await fireEvent.press(screen.getByRole('tab', { name: '저장·공개' }));
   await fireEvent.press(screen.getByRole('tab', { name: '비공개' }));
   expect(screen.getByText('인트로를 1개 이상 작성해 주세요.')).toBeTruthy();
-  expect(screen.getByRole('button', { name: '비공개 저장' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: '비공개로 저장' })).toBeDisabled();
 
   await fireEvent.press(screen.getByRole('tab', { name: '인트로' }));
   for (let i = 0; i < 5; i++) await fireEvent.press(screen.getByRole('button', { name: '인트로 추가' }));
@@ -121,7 +121,7 @@ it('인트로를 작성·정렬·삭제하고 완성 조건을 지킨 뒤 비공
   await waitFor(() => expect(save).toHaveBeenCalled());
   await fireEvent.press(screen.getByRole('tab', { name: '비공개' }));
   expect(screen.getByText('인트로 상황 제목은 30자 이내로 작성해 주세요.')).toBeTruthy();
-  expect(screen.getByRole('button', { name: '비공개 저장' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: '비공개로 저장' })).toBeDisabled();
   expect(stored().intros[1].title).toBe('😀'.repeat(31));
 
   // 두 번째를 위로 옮기면 기본 인트로가 바뀐다.
@@ -132,8 +132,8 @@ it('인트로를 작성·정렬·삭제하고 완성 조건을 지킨 뒤 비공
 
   await fireEvent.press(screen.getByRole('tab', { name: '저장·공개' }));
   await fireEvent.press(screen.getByRole('tab', { name: '비공개' }));
-  await waitFor(() => expect(screen.getByRole('button', { name: '비공개 저장' })).not.toBeDisabled());
-  await fireEvent.press(screen.getByRole('button', { name: '비공개 저장' }));
+  await waitFor(() => expect(screen.getByRole('button', { name: '비공개로 저장' })).not.toBeDisabled());
+  await fireEvent.press(screen.getByRole('button', { name: '비공개로 저장' }));
   await waitFor(() => expect(stored().saveState).toBe('private'));
   expect(stored().intros.map((intro) => intro.title)).toEqual(['😀'.repeat(30), '비 오는 골목']);
   expect(stored().intros[1].messages.map((m) => [m.speakerKind, m.characterId, m.body])).toEqual([
@@ -248,7 +248,7 @@ it('인트로 화면에서 말풍선 정렬·삭제·수정 취소/완료·삽�
   expect(stored().intros[0].messages[2].body).toBe('가'.repeat(2000));
   await fireEvent.press(screen.getByRole('tab', { name: '비공개' }));
   expect(screen.getByText('인트로 본문은 인트로마다 2000자 이내로 작성해 주세요.')).toBeTruthy();
-  expect(screen.getByRole('button', { name: '비공개 저장' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: '비공개로 저장' })).toBeDisabled();
 
   // 초과 말풍선을 지우면 비공개 저장이 가능하고 정렬·수정 결과가 그대로 저장된다.
   await fireEvent.press(screen.getByRole('tab', { name: '인트로' }));
@@ -257,8 +257,8 @@ it('인트로 화면에서 말풍선 정렬·삭제·수정 취소/완료·삽�
   await fireEvent.press(screen.getByRole('button', { name: '인트로 목록으로' }));
   await fireEvent.press(screen.getByRole('tab', { name: '저장·공개' }));
   await fireEvent.press(screen.getByRole('tab', { name: '비공개' }));
-  await waitFor(() => expect(screen.getByRole('button', { name: '비공개 저장' })).not.toBeDisabled());
-  await fireEvent.press(screen.getByRole('button', { name: '비공개 저장' }));
+  await waitFor(() => expect(screen.getByRole('button', { name: '비공개로 저장' })).not.toBeDisabled());
+  await fireEvent.press(screen.getByRole('button', { name: '비공개로 저장' }));
   await waitFor(() => expect(stored().saveState).toBe('private'));
   expect(stored().intros[0].messages.map((m) => [m.speakerKind, m.body])).toEqual([
     ['character', 'a2 수정{{user}}'],

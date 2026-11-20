@@ -133,7 +133,8 @@ export function CommonCreationWorkspace({
         tabs={['말투·서술', '대화 예시', '인트로', '초기 상태', '저장·공개']}
         activeIndex={tab}
         onChange={(index) => {
-          if (index !== tab && few.snapshot?.saveState === 'draft') void common.save('draft', 'auto');
+          // 탭을 바꾸면 확정된 변경을 임시 저장한다. 비공개·공개 스토리는 임시 저장본에만 남는다.
+          if (index !== tab) void common.save(target, 'auto');
           setTab(index);
         }}
       />
@@ -142,6 +143,11 @@ export function CommonCreationWorkspace({
         {few.loading ? <Text accessibilityRole="progressbar">제작 설정을 불러오는 중입니다.</Text> : null}
         {few.error ? <Notice tone="alert" message={few.error} /> : null}
         {common.error ? <Notice tone="alert" message={common.error} /> : null}
+        {completed && loaded?.workingCopySavedAt ? (
+          <Notice
+            message={`임시 저장한 내용이에요(${new Date(loaded.workingCopySavedAt).toLocaleString('ko-KR')}). 이용자는 아직 이전에 저장한 내용을 봐요. 저장을 눌러야 반영돼요.`}
+          />
+        ) : null}
         {common.pendingSave ? (
           // 재시도를 기다리는 동안 자동 저장이 멈추므로 어느 탭에서든 바로 다시 시도할 수 있게 한다.
           <Button
@@ -156,7 +162,9 @@ export function CommonCreationWorkspace({
             ? '공통 저장 중입니다.'
             : dirty || pendingInput.active
               ? '저장하지 않은 변경이 있습니다.'
-              : '저장한 설정과 같습니다.'}
+              : completed && loaded?.workingCopySavedAt
+                ? '임시 저장한 내용과 같습니다.'
+                : '저장한 설정과 같습니다.'}
         </Text>
         {few.snapshot ? (
           <Text variant="caption">마지막 저장: {new Date(few.snapshot.updatedAt).toLocaleString('ko-KR')}</Text>
@@ -201,44 +209,53 @@ export function CommonCreationWorkspace({
       <ScrollView style={[styles.screen, tab !== 4 && styles.hidden]} contentContainerStyle={styles.content}>
         <Text variant="heading">저장·공개</Text>
         <Text>표현 설정·대화 예시·인트로·초기 상태를 함께 저장합니다.</Text>
+        <Text variant="caption">공개 상태</Text>
         <TopTabs
-          tabs={['임시 저장', '비공개', '공개']}
+          tabs={['미등록', '비공개', '공개']}
           activeIndex={(['draft', 'private', 'public'] as const).indexOf(target)}
           onChange={(index) => {
             if (!common.saving && !common.pendingSave) setTarget((['draft', 'private', 'public'] as const)[index]);
           }}
         />
         {(completed && target === 'draft') || (few.snapshot?.saveState === 'public' && target === 'private') ? (
-          <Notice tone="alert" message="완성 저장은 임시 저장으로, 공개는 비공개로 되돌릴 수 없습니다." />
+          <Notice tone="alert" message="비공개·공개한 스토리는 미등록으로, 공개는 비공개로 되돌릴 수 없습니다." />
         ) : null}
         {target !== 'draft' ? issues.map((message) => <Notice key={message} tone="alert" message={message} />) : null}
         {pendingInput.active ? (
           <Notice message="작성 중인 말풍선은 추가 또는 수정 완료·취소로 확정해 주세요. 자동 저장은 확정된 설정만 저장합니다." />
         ) : null}
-        <Button
-          label={
-            common.pendingSave
-              ? '공통 저장 재시도'
-              : target === 'draft'
-                ? '전체 임시 저장'
-                : target === 'private'
-                  ? '비공개 저장'
-                  : '공개 저장'
-          }
-          disabled={
-            common.saving ||
-            few.loading ||
-            !document ||
-            (!common.pendingSave &&
-              (pendingInput.active ||
+        {common.pendingSave ? (
+          <Button
+            label="공통 저장 재시도"
+            disabled={common.saving || few.loading || !document}
+            onPress={() => void common.save(target)}
+          />
+        ) : (
+          <View style={styles.actions}>
+            <Button
+              label="임시 저장"
+              variant="secondary"
+              disabled={common.saving || few.loading || !document || pendingInput.active}
+              onPress={() => void common.save(target, 'manual', 'temporary')}
+            />
+            <Button
+              label={target === 'draft' ? '저장' : target === 'private' ? '비공개로 저장' : '공개로 저장'}
+              disabled={
+                common.saving ||
+                few.loading ||
+                !document ||
+                pendingInput.active ||
                 (target !== 'draft' && issues.length > 0) ||
                 (completed && target === 'draft') ||
-                (few.snapshot?.saveState === 'public' && target === 'private')))
-          }
-          onPress={() => void common.save(target)}
-        />
+                (few.snapshot?.saveState === 'public' && target === 'private')
+              }
+              onPress={() => void common.save(target, 'manual', 'save')}
+            />
+          </View>
+        )}
         <Text variant="caption">
-          초안의 확정된 변경만 1분마다, 탭을 바꿀 때 자동 저장합니다. 공개·비공개는 직접 저장해야 합니다.
+          임시 저장은 나만 보는 저장이에요. 확정된 변경은 1분마다, 탭을 바꿀 때 자동으로 임시 저장해요. 비공개·공개
+          스토리는 저장을 눌러야 이용자에게 반영돼요.
         </Text>
         <Button
           label="저장한 전체 설정 다시 불러오기"
@@ -270,4 +287,5 @@ const styles = StyleSheet.create({
   hidden: { display: 'none' },
   content: { padding: Spacing.three, gap: Spacing.three },
   status: { paddingHorizontal: Spacing.three, paddingTop: Spacing.two, gap: Spacing.one },
+  actions: { flexDirection: 'row', gap: Spacing.two, flexWrap: 'wrap' },
 });

@@ -99,7 +99,7 @@ it('탭 이동으로 표현·퓨샷을 공통 임시 저장하고 비공개 확�
   await fireEvent.press(screen.getByRole('tab', { name: '저장·공개' }));
   await waitFor(() => expect(save).toHaveBeenCalledTimes(2));
   await fireEvent.press(screen.getByRole('tab', { name: '비공개' }));
-  await fireEvent.press(screen.getByRole('button', { name: '비공개 저장' }));
+  await fireEvent.press(screen.getByRole('button', { name: '비공개로 저장' }));
   await waitFor(() => expect(stored().saveState).toBe('private'));
   expect(stored().speech.style).toEqual({ mode: 'custom', text: '  수정 원문 {{user}}\n' });
   expect(stored().fewshots[0].messages[0].body).toBe(' *원문* {{user}} ');
@@ -123,7 +123,7 @@ it('1000자·2000자 초과 사유를 모두 안내하고 공개·비공개를 �
     await fireEvent.press(screen.getByRole('tab', { name: target }));
     expect(screen.getByText('커스텀 문체는 1000자 이내로 작성해 주세요.')).toBeTruthy();
     expect(screen.getByText('퓨샷 전체를 2000자 이내로 작성해 주세요.')).toBeTruthy();
-    expect(screen.getByRole('button', { name: `${target} 저장` })).toBeDisabled();
+    expect(screen.getByRole('button', { name: `${target}로 저장` })).toBeDisabled();
   }
   expect(stored().saveState).toBe('draft');
   expect(stored().fewshots[0].messages[0].body).toHaveLength(2001);
@@ -176,3 +176,50 @@ it('저장 성패를 모르면 상단 실패 안내에 재시도 버튼을 보�
   await waitFor(() => expect(screen.queryByRole('button', { name: '실패한 저장 다시 시도' })).toBeNull());
   expect(stored().speech.style).toEqual({ mode: 'custom', text: '재시도할 문체' });
 });
+
+it('비공개 스토리의 임시 저장본을 불러오면 안내하고, 임시 저장과 저장(반영)을 나눠 보낸다 (2026-11-20 결정)', async () => {
+  const { repository: base, stored } = fixture();
+  let data: CreationSaveDocument = { ...stored(), saveState: 'private', workingCopySavedAt: '2026-11-20T07:00:00Z' };
+  const save = jest.fn(
+    async (
+      document: CreationSaveDocument,
+      state: CreationSaveDocument['saveState'],
+      _mode: string,
+      _key: string,
+      kind?: 'temporary' | 'save',
+    ) => {
+      // 서버처럼: 임시 저장은 공개 상태를 바꾸지 않고 임시 저장본 시각을 남기며, 저장은 임시 저장본을 비운다.
+      data =
+        kind === 'temporary'
+          ? { ...document, saveState: data.saveState, workingCopySavedAt: '2026-11-20T08:00:00Z' }
+          : { ...document, saveState: state, workingCopySavedAt: null };
+      return structuredClone(data);
+    },
+  );
+  const repository: CommonSaveRepository = { ...base, load: jest.fn(async () => structuredClone(data)), save };
+  await render(<CommonCreationWorkspace repository={repository} storyId="1" />);
+  await waitFor(() => expect(screen.getByText(/임시 저장한 내용이에요/)).toBeTruthy());
+  await fireEvent.press(screen.getByRole('tab', { name: '저장·공개' }));
+  expect(screen.getByRole('tab', { name: '미등록' })).toBeTruthy();
+
+  // 바뀐 내용이 없어도 임시 저장본이 있으면 "저장"으로 반영한다.
+  await fireEvent.press(screen.getByRole('button', { name: '비공개로 저장' }));
+  await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+  expect(save.mock.calls[0][4]).toBe('save');
+  await waitFor(() => expect(screen.queryByText(/임시 저장한 내용이에요/)).toBeNull());
+
+  // 다시 고친 뒤 임시 저장은 공개 상태를 바꾸지 않고 임시 저장본으로 남긴다.
+  await fireEvent.press(screen.getByRole('tab', { name: '말투·서술' }));
+  await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+  await fireEvent.changeText(screen.getByLabelText('커스텀 문체'), '고치는 중');
+  await fireEvent.press(screen.getByRole('tab', { name: '저장·공개' }));
+  await waitFor(() => expect(save).toHaveBeenCalledTimes(2));
+  expect(save.mock.calls[1][4]).toBe('temporary');
+  expect(stored().saveState).toBe('draft');
+  expect(data.saveState).toBe('private');
+  await waitFor(() => expect(screen.getByText(/임시 저장한 내용이에요/)).toBeTruthy());
+  // 비공개·공개 스토리를 미등록으로 되돌리는 저장은 막는다.
+  await fireEvent.press(screen.getByRole('tab', { name: '미등록' }));
+  expect(screen.getByRole('button', { name: '저장' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: '임시 저장' })).not.toBeDisabled();
+}, 30000);

@@ -15,6 +15,7 @@ import {
   type CreationSaveDocument,
   type CreationSaveState,
   type CreationSaveMode,
+  type CreationSaveKind,
 } from '@/shared/story-types';
 import type { CommonSaveRepository } from '../commonRepository';
 import { storyKeys } from './useStories';
@@ -66,8 +67,7 @@ const messages: Record<string, string> = {
   INVALID_CHARACTER_NAME: '캐릭터 이름의 앞뒤 공백과 중복을 확인해 주세요.',
   CHARACTER_IMAGE_REQUIRED: '1번 기본 정보에서 등장 캐릭터마다 이미지를 1장 이상 등록해 주세요.',
   INVALID_TAGS: '해시태그는 최대10개, 각10자 이내로 작성해 주세요.',
-  SAVE_STATE_TRANSITION: '완성 저장은 임시 저장으로, 공개는 비공개로 되돌릴 수 없습니다.',
-  AUTO_SAVE_NOT_ALLOWED: '자동 저장은 임시 저장에만 적용됩니다.',
+  SAVE_STATE_TRANSITION: '비공개·공개한 스토리는 미등록으로, 공개는 비공개로 되돌릴 수 없습니다.',
   INTRO_REQUIRED: '인트로를 1개 이상 작성해 주세요.',
   INTRO_TITLE_REQUIRED: '모든 인트로의 상황 제목을 작성해 주세요.',
   INTRO_TITLE_TOO_LONG: '인트로 상황 제목은 30자 이내로 작성해 주세요.',
@@ -93,6 +93,7 @@ type Operation = {
   document: CreationSaveDocument;
   state: CreationSaveState;
   mode: CreationSaveMode;
+  kind: CreationSaveKind;
   key: string;
   commit: ReturnType<Options['captureCommit']>;
 };
@@ -122,28 +123,40 @@ export function useCommonSave(repository: CommonSaveRepository, options: Options
       alive.current = false;
     };
   }, []);
-  const save = async (state: CreationSaveState, mode: CreationSaveMode = 'manual') => {
+  /**
+   * 공통 저장. kind가 temporary(임시 저장)면 이용자 화면을 바꾸지 않고, save(저장)면 반영한다.
+   * 자동 저장(mode auto)은 언제나 임시 저장이며, 비공개·공개 스토리도 임시 저장본에 남긴다.
+   */
+  const save = async (
+    state: CreationSaveState,
+    mode: CreationSaveMode = 'manual',
+    kind: CreationSaveKind = mode === 'auto' ? 'temporary' : 'save',
+  ) => {
     const current = latest.current;
     if (busy.current || current.loading || !current.document) return false;
-    if (mode === 'auto' && (pending.current || current.document.saveState !== 'draft' || !current.dirty)) return false;
+    if (mode === 'auto' && (pending.current || !current.dirty)) return false;
     if (!pending.current) {
       if (mode === 'manual' && current.pendingInput) {
         setError('말풍선을 추가하거나 수정 완료·취소한 뒤 저장해 주세요.');
         return false;
       }
-      if (state !== 'draft') {
+      if (kind === 'save' && state !== 'draft') {
         const issues = completionIssues(current.document);
         if (issues.length) {
           setError(issues.join('\n'));
           return false;
         }
       }
-      if (!current.dirty && state === current.document.saveState) return true;
+      // 바뀐 것이 없으면 보내지 않는다. 단, 임시 저장본이 남아 있으면 "저장"으로 반영해야 한다.
+      const unchanged =
+        kind === 'temporary' || (state === current.document.saveState && !current.document.workingCopySavedAt);
+      if (!current.dirty && unchanged) return true;
     }
     const operation = pending.current ?? {
       document: current.document,
       state,
       mode,
+      kind,
       key: newFewshotKey('creation'),
       commit: current.captureCommit(),
     };
@@ -152,7 +165,13 @@ export function useCommonSave(repository: CommonSaveRepository, options: Options
     setSaving(true);
     setError(null);
     try {
-      const result = await repository.save(operation.document, operation.state, operation.mode, operation.key);
+      const result = await repository.save(
+        operation.document,
+        operation.state,
+        operation.mode,
+        operation.key,
+        operation.kind,
+      );
       // 저장 상태(임시 저장→비공개·공개)와 저장 시각이 바뀌므로 스토리 목록·상세 캐시를 다시 받게 한다.
       // 응답 전에 화면을 떠났어도 서버에는 저장됐으므로 무효화는 항상 한다.
       void queryClient.invalidateQueries({ queryKey: storyKeys.all });
@@ -188,7 +207,7 @@ export function useCommonSave(repository: CommonSaveRepository, options: Options
   const saveRef = useRef(save);
   saveRef.current = save;
   useEffect(() => {
-    const timer = setInterval(() => void saveRef.current('draft', 'auto'), 60000);
+    const timer = setInterval(() => void saveRef.current(latest.current.document?.saveState ?? 'draft', 'auto'), 60000);
     return () => clearInterval(timer);
   }, []);
   return { saving, error, pendingSave, save };

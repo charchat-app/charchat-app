@@ -4,6 +4,7 @@ import {
   type CreationSaveDocument,
   type CreationSaveState,
   type CreationSaveMode,
+  type CreationSaveKind,
 } from '@/shared/story-types';
 import { fewshotsPayload, readFewshotsSnapshot } from './fewshotRepository';
 import { affinitiesPayload, readAffinities, readRelations, relationsPayload } from './initialStateRepository';
@@ -17,6 +18,7 @@ export interface CommonSaveRepository {
     state: CreationSaveState,
     mode: CreationSaveMode,
     requestId: string,
+    kind?: CreationSaveKind,
   ): Promise<CreationSaveDocument>;
 }
 function parse(value: unknown, id: string, key?: string): CreationSaveDocument {
@@ -27,7 +29,11 @@ function parse(value: unknown, id: string, key?: string): CreationSaveDocument {
     intros: readIntros((value as Record<string, unknown>).intros, few.characters),
     relations: readRelations((value as Record<string, unknown>).relations, few.characters),
     affinities: readAffinities((value as Record<string, unknown>).affinities, few.characters),
+    workingCopySavedAt: readSavedAt((value as Record<string, unknown>).working_copy_saved_at),
   };
+}
+function readSavedAt(value: unknown): string | null {
+  return typeof value === 'string' && value ? value : null;
 }
 export function createCommonSaveRepository(
   baseUrl: string,
@@ -41,7 +47,7 @@ export function createCommonSaveRepository(
     async load(id, signal) {
       return parse(await apiRequest(path(id), { signal, headers: await authorization() }, baseUrl), id);
     },
-    async save(document, state, mode, requestId) {
+    async save(document, state, mode, requestId, kind = 'save') {
       const { story_id: _storyId, ...expression } = toExpressionRow(document.id, document.speech);
       const headers = new Headers(await authorization());
       headers.set('Idempotency-Key', requestId);
@@ -58,6 +64,7 @@ export function createCommonSaveRepository(
               ...relationsPayload(document.relations),
               ...affinitiesPayload(document.affinities),
               save_state: state,
+              kind,
               mode,
             }),
           },
