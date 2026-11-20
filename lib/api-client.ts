@@ -46,7 +46,8 @@ export class ApiError extends Error {
   }
 }
 
-function authHeaders(): Record<string, string> {
+/** 인증 헤더. 이미지처럼 apiRequest를 거치지 않는 요청(소유자 전용 이미지 미리보기)에도 같은 값을 붙인다. */
+export function authHeaders(): Record<string, string> {
   return DEV_USER_ID ? { 'X-User-Id': DEV_USER_ID } : {};
 }
 
