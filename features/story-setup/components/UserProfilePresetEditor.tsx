@@ -108,7 +108,7 @@ export function UserProfilePresetEditor({
           preset={preset}
           nameError={errors[`${preset.key}.name`]}
           textError={errors[`${preset.key}.text`]}
-          imageError={errors[`${preset.key}.image`]}
+          imageError={onSelectImage ? errors[`${preset.key}.image`] : undefined}
           editable={editable}
           canSelectImage={onSelectImage !== undefined}
           onName={(name) => onChange((v) => updatePreset(v, preset.key, { name }))}
