@@ -9,7 +9,7 @@ import { ApiError, type FieldIssue } from '@/lib/api-client';
 import { BasicInfoForm, fromDraft, toDraftPatch, type BasicInfoValues } from '@/features/story-setup';
 
 import { toAppIssues } from '../api';
-import { applySavedIds, toFieldErrors } from '../formSync';
+import { applySavedIds, currentBasicIssues, toFieldErrors } from '../formSync';
 import { useSaveStoryBasic, useStory } from '../hooks/useStories';
 import { formatSavedAt } from '../savedAt';
 
@@ -62,8 +62,13 @@ export function StoryEditorScreen({ storyId, onBack }: StoryEditorScreenProps) {
 
   const saved = story.data;
   const failedIssues = save.error instanceof ApiError ? toAppIssues(save.error.issues) : [];
-  const issues: FieldIssue[] = failedIssues.length > 0 ? failedIssues : saved.issues;
-  const errors = toFieldErrors(issues, failedIssues.length > 0 ? attemptKeys : savedKeys);
+  const issueKeys = failedIssues.length > 0 ? attemptKeys : savedKeys;
+  const issues: FieldIssue[] = currentBasicIssues(
+    failedIssues.length > 0 ? failedIssues : saved.issues,
+    issueKeys,
+    values,
+  );
+  const errors = toFieldErrors(issues, issueKeys);
   const isDraft = saved.saveState === '임시 저장';
   const doSave = () => {
     const sent = values.characters.map((ch) => ch.key);
