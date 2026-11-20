@@ -1,10 +1,18 @@
 import { useState } from 'react';
-import { Animated, Image, ScrollView, StyleSheet, View } from 'react-native';
+import { Animated, ScrollView, StyleSheet, View } from 'react-native';
 
 import { Button, Notice, PhotoSlot, Text } from '@/components/ui';
 import { Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
-import { ImageCropper, MAX_IMAGES, isGif, useImageUpload, type ImageTarget, type MediaImage } from '@/shared/media';
+import {
+  ImageCropper,
+  MAX_IMAGES,
+  ServerImage,
+  isGif,
+  useImageUpload,
+  type ImageTarget,
+  type MediaImage,
+} from '@/shared/media';
 
 import {
   addImage,
@@ -96,9 +104,9 @@ function CoverPreview({ values }: { values: StoryImagesValues }) {
     <View style={styles.coverRow}>
       <View style={[styles.cover, { backgroundColor: c.placeholderBackground, borderColor: c.placeholderBorder }]}>
         {cover ? (
-          <Image
+          <ServerImage
             testID="cover-image"
-            source={{ uri: cover.image.uri }}
+            uri={cover.image.uri}
             resizeMode={cover.source === 'story' ? 'cover' : 'contain'}
             style={styles.coverImage}
             accessibilityIgnoresInvertColors
@@ -324,7 +332,7 @@ function DraggablePhoto({
           selected && { borderColor: c.accent, borderWidth: 2 },
         ]}
       >
-        <Image source={{ uri }} style={styles.photoImage} accessibilityIgnoresInvertColors />
+        <ServerImage uri={uri} style={styles.photoImage} accessibilityIgnoresInvertColors />
       </View>
       {first ? <Text variant="eyebrow">대표</Text> : null}
     </Animated.View>

@@ -4,7 +4,7 @@
  */
 import { Platform } from 'react-native';
 
-import { apiRequest } from '@/lib/api-client';
+import { ApiError, apiRequest, authHeaders } from '@/lib/api-client';
 
 import type { ImageTarget } from './rules';
 
@@ -33,6 +33,29 @@ export function imageUri(url: string): string {
   } catch {
     return url;
   }
+}
+
+/**
+ * 서버 이미지 파일 주소인지. 미등록·비공개 스토리나 아직 연결하지 않은 사진은 소유자만 볼 수 있어
+ * 이 주소를 불러올 때는 인증 헤더를 붙여야 한다. 기기에서 고른 사진(file:, blob:, data:)은 해당하지 않는다.
+ */
+export function isServerImage(uri: string): boolean {
+  return /^https?:\/\//.test(uri) && uri.includes('/creation/image-files/');
+}
+
+/** 이미지 요청에 붙일 source. 기기(iOS·안드로이드)의 Image는 headers를 그대로 지원한다. */
+export function imageSource(uri: string): { uri: string; headers?: Record<string, string> } {
+  return isServerImage(uri) ? { uri, headers: authHeaders() } : { uri };
+}
+
+/**
+ * 웹 전용: 웹의 Image는 요청 헤더를 붙일 수 없으므로, 인증 헤더로 파일을 받아 임시 주소(blob:)로 바꾼다.
+ * 쓰고 난 주소는 호출 측이 URL.revokeObjectURL로 해제한다.
+ */
+export async function loadImageObjectUrl(uri: string, signal?: AbortSignal): Promise<string> {
+  const response = await fetch(uri, { headers: authHeaders(), signal });
+  if (!response.ok) throw new ApiError(response.status, 'IMAGE_LOAD_FAILED', '이미지를 불러오지 못했습니다.');
+  return URL.createObjectURL(await response.blob());
 }
 
 export function fromImageDto(dto: ImageDto): MediaImage {
