@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -17,30 +17,34 @@ import {
   toDraftPatch,
   toImagesPatch,
   type BasicInfoValues,
-  type PresetValues,
   type StoryImagesValues,
 } from '@/features/story-setup';
 
 import { toAppIssues } from '../api';
+import type { CommonSaveRepository } from '../commonRepository';
 import { applySavedIds, currentBasicIssues, toFieldErrors } from '../formSync';
 import { useSaveFlow } from '../hooks/useSaveFlow';
 import { useSaveStoryImages, useStoryImages } from '../hooks/useStoryImages';
 import { useSaveStoryBasic, useStory } from '../hooks/useStories';
+import { useStoryPresets } from '../hooks/useStoryPresets';
 import { formatSavedAt } from '../savedAt';
 
-/** 목업의 제작 탭 구성. 지금은 기본 설정 탭만 서버와 연결되어 있다. */
+/** 목업의 제작 탭 구성. 기본 설정·유저 프로필 탭이 서버와 연결되어 있다. */
 const TABS = ['기본 설정', '말투·서술', '인트로', '초기 상태', '유저 프로필', '공개 범위'] as const;
 
 export type StoryEditorScreenProps = {
   storyId: string;
   onBack: () => void;
+  onOpenCreation?: () => void;
+  /** CREATE-US-05 유저 프로필 공통 저장 저장소. 테스트에서 바꿔 끼운다. 없으면 EXPO_PUBLIC_API_URL 기준. */
+  presetRepository?: CommonSaveRepository;
 };
 
 /**
  * 스토리 편집 화면. 탭별 저장 조각을 모아 저장한다 (story-publish 책임).
  * 저장이 실패하면 입력을 그대로 두고 실패를 알린다. 성공 응답을 받기 전에는 저장 완료로 표시하지 않는다.
  */
-export function StoryEditorScreen({ storyId, onBack }: StoryEditorScreenProps) {
+export function StoryEditorScreen({ storyId, onBack, onOpenCreation, presetRepository }: StoryEditorScreenProps) {
   const c = useTheme();
   const story = useStory(storyId);
   const save = useSaveStoryBasic(storyId);
@@ -48,8 +52,24 @@ export function StoryEditorScreen({ storyId, onBack }: StoryEditorScreenProps) {
   // 캐릭터를 끄는 동안 화면 스크롤을 멈춘다 (AC14: 드래그와 페이지 스크롤이 겹치지 않게)
   const [dragging, setDragging] = useState(false);
   const [values, setValues] = useState<BasicInfoValues | null>(null);
-  const [presets, setPresets] = useState<PresetValues[]>([]);
   const isProfileTab = TABS[tab] === '유저 프로필';
+  // CREATE-US-05: 유저 프로필은 탭을 처음 열 때 공통 저장(/creation)에서 불러온다.
+  const [profileOpened, setProfileOpened] = useState(false);
+  const presetState = useStoryPresets(storyId, profileOpened, presetRepository);
+  // CREATE-US-05-AC03: 진행 중인 프로필 사진 업로드(자르기·올리기). 남아 있으면 이전 사진으로 저장하지 않도록
+  // 프로필 저장을 막고, 업로드 주인(편집기)이 사라지지 않게 탭 이동을 막는다. 기본 설정 탭의 저장과는 무관하다.
+  const uploadSources = useRef<Set<string>>(new Set());
+  const [presetUploading, setPresetUploading] = useState(false);
+  const trackPresetUpload = (source: string, active: boolean) => {
+    if (active) uploadSources.current.add(source);
+    else uploadSources.current.delete(source);
+    setPresetUploading(uploadSources.current.size > 0);
+  };
+  const changeTab = (index: number) => {
+    if (uploadSources.current.size > 0 || presetState.saving) return;
+    if (TABS[index] === '유저 프로필') setProfileOpened(true);
+    setTab(index);
+  };
   // 서버 issues의 characters[i]가 어느 캐릭터인지 알려면, 그 판정을 받은 저장본의 캐릭터 순서(key)가 필요하다.
   const [savedKeys, setSavedKeys] = useState<string[]>([]);
   const [attemptKeys, setAttemptKeys] = useState<string[]>([]);
@@ -141,6 +161,12 @@ export function StoryEditorScreen({ storyId, onBack }: StoryEditorScreenProps) {
   const retryImages = () => void flow.retryImages(saveImagesStep);
   const unsavedCharacterNames = values.characters.filter((ch) => !ch.id).map((ch) => ch.name || '새 캐릭터');
   const saving = flow.running;
+  // CREATE-US-05: 공개·비공개(완성 저장) 스토리의 프로필은 임시 저장만 하고, 제작 화면의 「저장」으로 반영한다.
+  const presetFinalized = (presetState.saveState ?? 'draft') !== 'draft';
+  const presetSaveBlocked = presetState.saving || presetUploading || saving || !presetState.dirty;
+  const saveProfile = (kind: 'temporary' | 'save') => {
+    if (uploadSources.current.size === 0 && !flow.running) void presetState.save(kind);
+  };
 
   return (
     <Surface style={styles.container}>
@@ -152,7 +178,7 @@ export function StoryEditorScreen({ storyId, onBack }: StoryEditorScreenProps) {
       />
       {/* 가로 스크롤 탭이 세로로 늘어나지 않게 높이를 내용에 맞춘다 */}
       <View style={styles.tabs}>
-        <TopTabs tabs={TABS} activeIndex={tab} onChange={setTab} />
+        <TopTabs tabs={TABS} activeIndex={tab} onChange={changeTab} />
       </View>
       <ScrollView
         testID="story-editor-body"
@@ -196,20 +222,96 @@ export function StoryEditorScreen({ storyId, onBack }: StoryEditorScreenProps) {
             </View>
           </>
         ) : isProfileTab ? (
-          <>
-            <Notice message="유저 프로필은 아직 저장되지 않아요. 편집 화면을 나가면 변경 내용이 사라져요." />
-            <UserProfilePresetEditor
-              presets={presets}
-              characterNames={values.characters.map((character) => character.name)}
-              onChange={setPresets}
-              onDragActiveChange={setDragging}
-            />
-          </>
+          presetState.status === 'ready' && presetState.presets ? (
+            <>
+              {presetFinalized ? (
+                <Notice
+                  message={
+                    presetState.staged
+                      ? '임시 저장한 유저 프로필이 있어요. 이용자는 아직 이전 프로필을 봐요. 제작 화면에서 「저장」을 누르면 반영돼요.'
+                      : '공개·비공개 스토리의 유저 프로필은 임시 저장한 뒤 제작 화면의 「저장」으로 반영해요.'
+                  }
+                />
+              ) : null}
+              <UserProfilePresetEditor
+                presets={presetState.presets}
+                characterNames={values.characters.map((character) => character.name)}
+                onChange={presetState.setPresets}
+                uploadImages
+                editable={!presetState.saving && !presetState.pending}
+                onDragActiveChange={setDragging}
+                onUploadActiveChange={trackPresetUpload}
+              />
+            </>
+          ) : presetState.status === 'loading' ? (
+            <Text variant="caption">유저 프로필 불러오는 중…</Text>
+          ) : (
+            <View style={styles.centered}>
+              <Text variant="error">
+                {presetState.status === 'unavailable'
+                  ? '유저 프로필 정보를 받지 못해 편집할 수 없어요.'
+                  : `유저 프로필을 불러오지 못했어요. (${messageOf(presetState.query.error)})`}
+              </Text>
+              <Button label="다시 시도" variant="secondary" onPress={() => void presetState.query.refetch()} />
+            </View>
+          )
         ) : (
           <Notice message={`${TABS[tab]} 탭은 아직 연결되지 않았어요.`} />
         )}
       </ScrollView>
-      {/* 유저 프로필 탭은 아직 저장 연결 전이라 공통 저장 바를 숨긴다 (기본 정보·사진만 저장되는데 저장된 것처럼 보이지 않게) */}
+      {isProfileTab && presetState.status === 'ready' ? (
+        <SafeAreaView
+          edges={['bottom']}
+          style={[styles.footer, { borderTopColor: c.border, backgroundColor: c.background }]}
+        >
+          <View style={styles.status}>
+            {presetState.saving ? (
+              <Text variant="caption">유저 프로필 저장 중…</Text>
+            ) : presetState.error ? (
+              <View style={styles.imageFailure}>
+                <Text variant="error">{presetState.error}</Text>
+                {!presetState.pending && presetState.error.startsWith('다른 곳에서') ? (
+                  <Button label="프로필 다시 불러오기" variant="secondary" onPress={() => void presetState.reload()} />
+                ) : null}
+              </View>
+            ) : presetUploading ? (
+              <Text variant="caption">사진을 올리는 중이에요. 끝나면 저장할 수 있어요.</Text>
+            ) : (
+              <Text variant="caption">
+                {presetState.dirty ? '저장하지 않은 프로필 변경이 있어요.' : '저장한 프로필과 같아요.'}
+              </Text>
+            )}
+          </View>
+          {presetState.pending ? (
+            <Button
+              label={presetState.pendingKind === 'save' ? '저장 다시 시도' : '임시 저장 다시 시도'}
+              onPress={() => saveProfile(presetState.pendingKind ?? 'temporary')}
+              disabled={presetState.saving}
+            />
+          ) : (
+            <>
+              <Button
+                label="임시 저장"
+                variant={presetFinalized ? 'primary' : 'secondary'}
+                onPress={() => saveProfile('temporary')}
+                disabled={presetSaveBlocked}
+              />
+              {onOpenCreation ? (
+                <Button
+                  label="공통 저장 화면 열기"
+                  variant="secondary"
+                  onPress={() => {
+                    if (!presetState.dirty && !presetState.saving && uploadSources.current.size === 0 && !saving) {
+                      onOpenCreation();
+                    }
+                  }}
+                  disabled={presetState.dirty || presetState.saving || presetUploading || saving}
+                />
+              ) : null}
+            </>
+          )}
+        </SafeAreaView>
+      ) : null}
       {!isProfileTab ? (
         <SafeAreaView
           edges={['bottom']}

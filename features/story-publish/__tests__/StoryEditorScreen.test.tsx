@@ -2,6 +2,8 @@
 // CREATE-US-05-AC08 스토리 편집 화면의 유저 프로필 탭 연결 (프리셋 편집기 조립)
 import { notifyManager, QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, fireEvent, render as baseRender, screen, within } from '@testing-library/react-native';
+import { launchImageLibraryAsync } from 'expo-image-picker';
+import { manipulateAsync } from 'expo-image-manipulator';
 import type { ReactElement, ReactNode } from 'react';
 import {
   PanResponder,
@@ -11,13 +13,23 @@ import {
 } from 'react-native';
 
 import { ApiError, type FieldIssue } from '@/lib/api-client';
+import { uploadImage } from '@/shared/media/api';
+import { defaultExpression } from '@/shared/story-types';
 
 import { saveStoryBasic } from '../api';
+import type { CommonSaveDocument, CommonSaveRepository } from '../commonRepository';
 import { StoryEditorScreen } from '../components/StoryEditorScreen';
+import { storyCreationKey } from '../hooks/useStoryPresets';
 import type { EditorStory } from '../types';
 
 jest.mock('react-native-safe-area-context', () => require('react-native-safe-area-context/jest/mock').default);
 jest.mock('../api', () => ({ ...jest.requireActual('../api'), saveStoryBasic: jest.fn() }));
+jest.mock('expo-image-picker', () => ({ launchImageLibraryAsync: jest.fn() }));
+jest.mock('expo-image-manipulator', () => ({
+  manipulateAsync: jest.fn(),
+  SaveFormat: { PNG: 'png', JPEG: 'jpeg', WEBP: 'webp' },
+}));
+jest.mock('@/shared/media/api', () => ({ ...jest.requireActual('@/shared/media/api'), uploadImage: jest.fn() }));
 
 notifyManager.setScheduler((callback) => callback());
 const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
@@ -224,11 +236,33 @@ describe('CREATE-US-01-AC02: 서버 누락 안내를 지금 입력값과 맞춘�
 
 // ---- CREATE-US-05-AC08: 유저 프로필 탭 (프리셋 편집기 조립) ----
 
-const NOT_PERSISTED = /유저 프로필은 아직 저장되지 않아요/;
+function presetRepository() {
+  const stored: CommonSaveDocument = {
+    id: '1',
+    title: '스토리 1',
+    saveState: 'draft',
+    updatedAt: '2026-11-17T00:00:00Z',
+    speech: defaultExpression(),
+    characters: [],
+    fewshots: [],
+    intros: [],
+    relations: [],
+    affinities: [],
+    presets: [],
+  };
+  return {
+    load: jest.fn(async () => stored),
+    save: jest.fn<ReturnType<CommonSaveRepository['save']>, Parameters<CommonSaveRepository['save']>>(async (doc) => ({
+      ...doc,
+      presets: doc.presets?.map((preset, index) => ({ ...preset, id: String(index + 1) })),
+    })),
+  } satisfies CommonSaveRepository;
+}
 
 /** 프리셋 탭 테스트용 스토리: 캐릭터 한 명이 있는 임시 저장본 */
 function seedPresetStory(id: string, characterName: string) {
   seed({ title: `스토리 ${id}`, characters: [{ id: `${id}1`, name: characterName, detail: '' }] }, id);
+  client.setQueryData(storyCreationKey(id), { id, saveState: 'draft', presets: [] });
 }
 
 async function openTab(name: string) {
@@ -250,7 +284,7 @@ describe('CREATE-US-05-AC08: 유저 프로필 탭 연결', () => {
     seedPresetStory('2', '카일');
   });
 
-  it('유저 프로필 탭을 열면 프리셋 편집기와 저장되지 않는다는 안내를 보여 준다', async () => {
+  it('유저 프로필 탭을 열면 서버에서 받은 빈 프리셋 편집기를 보여 준다', async () => {
     await render(<StoryEditorScreen storyId="1" onBack={jest.fn()} />);
     expect(screen.queryByRole('button', { name: '+ 프로필 추가' })).toBeNull();
 
@@ -258,7 +292,7 @@ describe('CREATE-US-05-AC08: 유저 프로필 탭 연결', () => {
 
     expect(screen.getByRole('button', { name: '+ 프로필 추가' })).toBeTruthy();
     expect(screen.getByText('아직 추천 프로필이 없어요.')).toBeTruthy();
-    expect(screen.getAllByText(NOT_PERSISTED).length).toBeGreaterThan(0);
+    expect(screen.getByRole('button', { name: '임시 저장' })).toBeDisabled();
     expect(screen.queryByText('유저 프로필 탭은 아직 연결되지 않았어요.')).toBeNull();
   });
 
@@ -269,7 +303,7 @@ describe('CREATE-US-05-AC08: 유저 프로필 탭 연결', () => {
     await addPreset('여행자', '길을 잃은 여행자');
     await addPreset('기사');
     expect(presetNames()).toEqual(['여행자', '기사']);
-    expect(screen.queryByText('이미지를 선택해 주세요.')).toBeNull();
+    expect(screen.getAllByText('이미지를 선택해 주세요.')).toHaveLength(2);
 
     await fireEvent.press(screen.getByRole('button', { name: '프로필 1 아래로 이동' }));
     expect(presetNames()).toEqual(['기사', '여행자']);
@@ -298,18 +332,68 @@ describe('CREATE-US-05-AC08: 유저 프로필 탭 연결', () => {
   });
 
   it('유저 프로필 탭에서는 기본 저장 버튼을 프리셋 저장처럼 보여 주지 않는다', async () => {
-    await render(<StoryEditorScreen storyId="1" onBack={jest.fn()} />);
+    const repository = presetRepository();
+    await render(<StoryEditorScreen storyId="1" onBack={jest.fn()} presetRepository={repository} />);
     expect(screen.getByRole('button', { name: '임시 저장' })).toBeTruthy();
 
     await openTab('유저 프로필');
-    await addPreset('여행자');
+    await addPreset('{{user}}');
 
-    expect(screen.queryByRole('button', { name: '임시 저장' })).toBeNull();
+    await fireEvent.press(screen.getByRole('button', { name: '임시 저장' }));
+    expect(repository.save).toHaveBeenCalledWith(
+      expect.objectContaining({ presets: [expect.objectContaining({ name: '{{user}}', detail: '' })] }),
+      'draft',
+      'manual',
+      expect.any(String),
+      'temporary',
+    );
     expect(screen.queryByRole('button', { name: '변경 내용 저장' })).toBeNull();
     expect(screen.queryByRole('button', { name: '다시 저장' })).toBeNull();
     expect(screen.queryByRole('button', { name: '사진만 다시 저장' })).toBeNull();
     expect(screen.queryByText(/마지막 저장/)).toBeNull();
     expect(saveStoryBasic).not.toHaveBeenCalled();
+  });
+
+  it('앨범·자르기·업로드가 끝나기 전에는 저장하지 않고 완료 뒤 새 사진 ID를 저장한다', async () => {
+    const repository = presetRepository();
+    const picker = Promise.withResolvers<Awaited<ReturnType<typeof launchImageLibraryAsync>>>();
+    const upload = Promise.withResolvers<Awaited<ReturnType<typeof uploadImage>>>();
+    jest.mocked(launchImageLibraryAsync).mockReturnValueOnce(picker.promise);
+    jest.mocked(manipulateAsync).mockResolvedValueOnce({ uri: 'file:///cropped.png', width: 300, height: 300 });
+    jest.mocked(uploadImage).mockReturnValueOnce(upload.promise);
+    await render(<StoryEditorScreen storyId="1" onBack={jest.fn()} presetRepository={repository} />);
+    await openTab('유저 프로필');
+    await addPreset('여행자');
+    const saveButton = () => screen.getByRole('button', { name: '임시 저장' });
+    const expectSaveBlocked = async () => {
+      expect(saveButton()).toBeDisabled();
+      await fireEvent.press(saveButton());
+      expect(repository.save).not.toHaveBeenCalled();
+    };
+
+    await fireEvent.press(screen.getByLabelText('프로필 1 이미지 선택'));
+    expect(launchImageLibraryAsync).toHaveBeenCalled();
+    await expectSaveBlocked();
+    await openTab('기본 설정');
+    expect(screen.getByRole('tab', { name: '유저 프로필', selected: true })).toBeTruthy();
+    await act(async () => {
+      picker.resolve({
+        canceled: false,
+        assets: [{ uri: 'file:///picked.png', width: 400, height: 400, mimeType: 'image/png', fileSize: 100 }],
+      });
+    });
+    expect(screen.getByText('이미지 자르기 (1:1)')).toBeTruthy();
+    await expectSaveBlocked();
+    await fireEvent.press(screen.getByLabelText('확인'));
+    expect(uploadImage).toHaveBeenCalledWith(expect.anything(), 'profile');
+    await expectSaveBlocked();
+    await act(async () => {
+      upload.resolve({ imageId: 77, uri: 'https://api.test/image-files/77', mimeType: 'image/png', byteSize: 100 });
+    });
+    expect(saveButton()).toBeEnabled();
+    await fireEvent.press(saveButton());
+    expect(repository.save).toHaveBeenCalledTimes(1);
+    expect(repository.save.mock.calls[0][0].presets).toEqual([expect.objectContaining({ imageId: 77 })]);
   });
 
   it('다른 탭의 기본 저장은 그대로 동작하고 프리셋을 함께 보내지 않는다', async () => {

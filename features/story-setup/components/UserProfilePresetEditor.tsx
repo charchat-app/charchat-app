@@ -68,6 +68,11 @@ export type UserProfilePresetEditorProps = {
    * 캐릭터 목록 등 다른 목록의 끌기와는 상태를 공유하지 않는다.
    */
   onDragActiveChange?: (active: boolean) => void;
+  /**
+   * 업로드 모드에서 카드별 이미지 업로드(자르기·올리기)가 시작(true)·끝(false)될 때 알린다.
+   * source는 카드마다 고유하다. 카드가 사라지면 false로 알린다. 호스트가 저장·탭 이동을 막을 때 쓴다(선택).
+   */
+  onUploadActiveChange?: (source: string, active: boolean) => void;
 };
 
 /**
@@ -89,6 +94,7 @@ export function UserProfilePresetEditor({
   uploadImages = false,
   editable = true,
   onDragActiveChange,
+  onUploadActiveChange,
 }: UserProfilePresetEditorProps) {
   const imageMode: ImageMode = onSelectImage ? 'select' : uploadImages ? 'upload' : 'none';
   const { issues } = validatePresets(presets, characterNames);
@@ -130,6 +136,9 @@ export function UserProfilePresetEditor({
           onMove={(offset) => onChange((v) => movePreset(v, preset.key, offset))}
           onSelectImage={async () => onSelectImage?.(preset.key)}
           onApplyImage={(image) => onChange((v) => setPresetImage(v, preset.key, image))}
+          onUploadActiveChange={
+            onUploadActiveChange ? (active) => onUploadActiveChange(`preset:${preset.key}`, active) : undefined
+          }
         />
       ))}
       <Button
@@ -169,6 +178,8 @@ type PresetItemProps = {
   onSelectImage: () => Promise<PresetImageChoice | null | undefined>;
   /** 이미지 지정(null이면 해제) */
   onApplyImage: (image: PresetImageChoice | null) => void;
+  /** 이 카드의 업로드 진행 여부 알림 */
+  onUploadActiveChange?: (active: boolean) => void;
 };
 
 function PresetItem({
@@ -191,6 +202,7 @@ function PresetItem({
   onMove,
   onSelectImage,
   onApplyImage,
+  onUploadActiveChange,
 }: PresetItemProps) {
   const c = useTheme();
   const [pickError, setPickError] = useState<string | null>(null);
@@ -209,6 +221,7 @@ function PresetItem({
   // 이 흐름은 처음 고른 프리셋에 남고, 결과는 key 기준으로 그 프리셋에만 붙는다.
   const upload = useImageUpload({
     target: 'profile',
+    onActiveChange: imageMode === 'upload' ? onUploadActiveChange : undefined,
     onUploaded: (image: MediaImage) => {
       if (uploadSeq.current !== pickSeq.current) return;
       onApplyImage({ imageId: image.imageId, photoUrl: image.uri });
