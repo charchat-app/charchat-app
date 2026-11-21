@@ -44,5 +44,5 @@ export type ConversationStory = {
   intros: ConversationIntro[];
   profiles: ConversationProfile[];
   existing_session_id: number | null;
-  tags?: string[];
+  tags: string[];
 };
