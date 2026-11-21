@@ -1,2 +1,3 @@
-// chat: 공개 API. 다른 도메인은 이 파일로만 접근한다.
-export {};
+// CHAT-US-01 대화 화면 공개 API
+export { StoryDetailScreen } from '@/features/chat/components/StoryDetailScreen';
+export { ChatSessionScreen } from '@/features/chat/components/ChatSessionScreen';
