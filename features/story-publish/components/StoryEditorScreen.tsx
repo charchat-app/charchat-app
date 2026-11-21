@@ -9,6 +9,7 @@ import { ApiError, type FieldIssue } from '@/lib/api-client';
 import {
   BasicInfoForm,
   StoryImagesEditor,
+  UserProfilePresetEditor,
   fromDraft,
   mergeCharacters,
   requiredImageMessage,
@@ -16,6 +17,7 @@ import {
   toDraftPatch,
   toImagesPatch,
   type BasicInfoValues,
+  type PresetValues,
   type StoryImagesValues,
 } from '@/features/story-setup';
 
@@ -46,6 +48,8 @@ export function StoryEditorScreen({ storyId, onBack }: StoryEditorScreenProps) {
   // 캐릭터를 끄는 동안 화면 스크롤을 멈춘다 (AC14: 드래그와 페이지 스크롤이 겹치지 않게)
   const [dragging, setDragging] = useState(false);
   const [values, setValues] = useState<BasicInfoValues | null>(null);
+  const [presets, setPresets] = useState<PresetValues[]>([]);
+  const isProfileTab = TABS[tab] === '유저 프로필';
   // 서버 issues의 characters[i]가 어느 캐릭터인지 알려면, 그 판정을 받은 저장본의 캐릭터 순서(key)가 필요하다.
   const [savedKeys, setSavedKeys] = useState<string[]>([]);
   const [attemptKeys, setAttemptKeys] = useState<string[]>([]);
@@ -151,6 +155,7 @@ export function StoryEditorScreen({ storyId, onBack }: StoryEditorScreenProps) {
         <TopTabs tabs={TABS} activeIndex={tab} onChange={setTab} />
       </View>
       <ScrollView
+        testID="story-editor-body"
         style={styles.body}
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
@@ -190,34 +195,47 @@ export function StoryEditorScreen({ storyId, onBack }: StoryEditorScreenProps) {
               )}
             </View>
           </>
+        ) : isProfileTab ? (
+          <>
+            <Notice message="유저 프로필은 아직 저장되지 않아요. 편집 화면을 나가면 변경 내용이 사라져요." />
+            <UserProfilePresetEditor
+              presets={presets}
+              characterNames={values.characters.map((character) => character.name)}
+              onChange={setPresets}
+              onDragActiveChange={setDragging}
+            />
+          </>
         ) : (
           <Notice message={`${TABS[tab]} 탭은 아직 연결되지 않았어요.`} />
         )}
       </ScrollView>
-      <SafeAreaView
-        edges={['bottom']}
-        style={[styles.footer, { borderTopColor: c.border, backgroundColor: c.background }]}
-      >
-        <View style={styles.status}>
-          {saving ? (
-            <Text variant="caption">저장 중…</Text>
-          ) : save.isError ? (
-            <Text variant="error">{saveErrorMessage(save.error)}</Text>
-          ) : flow.imageError ? (
-            <View style={styles.imageFailure}>
-              <Text variant="error">{imageSaveErrorMessage(flow.imageError, imageValues)}</Text>
-              <Button label="사진만 다시 저장" variant="secondary" onPress={retryImages} disabled={saving} />
-            </View>
-          ) : (
-            <Text variant="caption">{formatSavedAt(saved.updatedAt)}</Text>
-          )}
-        </View>
-        <Button
-          label={save.isError ? '다시 저장' : isDraft ? '임시 저장' : '변경 내용 저장'}
-          onPress={doSave}
-          disabled={saving}
-        />
-      </SafeAreaView>
+      {/* 유저 프로필 탭은 아직 저장 연결 전이라 공통 저장 바를 숨긴다 (기본 정보·사진만 저장되는데 저장된 것처럼 보이지 않게) */}
+      {!isProfileTab ? (
+        <SafeAreaView
+          edges={['bottom']}
+          style={[styles.footer, { borderTopColor: c.border, backgroundColor: c.background }]}
+        >
+          <View style={styles.status}>
+            {saving ? (
+              <Text variant="caption">저장 중…</Text>
+            ) : save.isError ? (
+              <Text variant="error">{saveErrorMessage(save.error)}</Text>
+            ) : flow.imageError ? (
+              <View style={styles.imageFailure}>
+                <Text variant="error">{imageSaveErrorMessage(flow.imageError, imageValues)}</Text>
+                <Button label="사진만 다시 저장" variant="secondary" onPress={retryImages} disabled={saving} />
+              </View>
+            ) : (
+              <Text variant="caption">{formatSavedAt(saved.updatedAt)}</Text>
+            )}
+          </View>
+          <Button
+            label={save.isError ? '다시 저장' : isDraft ? '임시 저장' : '변경 내용 저장'}
+            onPress={doSave}
+            disabled={saving}
+          />
+        </SafeAreaView>
+      ) : null}
     </Surface>
   );
 }
