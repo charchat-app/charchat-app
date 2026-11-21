@@ -140,6 +140,7 @@ it('표현·퓨샷을 같은 요청에 보내고 조회도 같은 공통 응답�
       relations: [],
       affinities: [],
       save_state: 'private',
+      kind: 'save',
       mode: 'manual',
     });
     const loaded = await repository.load('1');
@@ -149,10 +150,10 @@ it('표현·퓨샷을 같은 요청에 보내고 조회도 같은 공통 응답�
     fetcher.mockRestore();
   }
 });
-it('초안 변경만1분 주기로 저장하고 완성 상태·미변경에는 자동 저장을 하지 않는다', async () => {
+it('바뀐 내용만 1분 주기로 임시 저장하고, 비공개·공개 스토리도 임시 저장한다(2026-11-20 결정)', async () => {
   jest.useFakeTimers();
   try {
-    const save = jest.fn(async (doc: CreationSaveDocument) => doc),
+    const save = jest.fn(async (doc: CreationSaveDocument, ..._rest: unknown[]) => doc),
       commit = jest.fn();
     const repository = repo(save);
     const doc = document();
@@ -179,16 +180,20 @@ it('초안 변경만1분 주기로 저장하고 완성 상태·미변경에는 �
     });
     expect(save).toHaveBeenCalledTimes(1);
     expect(save.mock.calls[0].slice(1, 3)).toEqual(['draft', 'auto']);
+    expect(save.mock.calls[0][4]).toBe('temporary');
     await rerender({ value: doc, dirty: false });
     await act(async () => {
       jest.advanceTimersByTime(60000);
     });
     expect(save).toHaveBeenCalledTimes(1);
+    // 비공개 스토리도 바뀐 내용은 임시 저장한다. 서버가 임시 저장본에만 두고 이용자 화면은 그대로 둔다.
     await rerender({ value: { ...doc, saveState: 'private' }, dirty: true });
     await act(async () => {
       jest.advanceTimersByTime(60000);
     });
-    expect(save).toHaveBeenCalledTimes(1);
+    expect(save).toHaveBeenCalledTimes(2);
+    expect(save.mock.calls[1].slice(1, 3)).toEqual(['private', 'auto']);
+    expect(save.mock.calls[1][4]).toBe('temporary');
     await unmount();
   } finally {
     jest.useRealTimers();
@@ -304,4 +309,10 @@ it('429·408 실패는 같은 요청으로 재시도할 수 있게 남겨 둔다
   expect(save).toHaveBeenCalledTimes(2);
   expect(save.mock.calls[1][3]).toBe(save.mock.calls[0][3]);
   expect(result.current.pendingSave).toBe(false);
+});
+
+it('거절 안내 문구: 캐릭터 이미지가 빠지면 1번에서 채우도록 안내한다 (CREATE-US-06-AC08)', () => {
+  expect(rejectionMessage(new ApiError(422, 'CHARACTER_IMAGE_REQUIRED', '서버 문구'))).toBe(
+    '1번 기본 정보에서 등장 캐릭터마다 이미지를 1장 이상 등록해 주세요.',
+  );
 });

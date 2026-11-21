@@ -22,6 +22,8 @@ export type FieldIssue = {
   field: string;
   code: string;
   message: string;
+  /** 문제가 된 대상의 값(선택). 예: 이미지가 없는 캐릭터의 id */
+  value?: string | null;
 };
 
 /**
@@ -44,7 +46,8 @@ export class ApiError extends Error {
   }
 }
 
-function authHeaders(): Record<string, string> {
+/** 인증 헤더. 이미지처럼 apiRequest를 거치지 않는 요청(소유자 전용 이미지 미리보기)에도 같은 값을 붙인다. */
+export function authHeaders(): Record<string, string> {
   return DEV_USER_ID ? { 'X-User-Id': DEV_USER_ID } : {};
 }
 
@@ -60,9 +63,12 @@ function toIssues(value: unknown): FieldIssue[] {
   );
 }
 
-/** 호출 측 헤더(객체·배열·Headers)를 기본 헤더 위에 덮어쓴다. 같은 이름은 호출 측 값이 이긴다. */
-function mergeHeaders(extra: HeadersInit | undefined): Record<string, string> {
-  const merged: Record<string, string> = { 'Content-Type': 'application/json', ...authHeaders() };
+/**
+ * 호출 측 헤더(객체·배열·Headers)를 기본 헤더 위에 덮어쓴다. 같은 이름은 호출 측 값이 이긴다.
+ * 본문이 FormData(파일 업로드)면 Content-Type을 넣지 않는다. 경계(boundary)는 fetch가 직접 붙인다.
+ */
+function mergeHeaders(extra: HeadersInit | undefined, json = true): Record<string, string> {
+  const merged: Record<string, string> = { ...(json ? { 'Content-Type': 'application/json' } : {}), ...authHeaders() };
   if (!extra) return merged;
   new Headers(extra).forEach((value, name) => {
     for (const key of Object.keys(merged)) if (key.toLowerCase() === name) delete merged[key];
@@ -107,7 +113,7 @@ export async function apiRequest<T>(path: string, options: ApiRequestInit = {}, 
     try {
       response = await fetch(`${baseUrl.replace(/\/$/, '')}${path}`, {
         ...init,
-        headers: mergeHeaders(init.headers),
+        headers: mergeHeaders(init.headers, !(typeof FormData !== 'undefined' && init.body instanceof FormData)),
         signal: controller.signal,
       });
     } catch {
