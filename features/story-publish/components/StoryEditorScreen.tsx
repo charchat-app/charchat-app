@@ -126,7 +126,11 @@ export function StoryEditorScreen({ storyId, onBack }: StoryEditorScreenProps) {
     const merged = mergeCharacters(imageValues, fresh.data.values);
     setImageValues(merged);
     if (sameImages(merged, fresh.data.values)) return;
-    const snapshot = await saveImages.mutateAsync(toImagesPatch(merged));
+    // 안 B: 비공개·공개 스토리의 사진은 임시 저장본에 두고, 저장·공개 탭의 「저장」에서 함께 반영한다.
+    const snapshot = await saveImages.mutateAsync({
+      patch: toImagesPatch(merged),
+      kind: isDraft ? 'save' : 'temporary',
+    });
     setImageValues(snapshot.values);
   };
   const doSave = () => void flow.saveAll(saveBasic, saveImagesStep);
@@ -165,6 +169,9 @@ export function StoryEditorScreen({ storyId, onBack }: StoryEditorScreenProps) {
             />
             <View style={styles.imagesSection}>
               <Text variant="heading">이미지</Text>
+              {!isDraft && images.data?.workingCopySavedAt ? (
+                <Notice message="사진은 임시 저장됐어요. 이용자는 아직 이전 사진을 봐요. 저장·공개 탭에서 저장하면 함께 반영돼요." />
+              ) : null}
               {images.isError ? (
                 <View style={styles.centered}>
                   <Text variant="error">{`이미지를 불러오지 못했어요. (${messageOf(images.error)})`}</Text>

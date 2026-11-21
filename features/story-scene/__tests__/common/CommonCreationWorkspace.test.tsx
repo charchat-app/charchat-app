@@ -3,6 +3,7 @@ import { act, fireEvent, render as baseRender, screen, waitFor } from '@testing-
 import type { ReactElement, ReactNode } from 'react';
 import { defaultExpression, emptyScene, type CreationSaveDocument, type FewshotCharacter } from '@/shared/story-types';
 import type { CommonSaveRepository, EditorStory } from '@/features/story-publish';
+import { ApiError } from '@/lib/api-client';
 import { CommonCreationWorkspace } from '../../components/CommonCreationWorkspace';
 
 jest.mock('react-native-safe-area-context', () => require('react-native-safe-area-context/jest/mock').default);
@@ -99,7 +100,7 @@ it('탭 이동으로 표현·퓨샷을 공통 임시 저장하고 비공개 확�
   await fireEvent.press(screen.getByRole('tab', { name: '저장·공개' }));
   await waitFor(() => expect(save).toHaveBeenCalledTimes(2));
   await fireEvent.press(screen.getByRole('tab', { name: '비공개' }));
-  await fireEvent.press(screen.getByRole('button', { name: '비공개 저장' }));
+  await fireEvent.press(screen.getByRole('button', { name: '비공개로 저장' }));
   await waitFor(() => expect(stored().saveState).toBe('private'));
   expect(stored().speech.style).toEqual({ mode: 'custom', text: '  수정 원문 {{user}}\n' });
   expect(stored().fewshots[0].messages[0].body).toBe(' *원문* {{user}} ');
@@ -123,7 +124,7 @@ it('1000자·2000자 초과 사유를 모두 안내하고 공개·비공개를 �
     await fireEvent.press(screen.getByRole('tab', { name: target }));
     expect(screen.getByText('커스텀 문체는 1000자 이내로 작성해 주세요.')).toBeTruthy();
     expect(screen.getByText('퓨샷 전체를 2000자 이내로 작성해 주세요.')).toBeTruthy();
-    expect(screen.getByRole('button', { name: `${target} 저장` })).toBeDisabled();
+    expect(screen.getByRole('button', { name: `${target}로 저장` })).toBeDisabled();
   }
   expect(stored().saveState).toBe('draft');
   expect(stored().fewshots[0].messages[0].body).toHaveLength(2001);
@@ -176,3 +177,180 @@ it('저장 성패를 모르면 상단 실패 안내에 재시도 버튼을 보�
   await waitFor(() => expect(screen.queryByRole('button', { name: '실패한 저장 다시 시도' })).toBeNull());
   expect(stored().speech.style).toEqual({ mode: 'custom', text: '재시도할 문체' });
 });
+
+it('비공개 스토리의 임시 저장본을 불러오면 안내하고, 임시 저장과 저장(반영)을 나눠 보낸다 (2026-11-20 결정)', async () => {
+  const { repository: base, stored } = fixture();
+  let data: CreationSaveDocument = { ...stored(), saveState: 'private', workingCopySavedAt: '2026-11-20T07:00:00Z' };
+  const save = jest.fn(
+    async (
+      document: CreationSaveDocument,
+      state: CreationSaveDocument['saveState'],
+      _mode: string,
+      _key: string,
+      kind?: 'temporary' | 'save',
+    ) => {
+      // 서버처럼: 임시 저장은 공개 상태를 바꾸지 않고 임시 저장본 시각을 남기며, 저장은 임시 저장본을 비운다.
+      data =
+        kind === 'temporary'
+          ? { ...document, saveState: data.saveState, workingCopySavedAt: '2026-11-20T08:00:00Z' }
+          : { ...document, saveState: state, workingCopySavedAt: null };
+      return structuredClone(data);
+    },
+  );
+  const repository: CommonSaveRepository = { ...base, load: jest.fn(async () => structuredClone(data)), save };
+  await render(<CommonCreationWorkspace repository={repository} storyId="1" />);
+  await waitFor(() => expect(screen.getByText(/임시 저장한 내용이에요/)).toBeTruthy());
+  await fireEvent.press(screen.getByRole('tab', { name: '저장·공개' }));
+  expect(screen.getByRole('tab', { name: '미등록' })).toBeTruthy();
+
+  // 바뀐 내용이 없어도 임시 저장본이 있으면 "저장"으로 반영한다.
+  await fireEvent.press(screen.getByRole('button', { name: '비공개로 저장' }));
+  await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+  expect(save.mock.calls[0][4]).toBe('save');
+  await waitFor(() => expect(screen.queryByText(/임시 저장한 내용이에요/)).toBeNull());
+
+  // 다시 고친 뒤 임시 저장은 공개 상태를 바꾸지 않고 임시 저장본으로 남긴다.
+  await fireEvent.press(screen.getByRole('tab', { name: '말투·서술' }));
+  await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+  await fireEvent.changeText(screen.getByLabelText('커스텀 문체'), '고치는 중');
+  await fireEvent.press(screen.getByRole('tab', { name: '저장·공개' }));
+  await waitFor(() => expect(save).toHaveBeenCalledTimes(2));
+  expect(save.mock.calls[1][4]).toBe('temporary');
+  expect(stored().saveState).toBe('draft');
+  expect(data.saveState).toBe('private');
+  await waitFor(() => expect(screen.getByText(/임시 저장한 내용이에요/)).toBeTruthy());
+  // 비공개·공개 스토리를 미등록으로 되돌리는 저장은 막는다.
+  await fireEvent.press(screen.getByRole('tab', { name: '미등록' }));
+  expect(screen.getByRole('button', { name: '저장' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: '임시 저장' })).not.toBeDisabled();
+}, 30000);
+
+/** 서버처럼 임시 저장과 저장(반영)을 나눠 처리하는 비공개 스토리 저장소. 첫 응답은 직접 끝낼 수 있다. */
+function privateFixture() {
+  const { repository: base, stored } = fixture();
+  let data: CreationSaveDocument = { ...stored(), saveState: 'private', workingCopySavedAt: null };
+  let finishFirst: (() => void) | null = null;
+  const save = jest.fn(
+    async (
+      document: CreationSaveDocument,
+      state: CreationSaveDocument['saveState'],
+      _mode: string,
+      _key: string,
+      kind?: 'temporary' | 'save',
+    ) => {
+      if (save.mock.calls.length === 1) {
+        await new Promise<void>((resolve) => {
+          finishFirst = resolve;
+        });
+      }
+      data =
+        kind === 'temporary'
+          ? { ...document, saveState: data.saveState, workingCopySavedAt: '2026-11-20T08:00:00Z' }
+          : { ...document, saveState: state, workingCopySavedAt: null };
+      return structuredClone(data);
+    },
+  );
+  const repository: CommonSaveRepository = { ...base, load: jest.fn(async () => structuredClone(data)), save };
+  return { repository, save, data: () => data, finishFirst: () => finishFirst?.() };
+}
+
+it('탭 이동으로 자동 임시 저장이 시작된 직후 저장을 눌러도 무시하지 않고, 끝난 뒤 최신 내용을 반영한다 (2026-11-20 결정)', async () => {
+  const { repository, save, data, finishFirst } = privateFixture();
+  await render(<CommonCreationWorkspace repository={repository} storyId="1" />);
+  await waitFor(() => expect(screen.getByLabelText('커스텀 문체')).toBeTruthy());
+  await fireEvent.changeText(screen.getByLabelText('커스텀 문체'), '자동 저장 직후 반영할 문체');
+  // 탭 이동 → 자동 임시 저장 시작(응답 대기 중)
+  await fireEvent.press(screen.getByRole('tab', { name: '저장·공개' }));
+  await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+  expect(save.mock.calls[0][4]).toBe('temporary');
+
+  // 자동 임시 저장만 진행 중이면 저장 버튼은 눌린다. 누르면 기다렸다가 이어서 보낸다.
+  const saveButton = screen.getByRole('button', { name: '비공개로 저장' });
+  expect(saveButton).not.toBeDisabled();
+  await fireEvent.press(saveButton);
+  expect(screen.getByText('자동 임시 저장이 끝나면 이어서 저장합니다.')).toBeTruthy();
+  expect(screen.getByRole('button', { name: '비공개로 저장' })).toBeDisabled();
+  expect(save).toHaveBeenCalledTimes(1);
+
+  await act(async () => finishFirst());
+  await waitFor(() => expect(save).toHaveBeenCalledTimes(2));
+  expect(save.mock.calls[1][1]).toBe('private');
+  expect(save.mock.calls[1][4]).toBe('save');
+  expect(save.mock.calls[1][0].speech.style).toEqual({ mode: 'custom', text: '자동 저장 직후 반영할 문체' });
+  // 반영 후에는 임시 저장본이 비고 공개 상태는 유지된다(이전 내용이 남지 않음).
+  await waitFor(() => expect(data().workingCopySavedAt).toBeNull());
+  expect(data().saveState).toBe('private');
+  expect(data().speech.style).toEqual({ mode: 'custom', text: '자동 저장 직후 반영할 문체' });
+  await waitFor(() => expect(screen.getByText('저장한 설정과 같습니다.')).toBeTruthy());
+}, 30000);
+
+it('자동 임시 저장을 기다리던 저장은 앞선 저장의 성패를 모르면 보내지 않고 재시도 안내를 남긴다', async () => {
+  const { repository, save } = privateFixture();
+  save.mockImplementationOnce(async () => {
+    throw new Error('lost');
+  });
+  await render(<CommonCreationWorkspace repository={repository} storyId="1" />);
+  await waitFor(() => expect(screen.getByLabelText('커스텀 문체')).toBeTruthy());
+  await fireEvent.changeText(screen.getByLabelText('커스텀 문체'), '성패 모름');
+  await fireEvent.press(screen.getByRole('tab', { name: '저장·공개' }));
+  await waitFor(() => expect(screen.getByText(/저장 성공 여부를 확인하지 못했습니다/)).toBeTruthy());
+  expect(save).toHaveBeenCalledTimes(1);
+  expect(screen.getByRole('button', { name: '실패한 저장 다시 시도' })).toBeTruthy();
+});
+
+it('저장 범위와 다시 불러오기 동작을 화면에서 알린다', async () => {
+  const { repository, save } = privateFixture();
+  await render(<CommonCreationWorkspace repository={repository} storyId="1" />);
+  await waitFor(() => expect(screen.getByLabelText('커스텀 문체')).toBeTruthy());
+  await fireEvent.press(screen.getByRole('tab', { name: '저장·공개' }));
+  expect(screen.getByText(/말투·서술, 대화 예시, 인트로, 초기 상태와 임시 저장한 사진이 함께 반영돼요/)).toBeTruthy();
+  expect(screen.getByText(/기본 정보\(제목·소개·캐릭터 등\)는 포함되지 않아요/)).toBeTruthy();
+  expect(screen.queryByRole('button', { name: '저장한 전체 설정 다시 불러오기' })).toBeNull();
+
+  // 바꾼 내용이 남아 있으면(자동 임시 저장이 거절된 경우) 확인창에서도 임시 저장본을 불러온다고 알린다.
+  save.mockImplementationOnce(async () => {
+    throw new ApiError(422, 'REJECTED_FOR_TEST', '거절');
+  });
+  await fireEvent.press(screen.getByRole('tab', { name: '말투·서술' }));
+  await fireEvent.changeText(screen.getByLabelText('커스텀 문체'), '버릴 변경');
+  await fireEvent.press(screen.getByRole('tab', { name: '저장·공개' }));
+  await waitFor(() => expect(screen.getByText('저장하지 않은 변경이 있습니다.')).toBeTruthy());
+  await fireEvent.press(screen.getByRole('button', { name: '최신 편집 내용 다시 불러오기' }));
+  expect(screen.getByText(/저장하지 않은 변경 내용이 사라집니다\. 임시 저장한 내용이 있으면 그 내용을/)).toBeTruthy();
+  expect(screen.getByRole('button', { name: '변경 버리고 최신 편집 내용 불러오기' })).toBeTruthy();
+}, 30000);
+
+it('사진만 임시 저장돼 있어도 저장을 보내 함께 반영하고, 안내를 보여 준다 (안 B)', async () => {
+  const { repository: base, stored } = fixture();
+  let data: CreationSaveDocument = {
+    ...stored(),
+    saveState: 'private',
+    workingCopySavedAt: null,
+    imagesWorkingCopySavedAt: '2026-11-20T08:00:00Z',
+  };
+  const save = jest.fn(
+    async (
+      document: CreationSaveDocument,
+      state: CreationSaveDocument['saveState'],
+      _mode?: string,
+      _key?: string,
+      _kind?: 'temporary' | 'save',
+    ) => {
+      // 서버처럼: 저장(반영)하면 사진 임시 저장본도 함께 반영되어 비워진다.
+      data = { ...document, saveState: state, workingCopySavedAt: null, imagesWorkingCopySavedAt: null };
+      return structuredClone(data);
+    },
+  );
+  const repository: CommonSaveRepository = { ...base, load: jest.fn(async () => structuredClone(data)), save };
+  await render(<CommonCreationWorkspace repository={repository} storyId="1" />);
+  await waitFor(() => expect(screen.getByText(/임시 저장한 사진이 있어요/)).toBeTruthy());
+  expect(screen.getByText('임시 저장한 내용과 같습니다.')).toBeTruthy();
+  await fireEvent.press(screen.getByRole('tab', { name: '저장·공개' }));
+  expect(screen.getByText(/임시 저장한 사진이 함께 반영돼요/)).toBeTruthy();
+
+  // 2~4번은 바뀐 것이 없지만 사진 임시 저장본이 있으므로 「저장」을 보낸다.
+  await fireEvent.press(screen.getByRole('button', { name: '비공개로 저장' }));
+  await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+  expect(save.mock.calls[0][4]).toBe('save');
+  await waitFor(() => expect(screen.queryByText(/임시 저장한 사진이 있어요/)).toBeNull());
+}, 30000);

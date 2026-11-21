@@ -144,14 +144,14 @@ it('인트로별 장면과 공통 관계·호감도를 작성·검증하고 비�
   ]);
   await openTab('비공개');
   expect(screen.getByText('초기 호감도는 -100~100 사이 정수로 입력해 주세요.')).toBeTruthy();
-  expect(screen.getByRole('button', { name: '비공개 저장' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: '비공개로 저장' })).toBeDisabled();
 
   await openTab('초기 상태');
   await type('하린→유저 호감도', '-35');
   await openTab('저장·공개');
   await openTab('비공개');
-  await waitFor(() => expect(screen.getByRole('button', { name: '비공개 저장' })).not.toBeDisabled());
-  await press('비공개 저장');
+  await waitFor(() => expect(screen.getByRole('button', { name: '비공개로 저장' })).not.toBeDisabled());
+  await press('비공개로 저장');
   await waitFor(() => expect(stored().saveState).toBe('private'));
   const [first, second] = stored().intros.map((intro) => intro.scene);
   expect(first).toMatchObject({
