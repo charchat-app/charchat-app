@@ -11,10 +11,12 @@ import { formatSavedAt } from '../savedAt';
 export type StoryListScreenProps = {
   /** 스토리 편집 화면으로 이동한다 */
   onOpen: (id: string) => void;
+  /** 공개·비공개 저장본의 대화 상세로 이동한다 */
+  onStartChat?: (id: string) => void;
 };
 
 /** 제작 탭 첫 화면: 내 스토리 목록과 새 스토리 만들기 */
-export function StoryListScreen({ onOpen }: StoryListScreenProps) {
+export function StoryListScreen({ onOpen, onStartChat }: StoryListScreenProps) {
   const c = useTheme();
   const stories = useMyStories();
   const create = useCreateStory();
@@ -47,26 +49,36 @@ export function StoryListScreen({ onOpen }: StoryListScreenProps) {
           data={stories.data}
           keyExtractor={(s) => s.id}
           contentContainerStyle={styles.list}
-          renderItem={({ item }) => (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={`${item.title || '제목 없는 스토리'} 편집`}
-              onPress={() => onOpen(item.id)}
-              style={({ pressed }) => [
-                styles.row,
-                { backgroundColor: c.surface, borderColor: c.border },
-                pressed && styles.pressed,
-              ]}
-            >
-              <View style={styles.rowText}>
-                <Text variant="subheading" numberOfLines={1}>
-                  {item.title || '제목 없는 스토리'}
-                </Text>
-                <Text variant="caption">{formatSavedAt(item.updatedAt)}</Text>
+          renderItem={({ item }) => {
+            const title = item.title || '제목 없는 스토리';
+            return (
+              <View style={[styles.card, { backgroundColor: c.surface, borderColor: c.border }]}>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`${title} 편집`}
+                  onPress={() => onOpen(item.id)}
+                  style={({ pressed }) => [styles.row, pressed && styles.pressed]}
+                >
+                  <View style={styles.rowText}>
+                    <Text variant="subheading" numberOfLines={1}>
+                      {title}
+                    </Text>
+                    <Text variant="caption">{formatSavedAt(item.updatedAt)}</Text>
+                  </View>
+                  <Badge label={item.saveState} />
+                </Pressable>
+                {onStartChat && (item.saveState === '공개' || item.saveState === '비공개') ? (
+                  <Button
+                    label="대화 시작"
+                    accessibilityLabel={`${title} 대화 시작`}
+                    variant="secondary"
+                    style={styles.chatAction}
+                    onPress={() => onStartChat(item.id)}
+                  />
+                ) : null}
               </View>
-              <Badge label={item.saveState} />
-            </Pressable>
-          )}
+            );
+          }}
         />
       )}
     </Surface>
@@ -81,14 +93,14 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   status: { padding: Spacing.four, gap: Spacing.two },
   list: { padding: Spacing.four, gap: Spacing.two },
+  card: { borderWidth: 1, borderRadius: 10 },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.three,
     padding: Spacing.three,
-    borderWidth: 1,
-    borderRadius: 10,
   },
+  chatAction: { alignSelf: 'flex-end', marginHorizontal: Spacing.three, marginBottom: Spacing.three },
   rowText: { flex: 1, minWidth: 0, gap: Spacing.half },
   pressed: { opacity: 0.85 },
 });
