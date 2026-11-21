@@ -115,7 +115,7 @@ it('KAN-16: 상세를 모두 펼쳐 보여 주고 첫 인트로 말풍선을 순
   expect(screen.queryByText('비가 내린다.')).not.toBeOnTheScreen();
   expect(fetchMock).toHaveBeenCalledTimes(1);
   expect(fetchMock).toHaveBeenCalledWith(STORY_PATH, expect.objectContaining({ signal: expect.anything() }));
-});
+}, 20_000); // 첫 React Native 렌더는 CI의 콜드 캐시에서 기본 5초를 넘길 수 있다.
 
 it('KAN-16: 인트로와 프로필을 선택하고 이름 원문으로 대화방을 한 번만 만든다', async () => {
   let finishPost!: (result: Response) => void;
