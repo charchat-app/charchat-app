@@ -5,6 +5,7 @@ import { Animated, StyleSheet, View } from 'react-native';
 import { Button, FormField, PhotoSlot, Text, TextArea, TextField } from '@/components/ui';
 import { MinTouchSize, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+import { ImageCropper, ServerImage, useImageUpload, type MediaImage } from '@/shared/media';
 import {
   MAX_PRESET_TEXT_LENGTH,
   MAX_USER_PROFILE_PRESETS,
@@ -29,6 +30,8 @@ import { useDragList, type DragList } from './useDragList';
 
 /** 카드 사이 간격. 끌어 놓을 자리 계산에도 같은 값을 쓴다. */
 const ITEM_GAP = Spacing.three;
+/** 유저 프로필 이미지 미리보기(1:1) 한 변. PhotoSlot 기본 너비(목업 78px)와 같다. */
+const PHOTO_SIZE = 78;
 
 /** fromKey 프리셋을 toKey 프리셋 자리로 옮긴다. 최신 값 기준으로 계산하며, 둘 중 하나가 없으면 그대로 둔다. */
 function movePresetTo(presets: PresetValues[], fromKey: string, toKey: string): PresetValues[] {
@@ -49,9 +52,16 @@ export type UserProfilePresetEditorProps = {
   onChange: (update: (presets: PresetValues[]) => PresetValues[]) => void;
   /**
    * 이미 올라가 있는 이미지 중 하나를 고르는 동작(호스트가 연결). 고른 이미지(imageId·표시 주소)를 돌려주고,
-   * 취소하면 undefined를 돌려준다. 이 컴포넌트는 업로드를 하지 않으며, 없으면 이미지 버튼을 만들지 않는다.
+   * 취소하면 undefined를 돌려준다. 이 경로에서는 업로드를 하지 않는다.
+   * onSelectImage도 uploadImages도 없으면 이미지 버튼을 만들지 않는다.
    */
   onSelectImage?: (key: string) => Promise<PresetImageChoice | null | undefined>;
+  /**
+   * true면 이 컴포넌트가 직접 이미지를 올린다(AC03): 앨범에서 고르기 → 1:1 자르기 → 유저 프로필(profile) 대상 업로드.
+   * 업로드가 끝나면 서버 imageId와 표시 주소를 그 프리셋에 지정한다. 취소·실패하면 기존 이미지를 그대로 둔다.
+   * onSelectImage를 함께 넘기면 onSelectImage가 우선한다. 기본값은 false(업로드하지 않음).
+   */
+  uploadImages?: boolean;
   editable?: boolean;
   /**
    * 끌기 시작(true)·끝(false) 알림. 바깥 스크롤을 감싼 호스트가 끄는 동안 스크롤을 멈출 때 쓴다(선택).
@@ -76,9 +86,11 @@ export function UserProfilePresetEditor({
   characterNames = [],
   onChange,
   onSelectImage,
+  uploadImages = false,
   editable = true,
   onDragActiveChange,
 }: UserProfilePresetEditorProps) {
+  const imageMode: ImageMode = onSelectImage ? 'select' : uploadImages ? 'upload' : 'none';
   const { issues } = validatePresets(presets, characterNames);
   const errors = issuesToErrors(issues);
   const full = presets.length >= MAX_USER_PROFILE_PRESETS;
@@ -108,9 +120,9 @@ export function UserProfilePresetEditor({
           preset={preset}
           nameError={errors[`${preset.key}.name`]}
           textError={errors[`${preset.key}.text`]}
-          imageError={onSelectImage ? errors[`${preset.key}.image`] : undefined}
+          imageError={imageMode !== 'none' ? errors[`${preset.key}.image`] : undefined}
           editable={editable}
-          canSelectImage={onSelectImage !== undefined}
+          imageMode={imageMode}
           onName={(name) => onChange((v) => updatePreset(v, preset.key, { name }))}
           onDetail={(detail) => onChange((v) => updatePreset(v, preset.key, { detail }))}
           onToggleUserName={() => onChange((v) => toggleUserNamePreset(v, preset.key))}
@@ -130,6 +142,9 @@ export function UserProfilePresetEditor({
   );
 }
 
+/** 이미지 지정 방식: 호스트가 고르기(select), 직접 업로드(upload), 이미지 칸 없음(none) */
+type ImageMode = 'select' | 'upload' | 'none';
+
 type PresetItemProps = {
   index: number;
   last: boolean;
@@ -144,7 +159,7 @@ type PresetItemProps = {
   textError?: string;
   imageError?: string;
   editable: boolean;
-  canSelectImage: boolean;
+  imageMode: ImageMode;
   onName: (name: string) => void;
   onDetail: (detail: string) => void;
   onToggleUserName: () => void;
@@ -168,7 +183,7 @@ function PresetItem({
   textError,
   imageError,
   editable,
-  canSelectImage,
+  imageMode,
   onName,
   onDetail,
   onToggleUserName,
@@ -179,17 +194,30 @@ function PresetItem({
 }: PresetItemProps) {
   const c = useTheme();
   const [pickError, setPickError] = useState<string | null>(null);
-  // 이미지 선택·해제마다 번호를 올린다. 늦게 끝난 이전 선택은 번호가 달라 결과를 반영하지 않는다.
+  // 이미지 선택·업로드 시작·해제·카드 제거(언마운트)마다 번호를 올린다.
+  // 늦게 끝난 이전 선택·업로드는 번호가 달라 결과를 반영하지 않는다.
   const pickSeq = useRef(0);
+  /** 진행 중인 업로드가 시작될 때의 번호. 업로드 결과는 이 번호가 아직 최신일 때만 반영한다. */
+  const uploadSeq = useRef(-1);
   useEffect(
     () => () => {
       pickSeq.current += 1;
     },
     [],
   );
+  // 업로드 모드: 카드마다 업로드 흐름을 따로 둔다. 카드는 프리셋 key로 그려지므로 순서가 바뀌어도
+  // 이 흐름은 처음 고른 프리셋에 남고, 결과는 key 기준으로 그 프리셋에만 붙는다.
+  const upload = useImageUpload({
+    target: 'profile',
+    onUploaded: (image: MediaImage) => {
+      if (uploadSeq.current !== pickSeq.current) return;
+      onApplyImage({ imageId: image.imageId, photoUrl: image.uri });
+    },
+  });
   const label = `프로필 ${index + 1}`;
   const usesUserName = isUserNamePreset(preset.name);
   const total = presetTotalLength(preset);
+  const uploading = imageMode === 'upload' && (upload.busy || upload.crop !== null);
 
   const pickImage = async () => {
     pickSeq.current += 1;
@@ -205,9 +233,27 @@ function PresetItem({
     }
   };
 
+  const uploadImage = () => {
+    if (!editable || uploading) return;
+    pickSeq.current += 1;
+    uploadSeq.current = pickSeq.current;
+    void upload.pick();
+  };
+
+  // 자르기 확인은 고르기 때 받은 번호를 그대로 쓴다. 새 번호를 주면 자르기 창이 열린 사이의 해제가 무효가 된다.
+  // 고른 뒤 해제·새 선택이 있었으면 그 선택은 이미 낡았으므로 올리지 않고 자르기 창만 닫는다.
+  const confirmCrop = (rect: Parameters<typeof upload.confirmCrop>[0]) => {
+    if (uploadSeq.current !== pickSeq.current) {
+      upload.cancelCrop();
+      return;
+    }
+    void upload.confirmCrop(rect);
+  };
+
   const clearImage = () => {
     pickSeq.current += 1;
     setPickError(null);
+    upload.clearError();
     onApplyImage(null);
   };
 
@@ -268,7 +314,7 @@ function PresetItem({
           <Button label={`${label} 삭제`} variant="danger" onPress={onRemove} disabled={!editable} />
         </View>
       </View>
-      {canSelectImage ? (
+      {imageMode === 'select' ? (
         <View style={styles.photoRow}>
           <PhotoSlot uri={preset.photoUrl} accessibilityLabel={`${label} 이미지 미리보기`} />
           <View style={styles.actions}>
@@ -281,6 +327,56 @@ function PresetItem({
             />
           </View>
         </View>
+      ) : null}
+      {imageMode === 'upload' ? (
+        <View style={styles.photoRow}>
+          {/* 서버 이미지는 소유자만 볼 수 있어 인증을 붙여 불러오는 ServerImage로 보여 준다 */}
+          <View
+            accessible
+            accessibilityLabel={`${label} 이미지 미리보기`}
+            style={[styles.photo, { backgroundColor: c.placeholderBackground, borderColor: c.placeholderBorder }]}
+          >
+            {preset.photoUrl ? (
+              <ServerImage
+                testID={`preset-photo-${preset.key}`}
+                uri={preset.photoUrl}
+                resizeMode="cover"
+                style={styles.photoImage}
+                accessibilityIgnoresInvertColors
+              />
+            ) : null}
+          </View>
+          <View style={styles.actions}>
+            <Button
+              label={`${label} 이미지 선택`}
+              variant="secondary"
+              onPress={uploadImage}
+              disabled={!editable || uploading}
+            />
+            <Button
+              label={`${label} 이미지 해제`}
+              variant="secondary"
+              onPress={clearImage}
+              disabled={!editable || preset.imageId === null}
+            />
+          </View>
+        </View>
+      ) : null}
+      {imageMode === 'upload' && upload.busy && upload.crop === null ? (
+        <Text variant="caption">이미지를 올리는 중…</Text>
+      ) : null}
+      {imageMode === 'upload' && upload.error ? (
+        <Text variant="error">{`${label} 이미지: ${upload.error}`}</Text>
+      ) : null}
+      {imageMode === 'upload' && upload.crop ? (
+        <ImageCropper
+          uri={upload.crop.uri}
+          imageSize={upload.crop.imageSize}
+          target="profile"
+          busy={upload.busy}
+          onCancel={upload.cancelCrop}
+          onConfirm={confirmCrop}
+        />
       ) : null}
       {pickError ? <Text variant="error">{pickError}</Text> : null}
       {imageError ? <Text variant="error">{imageError}</Text> : null}
@@ -339,4 +435,13 @@ const styles = StyleSheet.create({
   handleDisabled: { opacity: 0.3 },
   actions: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.two },
   photoRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.three },
+  photo: {
+    width: PHOTO_SIZE,
+    height: PHOTO_SIZE,
+    borderWidth: 1,
+    borderRadius: Radius.sm + 2,
+    overflow: 'hidden',
+    flexShrink: 0,
+  },
+  photoImage: { width: '100%', height: '100%' },
 });
