@@ -17,7 +17,7 @@ import {
   type CreationSaveMode,
   type CreationSaveKind,
 } from '@/shared/story-types';
-import type { CommonSaveRepository } from '../commonRepository';
+import type { CommonSaveDocument, CommonSaveRepository } from '../commonRepository';
 import { storyKeys } from './useStories';
 
 export function completionIssues(document: CreationSaveDocument): string[] {
@@ -107,6 +107,18 @@ export function rejectionMessage(failure: ApiError): string {
   const detail = failure.detail.trim();
   return detail && detail !== `요청 실패: ${failure.status}` ? detail : '저장이 거절되었습니다. 입력은 유지됩니다.';
 }
+/** CREATE-US-05 비공개·공개 스토리의 유저 프로필 임시 저장본이 남아 있는지 (공통 응답 presets_pending) */
+function hasPendingPresets(document: CreationSaveDocument): boolean {
+  return (document as CommonSaveDocument).presetsPending === true;
+}
+/**
+ * 2~4번 작업 화면의 저장은 유저 프로필(presets)을 싣지 않는다. 불러온 문서에 presets가 있어도 빼서
+ * 서버가 기존 프리셋(임시 저장본 포함)을 유지하게 한다. 프리셋은 편집 화면의 유저 프로필 탭에서만 보낸다.
+ */
+function withoutPresets(document: CreationSaveDocument): CreationSaveDocument {
+  const { presets: _presets, ...rest } = document as CommonSaveDocument;
+  return rest;
+}
 export function useCommonSave(repository: CommonSaveRepository, options: Options) {
   const queryClient = useQueryClient();
   const [saving, setSaving] = useState(false),
@@ -169,16 +181,17 @@ export function useCommonSave(repository: CommonSaveRepository, options: Options
           return false;
         }
       }
-      // 바뀐 것이 없으면 보내지 않는다. 단, 임시 저장본(2~4번 또는 사진)이 남아 있으면 "저장"으로 반영해야 한다.
+      // 바뀐 것이 없으면 보내지 않는다. 단, 임시 저장본(2~4번·사진·CREATE-US-05 유저 프로필)이 남아 있으면 "저장"으로 반영해야 한다.
       const unchanged =
         kind === 'temporary' ||
         (state === current.document.saveState &&
           !current.document.workingCopySavedAt &&
-          !current.document.imagesWorkingCopySavedAt);
+          !current.document.imagesWorkingCopySavedAt &&
+          !hasPendingPresets(current.document));
       if (!current.dirty && unchanged) return true;
     }
     const operation = pending.current ?? {
-      document: current.document,
+      document: withoutPresets(current.document),
       state,
       mode,
       kind,

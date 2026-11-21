@@ -215,6 +215,37 @@ async function main() {
     () => common.save(published, 'draft', 'manual', 'live-common-back'),
     (error) => error.status === 409,
   );
+  const imageId = Number(process.argv[4]);
+  if (imageId) {
+    const beforePresets = await common.load(id);
+    const profiles = [{ name: '{{user}}', detail: '', imageId, photoUrl: null }];
+    const staged = await common.save(
+      { ...beforePresets, presets: profiles, preserveScene: true },
+      'public',
+      'manual',
+      'live-preset-stage',
+      'temporary',
+    );
+    assert.equal(staged.presetsPending, true);
+    const reopened = await common.load(id);
+    assert.equal(reopened.presets[0].name, '{{user}}');
+    assert.equal(reopened.presets[0].detail, '');
+    assert.equal(reopened.presets[0].imageId, imageId);
+    assert.ok(reopened.presets[0].photoUrl.startsWith(`${base}/creation/image-files/`));
+    const final = await common.save({ ...reopened, presets: undefined }, 'public', 'manual', 'live-preset-final');
+    assert.ok(final.presets[0].id);
+    assert.deepEqual(final.intros, beforePresets.intros);
+    await common.save(
+      { ...final, presets: [], preserveScene: true },
+      'public',
+      'manual',
+      'live-preset-empty',
+      'temporary',
+    );
+    const emptyProfiles = await common.load(id);
+    await common.save({ ...emptyProfiles, presets: undefined }, 'public', 'manual', 'live-preset-empty-final');
+    assert.deepEqual((await common.load(id)).presets, []);
+  }
   console.log(
     JSON.stringify({
       passed: true,
