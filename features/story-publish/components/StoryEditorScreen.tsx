@@ -6,10 +6,23 @@ import { Badge, Button, Notice, ScreenHeader, Surface, Text, TopTabs } from '@/c
 import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { ApiError, type FieldIssue } from '@/lib/api-client';
-import { BasicInfoForm, fromDraft, toDraftPatch, type BasicInfoValues } from '@/features/story-setup';
+import {
+  BasicInfoForm,
+  StoryImagesEditor,
+  fromDraft,
+  mergeCharacters,
+  requiredImageMessage,
+  sameImages,
+  toDraftPatch,
+  toImagesPatch,
+  type BasicInfoValues,
+  type StoryImagesValues,
+} from '@/features/story-setup';
 
 import { toAppIssues } from '../api';
 import { applySavedIds, currentBasicIssues, toFieldErrors } from '../formSync';
+import { useSaveFlow } from '../hooks/useSaveFlow';
+import { useSaveStoryImages, useStoryImages } from '../hooks/useStoryImages';
 import { useSaveStoryBasic, useStory } from '../hooks/useStories';
 import { formatSavedAt } from '../savedAt';
 
@@ -36,6 +49,16 @@ export function StoryEditorScreen({ storyId, onBack }: StoryEditorScreenProps) {
   // 서버 issues의 characters[i]가 어느 캐릭터인지 알려면, 그 판정을 받은 저장본의 캐릭터 순서(key)가 필요하다.
   const [savedKeys, setSavedKeys] = useState<string[]>([]);
   const [attemptKeys, setAttemptKeys] = useState<string[]>([]);
+  // CREATE-US-06: 이미지 목록. 기본 정보 저장이 성공한 뒤 이어서 저장한다(캐릭터 id가 있어야 연결 가능).
+  const images = useStoryImages(storyId);
+  const saveImages = useSaveStoryImages(storyId);
+  const [imageValues, setImageValues] = useState<StoryImagesValues | null>(null);
+  // 기본 정보 저장부터 이미지 저장까지 한 번의 저장으로 묶어 잠그고, 어느 단계에서 실패했는지 기억한다.
+  const flow = useSaveFlow();
+
+  useEffect(() => {
+    if (images.data && imageValues === null) setImageValues(images.data.values);
+  }, [images.data, imageValues]);
 
   // 처음 불러온 저장본으로 입력값을 채운다. 이후 서버 응답이 입력 중인 내용을 덮어쓰지 않게 한 번만 한다.
   useEffect(() => {
@@ -70,25 +93,46 @@ export function StoryEditorScreen({ storyId, onBack }: StoryEditorScreenProps) {
   );
   const errors = toFieldErrors(issues, issueKeys);
   const isDraft = saved.saveState === '임시 저장';
-  const doSave = () => {
+  /** 1단계: 기본 정보 저장. 실패 안내는 save.error로 보여 준다. */
+  const saveBasic = async () => {
     const sent = values.characters.map((ch) => ch.key);
     setAttemptKeys(sent);
-    save.mutate(toDraftPatch(values), {
-      onSuccess: (story) => {
-        // 새 캐릭터에 서버 id를 붙여 다음 저장 때 같은 캐릭터로 수정되게 한다.
-        setValues((v) =>
-          v
-            ? applySavedIds(
-                v,
-                sent,
-                story.characters.map((ch) => ch.id ?? ''),
-              )
-            : v,
-        );
-        setSavedKeys(sent);
-      },
-    });
+    try {
+      const savedStory = await save.mutateAsync(toDraftPatch(values));
+      // 새 캐릭터에 서버 id를 붙여 다음 저장 때 같은 캐릭터로 수정되게 한다.
+      setValues((v) =>
+        v
+          ? applySavedIds(
+              v,
+              sent,
+              savedStory.characters.map((ch) => ch.id ?? ''),
+            )
+          : v,
+      );
+      setSavedKeys(sent);
+      return true;
+    } catch {
+      return false;
+    }
   };
+  /**
+   * 2단계: 기본 정보 저장으로 바뀐 캐릭터 목록(추가·삭제·이름)을 다시 불러와 반영한 뒤, 바뀐 이미지가 있으면 저장한다.
+   * 재조회나 저장이 실패하면 예외를 던져 「사진만 다시 저장」을 보여 준다. 고른 사진은 그대로 둔다.
+   */
+  const saveImagesStep = async () => {
+    if (imageValues === null) return;
+    const fresh = await images.refetch();
+    if (fresh.isError || !fresh.data) throw fresh.error ?? new Error('이미지 목록을 다시 불러오지 못했어요.');
+    const merged = mergeCharacters(imageValues, fresh.data.values);
+    setImageValues(merged);
+    if (sameImages(merged, fresh.data.values)) return;
+    const snapshot = await saveImages.mutateAsync(toImagesPatch(merged));
+    setImageValues(snapshot.values);
+  };
+  const doSave = () => void flow.saveAll(saveBasic, saveImagesStep);
+  const retryImages = () => void flow.retryImages(saveImagesStep);
+  const unsavedCharacterNames = values.characters.filter((ch) => !ch.id).map((ch) => ch.name || '새 캐릭터');
+  const saving = flow.running;
 
   return (
     <Surface style={styles.container}>
@@ -119,6 +163,25 @@ export function StoryEditorScreen({ storyId, onBack }: StoryEditorScreenProps) {
               errors={errors}
               onDragActiveChange={setDragging}
             />
+            <View style={styles.imagesSection}>
+              <Text variant="heading">이미지</Text>
+              {images.isError ? (
+                <View style={styles.centered}>
+                  <Text variant="error">{`이미지를 불러오지 못했어요. (${messageOf(images.error)})`}</Text>
+                  <Button label="다시 시도" variant="secondary" onPress={() => void images.refetch()} />
+                </View>
+              ) : imageValues === null ? (
+                <Text variant="caption">이미지 불러오는 중…</Text>
+              ) : (
+                <StoryImagesEditor
+                  values={imageValues}
+                  onChange={(update) => setImageValues((v) => (v ? update(v) : v))}
+                  disabled={saving}
+                  unsavedCharacterNames={unsavedCharacterNames}
+                  onDragActiveChange={setDragging}
+                />
+              )}
+            </View>
           </>
         ) : (
           <Notice message={`${TABS[tab]} 탭은 아직 연결되지 않았어요.`} />
@@ -129,10 +192,15 @@ export function StoryEditorScreen({ storyId, onBack }: StoryEditorScreenProps) {
         style={[styles.footer, { borderTopColor: c.border, backgroundColor: c.background }]}
       >
         <View style={styles.status}>
-          {save.isPending ? (
+          {saving ? (
             <Text variant="caption">저장 중…</Text>
           ) : save.isError ? (
             <Text variant="error">{saveErrorMessage(save.error)}</Text>
+          ) : flow.imageError ? (
+            <View style={styles.imageFailure}>
+              <Text variant="error">{imageSaveErrorMessage(flow.imageError, imageValues)}</Text>
+              <Button label="사진만 다시 저장" variant="secondary" onPress={retryImages} disabled={saving} />
+            </View>
           ) : (
             <Text variant="caption">{formatSavedAt(saved.updatedAt)}</Text>
           )}
@@ -140,11 +208,30 @@ export function StoryEditorScreen({ storyId, onBack }: StoryEditorScreenProps) {
         <Button
           label={save.isError ? '다시 저장' : isDraft ? '임시 저장' : '변경 내용 저장'}
           onPress={doSave}
-          disabled={save.isPending}
+          disabled={saving}
         />
       </SafeAreaView>
     </Surface>
   );
+}
+
+/** 기본 정보는 저장됐고 사진 단계만 실패했음을 알리는 첫 문장 */
+const IMAGE_STEP_FAILED = '기본 정보는 저장됐지만 사진은 반영되지 않았어요.';
+
+/**
+ * 이미지 단계 실패 안내. 어느 단계까지 성공했는지 먼저 알린다.
+ * 완성 저장된 스토리에서 캐릭터의 마지막 이미지를 지우면 서버가 거절한다(CREATE-US-06-AC08).
+ * 이때는 누락된 캐릭터 이름을 알려 준다.
+ */
+function imageSaveErrorMessage(error: Error, values: StoryImagesValues | null): string {
+  if (error instanceof ApiError && error.code === 'CHARACTER_IMAGE_REQUIRED') {
+    return `${IMAGE_STEP_FAILED} ${requiredImageMessage(
+      values,
+      error.issues.map((issue) => issue.value ?? ''),
+    )}`;
+  }
+  const reason = error instanceof ApiError ? error.detail : error.message || '알 수 없는 오류가 발생했습니다.';
+  return `${IMAGE_STEP_FAILED} 고른 사진은 그대로예요. (${reason})`;
 }
 
 function Centered({ message, onBack, onRetry }: { message: string; onBack: () => void; onRetry?: () => void }) {
@@ -184,5 +271,7 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
   },
   status: { flex: 1, minWidth: 0 },
+  imageFailure: { gap: Spacing.one, alignItems: 'flex-start' },
   centered: { padding: Spacing.four, gap: Spacing.two },
+  imagesSection: { marginTop: Spacing.six, gap: Spacing.three },
 });

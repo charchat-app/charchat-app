@@ -305,3 +305,9 @@ it('429·408 실패는 같은 요청으로 재시도할 수 있게 남겨 둔다
   expect(save.mock.calls[1][3]).toBe(save.mock.calls[0][3]);
   expect(result.current.pendingSave).toBe(false);
 });
+
+it('거절 안내 문구: 캐릭터 이미지가 빠지면 1번에서 채우도록 안내한다 (CREATE-US-06-AC08)', () => {
+  expect(rejectionMessage(new ApiError(422, 'CHARACTER_IMAGE_REQUIRED', '서버 문구'))).toBe(
+    '1번 기본 정보에서 등장 캐릭터마다 이미지를 1장 이상 등록해 주세요.',
+  );
+});
