@@ -420,7 +420,10 @@ it.each(['다시 불러오기', '재진입'] as const)(
       );
       await fireEvent.press(await screen.findByRole('radio', { name: '여행자' }));
     }
-    expect(await screen.findByRole('button', { name: '대화 시작', disabled: false })).toBeOnTheScreen();
+    // 콜드 실행(CI 첫 렌더)에서 재조회 뒤 다시 그리기가 기본 1초를 넘을 수 있어 대기만 늘린다.
+    expect(
+      await screen.findByRole('button', { name: '대화 시작', disabled: false }, { timeout: 5000 }),
+    ).toBeOnTheScreen();
     expect(fetchMock.mock.calls.map(([, options]) => options?.method ?? 'GET')).toEqual([
       'GET',
       'POST',
@@ -430,6 +433,7 @@ it.each(['다시 불러오기', '재진입'] as const)(
       'GET',
     ]);
   },
+  15000,
 );
 
 it('KAN-16: 재전송 422 전에 시작한 GET은 버리고 새 GET에서 확인한 방만 이어한다', async () => {
