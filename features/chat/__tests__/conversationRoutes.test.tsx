@@ -27,6 +27,16 @@ jest.mock('@/lib/api-client', () => {
     else process.env.EXPO_PUBLIC_API_URL = previous;
   }
 });
+// CHAT-US-02 대화 이력 조회는 chatRoom 테스트에서 검증한다. 이 파일은 CHAT-US-01 조회 횟수만 센다.
+jest.mock('@/features/chat/api', () => ({
+  ...jest.requireActual('@/features/chat/api'),
+  getChatTurns: jest.fn(async () => ({
+    messages: [],
+    active_generation: null,
+    last_failed_generation: null,
+    model: null,
+  })),
+}));
 
 const STORY_PATH = 'http://localhost:8000/api/v1/conversation/stories/7';
 const story = {
@@ -651,7 +661,9 @@ it('KAN-16: 대화방에 서버의 말풍선, 등장 캐릭터, 적용된 모델
   expect(screen.getAllByTestId('conversation-bubble')[0]).toHaveTextContent('나레이터문이 열렸다.');
   expect(screen.getAllByTestId('conversation-bubble')[2]).toHaveTextContent('유저실례합니다.');
   expect(screen.queryByText('읽기 전용')).not.toBeOnTheScreen();
-  expect(screen.queryByRole('button', { name: /모델|전송/ })).not.toBeOnTheScreen();
+  expect(screen.queryByRole('button', { name: /모델/ })).not.toBeOnTheScreen();
+  // CHAT-US-02: 열린 대화방에는 입력창이 있다.
+  expect(await screen.findByLabelText('메시지 입력')).toBeOnTheScreen();
   expect(fetchMock).toHaveBeenCalledWith(
     'http://localhost:8000/api/v1/conversation/sessions/19',
     expect.objectContaining({ signal: expect.anything() }),
@@ -669,6 +681,7 @@ it('KAN-16: 읽기 전용 방은 빈 대화 상태를 표시하고 모델 값이
   expect(screen.getByText('표시할 대화가 없습니다.')).toBeOnTheScreen();
   expect(screen.queryByText(/모델/)).not.toBeOnTheScreen();
   expect(screen.queryByRole('button', { name: /전송/ })).not.toBeOnTheScreen();
+  expect(screen.queryByLabelText('메시지 입력')).not.toBeOnTheScreen();
 });
 
 it('KAN-16: 대화방 재조회가 읽기 전용 응답을 반환하면 대화 내용을 계속 표시한다', async () => {
