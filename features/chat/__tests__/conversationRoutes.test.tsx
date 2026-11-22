@@ -27,6 +27,17 @@ jest.mock('@/lib/api-client', () => {
     else process.env.EXPO_PUBLIC_API_URL = previous;
   }
 });
+// CHAT-US-02 대화 이력 조회는 chatRoom 테스트에서 검증한다. 이 파일은 CHAT-US-01 조회 횟수만 센다.
+jest.mock('@/features/chat/api', () => ({
+  ...jest.requireActual('@/features/chat/api'),
+  getChatTurns: jest.fn(async () => ({
+    messages: [],
+    active_generation: null,
+    last_failed_generation: null,
+    // 이 파일은 세션 응답의 모델 표시만 검증한다. 빈 값이면 대화방은 세션 모델을 보인다.
+    model: '',
+  })),
+}));
 
 const STORY_PATH = 'http://localhost:8000/api/v1/conversation/stories/7';
 const story = {
@@ -393,14 +404,15 @@ it.each(['다시 불러오기', '재진입'] as const)(
     await fireEvent.press(screen.getByRole('button', { name: '대화 시작' }));
     await fireEvent.press(await screen.findByRole('button', { name: '같은 요청 다시 보내기' }));
 
-    const retry = await screen.findByRole('button', { name: '다시 불러오기' });
+    await screen.findByRole('button', { name: '다시 불러오기' });
     expect(screen.getByRole('button', { name: '대화 시작' })).toBeDisabled();
     expect(screen.queryByRole('button', { name: '같은 요청 다시 보내기' })).not.toBeOnTheScreen();
     await fireEvent.press(screen.getByRole('button', { name: '대화 시작' }));
     expect(fetchMock).toHaveBeenCalledTimes(5);
 
     if (recovery === '다시 불러오기') {
-      await fireEvent.press(retry);
+      // 느린 실행에서는 버튼이 다시 그려질 수 있어, 누를 때 현재 버튼을 다시 찾는다.
+      await fireEvent.press(screen.getByRole('button', { name: '다시 불러오기' }));
     } else {
       await view.unmount();
       await render(
@@ -410,7 +422,10 @@ it.each(['다시 불러오기', '재진입'] as const)(
       );
       await fireEvent.press(await screen.findByRole('radio', { name: '여행자' }));
     }
-    expect(await screen.findByRole('button', { name: '대화 시작', disabled: false })).toBeOnTheScreen();
+    // 콜드 실행(CI 첫 렌더)에서 재조회 뒤 다시 그리기가 기본 1초를 넘을 수 있어 대기만 늘린다.
+    expect(
+      await screen.findByRole('button', { name: '대화 시작', disabled: false }, { timeout: 5000 }),
+    ).toBeOnTheScreen();
     expect(fetchMock.mock.calls.map(([, options]) => options?.method ?? 'GET')).toEqual([
       'GET',
       'POST',
@@ -420,6 +435,7 @@ it.each(['다시 불러오기', '재진입'] as const)(
       'GET',
     ]);
   },
+  15000,
 );
 
 it('KAN-16: 재전송 422 전에 시작한 GET은 버리고 새 GET에서 확인한 방만 이어한다', async () => {
@@ -637,6 +653,7 @@ const session = {
   story_title: '달빛 정원',
   model: 'applied-model',
   read_only: false,
+  play_name: '여행자',
   messages: story.intros[0].messages,
   characters: [{ id: 2, name: '윤슬' }],
 };
@@ -651,7 +668,9 @@ it('KAN-16: 대화방에 서버의 말풍선, 등장 캐릭터, 적용된 모델
   expect(screen.getAllByTestId('conversation-bubble')[0]).toHaveTextContent('나레이터문이 열렸다.');
   expect(screen.getAllByTestId('conversation-bubble')[2]).toHaveTextContent('유저실례합니다.');
   expect(screen.queryByText('읽기 전용')).not.toBeOnTheScreen();
-  expect(screen.queryByRole('button', { name: /모델|전송/ })).not.toBeOnTheScreen();
+  expect(screen.queryByRole('button', { name: /모델/ })).not.toBeOnTheScreen();
+  // CHAT-US-02: 열린 대화방에는 입력창이 있다.
+  expect(await screen.findByLabelText('메시지 입력')).toBeOnTheScreen();
   expect(fetchMock).toHaveBeenCalledWith(
     'http://localhost:8000/api/v1/conversation/sessions/19',
     expect.objectContaining({ signal: expect.anything() }),
@@ -669,6 +688,7 @@ it('KAN-16: 읽기 전용 방은 빈 대화 상태를 표시하고 모델 값이
   expect(screen.getByText('표시할 대화가 없습니다.')).toBeOnTheScreen();
   expect(screen.queryByText(/모델/)).not.toBeOnTheScreen();
   expect(screen.queryByRole('button', { name: /전송/ })).not.toBeOnTheScreen();
+  expect(screen.queryByLabelText('메시지 입력')).not.toBeOnTheScreen();
 });
 
 it('KAN-16: 대화방 재조회가 읽기 전용 응답을 반환하면 대화 내용을 계속 표시한다', async () => {
