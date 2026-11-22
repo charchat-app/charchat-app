@@ -404,14 +404,15 @@ it.each(['다시 불러오기', '재진입'] as const)(
     await fireEvent.press(screen.getByRole('button', { name: '대화 시작' }));
     await fireEvent.press(await screen.findByRole('button', { name: '같은 요청 다시 보내기' }));
 
-    const retry = await screen.findByRole('button', { name: '다시 불러오기' });
+    await screen.findByRole('button', { name: '다시 불러오기' });
     expect(screen.getByRole('button', { name: '대화 시작' })).toBeDisabled();
     expect(screen.queryByRole('button', { name: '같은 요청 다시 보내기' })).not.toBeOnTheScreen();
     await fireEvent.press(screen.getByRole('button', { name: '대화 시작' }));
     expect(fetchMock).toHaveBeenCalledTimes(5);
 
     if (recovery === '다시 불러오기') {
-      await fireEvent.press(retry);
+      // 느린 실행에서는 버튼이 다시 그려질 수 있어, 누를 때 현재 버튼을 다시 찾는다.
+      await fireEvent.press(screen.getByRole('button', { name: '다시 불러오기' }));
     } else {
       await view.unmount();
       await render(
