@@ -36,12 +36,18 @@ export function ChatRoom({ session, onBack }: { session: ConversationSession; on
   const turns = useChatTurns(sessionId, true);
   const { draft, update } = useChatDraft(sessionId);
   const sender = useSendMessage(sessionId);
-  const retrier = useRetryGeneration(sessionId);
+  const retrier = useRetryGeneration(sessionId, turns.data);
   const messages = turns.data?.messages ?? [];
   const active = turns.data?.active_generation ?? null;
   const lastFailed = turns.data?.last_failed_generation ?? null;
   const stream = useGenerationStream(sessionId, active);
-  const { options, labelOf, characterNames } = useSpeakers(session, messages);
+  const { options, labelOf, characterNames } = useSpeakers(session);
+  const retryAttempt = retrier.attempt;
+  // 결과를 모르는 재시도의 실패 안내가 이력에서 사라졌으면 따로 확인 버튼을 보인다(같은 요청 ID로 확인).
+  const orphanRetry =
+    retrier.isBusy &&
+    retryAttempt?.status === 'uncertain' &&
+    (!!active || lastFailed?.id !== retryAttempt.generationId);
 
   const toBubbles = (text: string): ConversationMessage[] => parseAssistantText(text, characterNames);
   const failedText = lastFailed
@@ -60,7 +66,8 @@ export function ChatRoom({ session, onBack }: { session: ConversationSession; on
       }))
     : [];
   const generating = !!active || attempt?.status === 'posting' || retrier.attempt?.status === 'posting';
-  const model = turns.data?.model ?? session.model;
+  // turns.model은 이 세션에 적용될 모델(서버가 항상 줌). 이력을 읽기 전이거나 빈 값이면 세션 값을 쓴다.
+  const model = turns.data?.model || session.model;
 
   const blockedReason = !turns.isSuccess
     ? '대화 이력을 불러온 뒤 보낼 수 있습니다.'
@@ -158,9 +165,23 @@ export function ChatRoom({ session, onBack }: { session: ConversationSession; on
       {lastFailed && !active ? (
         <GenerationNotice
           generation={lastFailed}
-          retryAttempt={retrier.attempt}
-          onRetry={() => retrier.retry(lastFailed.id)}
+          retryAttempt={retryAttempt}
+          onRetry={() => retrier.retry(lastFailed)}
         />
+      ) : null}
+      {orphanRetry ? (
+        <>
+          <Notice
+            tone="alert"
+            message="재시도 접수 여부를 확인하지 못했습니다. 새로 요청하지 않고 같은 요청으로 확인합니다."
+          />
+          <Button
+            label="재시도 결과 확인"
+            accessibilityLabel="재시도 접수 확인"
+            variant="secondary"
+            onPress={retrier.confirm}
+          />
+        </>
       ) : null}
     </ConversationFrame>
   );

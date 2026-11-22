@@ -27,13 +27,19 @@ const session: ConversationSession = {
   story_title: '달빛 정원',
   model: null,
   read_only: false,
+  play_name: '여행자',
   messages: [{ speaker_kind: 'narrator', speaker_name: null, body: '문이 열렸다.' }],
   characters: [
     { id: 2, name: '윤슬' },
     { id: 3, name: '서윤' },
   ],
 };
-const emptyTurns: ChatTurns = { messages: [], active_generation: null, last_failed_generation: null, model: null };
+const emptyTurns: ChatTurns = {
+  messages: [],
+  active_generation: null,
+  last_failed_generation: null,
+  model: 'fake-echo',
+};
 const userMessage: ChatMessage = {
   id: 5,
   role: 'user',
@@ -143,7 +149,7 @@ it('CHAT-US-02-AC01: 발화자를 고르지 않으면 유저 캐릭터로 보내
   await openPicker();
   expect(
     screen.getAllByRole('button', { name: /^발화자 .+ 선택$/ }).map((item) => item.props.accessibilityLabel),
-  ).toEqual(['발화자 내 캐릭터 선택', '발화자 윤슬 선택', '발화자 서윤 선택', '발화자 나레이터 선택']);
+  ).toEqual(['발화자 여행자 선택', '발화자 윤슬 선택', '발화자 서윤 선택', '발화자 나레이터 선택']);
   await openPicker();
   await fireEvent.changeText(input(), '첫 메시지');
   await fireEvent.press(sendButton());
@@ -169,7 +175,7 @@ it('CHAT-US-02-AC01·AC02: @로 발화자를 바꿔 여러 부분을 한 번에 
   await fireEvent.changeText(input(), '바람이 분다');
   const parts = screen.getAllByTestId('draft-part');
   expect(parts).toHaveLength(2);
-  expect(parts[0]).toHaveTextContent('내 캐릭터안녕삭제');
+  expect(parts[0]).toHaveTextContent('여행자안녕삭제');
   expect(parts[1]).toHaveTextContent('윤슬*웃는다* 반가워삭제');
 
   await fireEvent.press(sendButton());
@@ -183,7 +189,7 @@ it('CHAT-US-02-AC01·AC02: @로 발화자를 바꿔 여러 부분을 한 번에 
   });
   expect(input()).toHaveDisplayValue('');
   expect(screen.queryAllByTestId('draft-part')).toHaveLength(0);
-  expect(screen.getByRole('button', { name: '발화자 바꾸기, 현재 내 캐릭터' })).toBeOnTheScreen();
+  expect(screen.getByRole('button', { name: '발화자 바꾸기, 현재 여행자' })).toBeOnTheScreen();
 });
 
 it('CHAT-US-02-AC02: 구성한 부분을 지울 수 있다', async () => {
@@ -194,7 +200,7 @@ it('CHAT-US-02-AC02: 구성한 부분을 지울 수 있다', async () => {
   await openPicker();
   await pick('서윤');
   expect(screen.getAllByTestId('draft-part')).toHaveLength(1);
-  await fireEvent.press(screen.getByRole('button', { name: '1번째 부분(내 캐릭터) 삭제' }));
+  await fireEvent.press(screen.getByRole('button', { name: '1번째 부분(여행자) 삭제' }));
   expect(screen.queryAllByTestId('draft-part')).toHaveLength(0);
 });
 
@@ -292,7 +298,7 @@ it('CHAT-US-02-AC05·AC06·AC08·AC09·AC12: 생성 중 진행 표시와 스트�
     ],
     created_at: '2026-11-22T00:00:02Z',
   };
-  server.state.turns = { ...emptyTurns, messages: [userMessage, reply], model: 'fake-echo' };
+  server.state.turns = { ...emptyTurns, messages: [userMessage, reply], model: 'model-after-reply' };
   await server.answerPoll(
     generation({ status: 'completed', text: '이 분다.', next_offset: 20, assistant_message: reply }),
   );
@@ -301,7 +307,7 @@ it('CHAT-US-02-AC05·AC06·AC08·AC09·AC12: 생성 중 진행 표시와 스트�
   expect(screen.queryByTestId('chat-streaming-bubble')).not.toBeOnTheScreen();
   await waitFor(() => expect(screen.getAllByTestId('chat-message-bubble')).toHaveLength(3));
   expect(screen.getAllByTestId('chat-message-bubble')[2]).toHaveTextContent('나레이터바람이 분다.');
-  expect(await screen.findByText('적용 모델: fake-echo')).toBeOnTheScreen();
+  expect(await screen.findByText('적용 모델: model-after-reply')).toBeOnTheScreen();
   // AC05·AC06: 완료돼도 새로 쓴 내용은 그대로이고 이제 보낼 수 있다.
   expect(input()).toHaveDisplayValue('다음 메시지');
   expect(sendButton()).toBeEnabled();
@@ -320,7 +326,7 @@ it('CHAT-US-02-AC10: 전송 버튼을 연속으로 눌러도 요청 ID 하나로
   });
   expect(server.postBodies()).toHaveLength(1);
   expect(sendButton()).toBeDisabled();
-  expect(screen.getByTestId('chat-pending-bubble')).toHaveTextContent('내 캐릭터한 번만');
+  expect(screen.getByTestId('chat-pending-bubble')).toHaveTextContent('여행자한 번만');
   server.state.turns = { ...emptyTurns, messages: [userMessage], active_generation: generation() };
   await act(async () => server.posts.shift()?.resolve(json(generation(), 202)));
   await waitFor(() => expect(screen.getByLabelText('응답 생성 중')).toBeOnTheScreen());
@@ -336,7 +342,7 @@ it('CHAT-US-02-AC14·AC15: 접수 결과를 모르면 새 요청을 만들지 �
   await fireEvent.press(sendButton());
   const confirm = await screen.findByRole('button', { name: '보낸 메시지 접수 확인' });
   expect(screen.getByText(/접수 여부를 확인하지 못했습니다/)).toBeOnTheScreen();
-  expect(screen.getByTestId('chat-pending-bubble')).toHaveTextContent('내 캐릭터확인할 메시지');
+  expect(screen.getByTestId('chat-pending-bubble')).toHaveTextContent('여행자확인할 메시지');
   expect(sendButton()).toBeDisabled();
   expect(server.postBodies()).toHaveLength(1);
 
@@ -394,6 +400,89 @@ it('CHAT-US-02-AC10·AC15: 재시도 결과를 모르면 다시 눌러도 같은
   await waitFor(() => expect(server.onRetry).toHaveBeenCalledTimes(2));
   const ids = server.onRetry.mock.calls.map(([call]) => (call.body as { request_id: string }).request_id);
   expect(ids[1]).toBe(ids[0]);
+});
+
+const replyTo5: ChatMessage = {
+  id: 6,
+  role: 'assistant',
+  parts: [{ speaker_kind: 'character', character_id: 2, speaker_name: '윤슬', body: '다시 왔어' }],
+  created_at: '2026-11-22T00:00:03Z',
+};
+
+it('CHAT-US-02-AC10·AC15: 재시도 응답을 잃었지만 서버가 접수했으면 이력의 새 생성으로 확인을 풀고, 완료 뒤 다음 메시지를 보낼 수 있다', async () => {
+  const server = fakeServer();
+  const failed = generation({ status: 'failed', retryable: true });
+  server.state.turns = { ...emptyTurns, messages: [userMessage], last_failed_generation: failed };
+  // 서버는 재시도를 접수했지만(생성 10) 응답이 앱에 오지 않았다.
+  server.onRetry.mockImplementationOnce(() => {
+    server.state.turns = {
+      ...emptyTurns,
+      messages: [userMessage],
+      active_generation: generation({ id: 10, status: 'streaming' }),
+    };
+    return Promise.reject(new TypeError('network lost'));
+  });
+  await show();
+  await ready();
+  await fireEvent.changeText(input(), '다음 메시지');
+  await fireEvent.press(await screen.findByRole('button', { name: '응답 생성 다시 시도' }));
+
+  // 이력을 다시 읽으면 실패 안내는 사라지고 생성 10을 이어 받는다. 확인 대기로 남지 않는다.
+  await waitFor(() => expect(server.pollUrls().at(-1)).toBe(`${BASE}/generations/10?offset=0&wait=10`));
+  expect(screen.queryByTestId('generation-notice')).not.toBeOnTheScreen();
+  expect(screen.queryByRole('button', { name: '재시도 접수 확인' })).not.toBeOnTheScreen();
+  expect(screen.queryByText('재시도 요청을 처리하는 중입니다.')).not.toBeOnTheScreen();
+  expect(screen.getByText('AI 응답이 끝나면 보낼 수 있습니다.')).toBeOnTheScreen();
+
+  server.state.turns = { ...emptyTurns, messages: [userMessage, replyTo5] };
+  await server.answerPoll(
+    generation({ id: 10, status: 'completed', text: '@윤슬: 다시 왔어', next_offset: 10, assistant_message: replyTo5 }),
+  );
+  await waitFor(() => expect(screen.queryByLabelText('응답 생성 중')).not.toBeOnTheScreen());
+  await waitFor(() => expect(sendButton()).toBeEnabled());
+  await fireEvent.press(sendButton());
+  await waitFor(() => expect(server.postBodies()).toHaveLength(1));
+  expect(server.postBodies()[0]).toMatchObject({ parts: [{ speaker_kind: 'user', body: '다음 메시지' }] });
+  expect(server.onRetry).toHaveBeenCalledTimes(1);
+});
+
+it('CHAT-US-02-AC10·AC15: 실패 안내가 사라져도 결과를 모르는 재시도는 같은 요청 ID로 확인하고, 완료 뒤 보낼 수 있다', async () => {
+  const server = fakeServer();
+  const failed = generation({ status: 'failed', retryable: true });
+  server.state.turns = { ...emptyTurns, messages: [userMessage], last_failed_generation: failed };
+  server.onRetry.mockImplementationOnce(() => {
+    // 다시 읽은 이력에는 실패 안내도 새 생성도 아직 보이지 않는다.
+    server.state.turns = { ...emptyTurns, messages: [userMessage] };
+    return Promise.reject(new TypeError('network lost'));
+  });
+  await show();
+  await ready();
+  await fireEvent.press(await screen.findByRole('button', { name: '응답 생성 다시 시도' }));
+
+  const confirm = await screen.findByRole('button', { name: '재시도 접수 확인' });
+  expect(screen.queryByTestId('generation-notice')).not.toBeOnTheScreen();
+  expect(screen.getByText('재시도 요청을 처리하는 중입니다.')).toBeOnTheScreen();
+
+  server.onRetry.mockImplementationOnce(() => {
+    server.state.turns = { ...emptyTurns, messages: [userMessage], active_generation: generation({ id: 10 }) };
+    return json(generation({ id: 10 }), 202);
+  });
+  await fireEvent.press(confirm);
+  await waitFor(() => expect(server.onRetry).toHaveBeenCalledTimes(2));
+  const [first, second] = server.onRetry.mock.calls.map(([call]) => call);
+  expect(second.url).toBe(`${BASE}/generations/9/retry`);
+  expect((second.body as { request_id: string }).request_id).toBe((first.body as { request_id: string }).request_id);
+  await waitFor(() => expect(screen.queryByRole('button', { name: '재시도 접수 확인' })).not.toBeOnTheScreen());
+  await waitFor(() => expect(server.pollUrls().at(-1)).toBe(`${BASE}/generations/10?offset=0&wait=10`));
+
+  server.state.turns = { ...emptyTurns, messages: [userMessage, replyTo5] };
+  await server.answerPoll(
+    generation({ id: 10, status: 'completed', text: '@윤슬: 다시 왔어', next_offset: 10, assistant_message: replyTo5 }),
+  );
+  await fireEvent.changeText(input(), '이어서');
+  await waitFor(() => expect(sendButton()).toBeEnabled());
+  await fireEvent.press(sendButton());
+  await waitFor(() => expect(server.postBodies()).toHaveLength(1));
 });
 
 it.each([

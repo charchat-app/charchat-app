@@ -32,8 +32,8 @@ export type ConversationSession = ConversationSessionCreated & {
   read_only: boolean;
   messages: ConversationMessage[];
   characters: ConversationCharacter[];
-  /** CHAT-US-02: 세션에 적용된 플레이 이름. 서버가 아직 주지 않으면 없다(추가 요청 예정). */
-  play_name?: string | null;
+  /** CHAT-US-02: 세션에 적용된 플레이 이름. 서버가 항상 준다. */
+  play_name: string;
 };
 
 export type ConversationStory = {
@@ -93,7 +93,8 @@ export type ChatTurns = {
   messages: ChatMessage[];
   active_generation: ChatGeneration | null;
   last_failed_generation: ChatGeneration | null;
-  model: string | null;
+  /** 이 세션의 응답 모델. 서버가 항상 문자열로 준다. */
+  model: string;
 };
 
 export type SendChatMessageInput = { request_id: string; parts: ChatMessagePartInput[] };

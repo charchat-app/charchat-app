@@ -34,7 +34,8 @@ jest.mock('@/features/chat/api', () => ({
     messages: [],
     active_generation: null,
     last_failed_generation: null,
-    model: null,
+    // 이 파일은 세션 응답의 모델 표시만 검증한다. 빈 값이면 대화방은 세션 모델을 보인다.
+    model: '',
   })),
 }));
 
@@ -651,6 +652,7 @@ const session = {
   story_title: '달빛 정원',
   model: 'applied-model',
   read_only: false,
+  play_name: '여행자',
   messages: story.intros[0].messages,
   characters: [{ id: 2, name: '윤슬' }],
 };

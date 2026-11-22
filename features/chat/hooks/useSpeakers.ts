@@ -4,26 +4,14 @@ import { useMemo } from 'react';
 import type { SpeakerOption } from '@/features/chat/components/room/SpeakerPicker';
 import { NARRATOR_TAG } from '@/features/chat/assistantParser';
 import { type DraftSpeaker, USER_SPEAKER } from '@/features/chat/messageDraft';
-import type { ChatMessage, ConversationSession } from '@/shared/story-types';
+import type { ConversationSession } from '@/shared/story-types';
 
-/** 플레이 이름을 모를 때 쓰는 유저 발화자 이름 */
+/** 플레이 이름이 빈 문자열일 때 쓰는 유저 발화자 이름 */
 export const UNKNOWN_PLAY_NAME = '내 캐릭터';
 
-/**
- * 세션 응답에 플레이 이름(`play_name`)이 있으면 쓰고, 없으면 저장된 유저 메시지의 speaker_name을 쓴다.
- * 둘 다 없으면 '내 캐릭터'로 표시한다.
- */
-function findPlayName(session: ConversationSession, messages: ChatMessage[]) {
-  if (session.play_name) return session.play_name;
-  for (let i = messages.length - 1; i >= 0; i -= 1) {
-    const named = messages[i].parts.find((part) => part.speaker_kind === 'user' && part.speaker_name);
-    if (named?.speaker_name) return named.speaker_name;
-  }
-  return null;
-}
-
-export function useSpeakers(session: ConversationSession, messages: ChatMessage[]) {
-  const playName = findPlayName(session, messages) ?? UNKNOWN_PLAY_NAME;
+/** 유저 발화자 이름은 세션에 적용된 플레이 이름(`play_name`, 서버가 항상 줌)이다. */
+export function useSpeakers(session: ConversationSession) {
+  const playName = session.play_name || UNKNOWN_PLAY_NAME;
   const { characters } = session;
   return useMemo(() => {
     const options: SpeakerOption[] = [
