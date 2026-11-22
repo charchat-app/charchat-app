@@ -11,6 +11,5 @@ export { createServerExpressionRepository } from './serverRepository';
 export type { StoryRepository } from './fixtureRepository';
 export { createServerFewshotRepository } from './fewshotRepository';
 export type { FewshotRepository } from './fewshotRepository';
-export { createCommonSaveRepository } from './commonRepository';
-export type { CommonSaveRepository } from './commonRepository';
+export { createCommonSaveRepository, type CommonSaveDocument, type CommonSaveRepository } from './commonRepository';
 export { useCommonSave, completionIssues, introLength } from './hooks/useCommonSave';

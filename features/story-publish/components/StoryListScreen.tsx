@@ -5,6 +5,7 @@ import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { ApiError } from '@/lib/api-client';
 
+import { useDeletedNotice } from '../hooks/useDeletedNotice';
 import { useCreateStory, useMyStories } from '../hooks/useStories';
 import { formatSavedAt } from '../savedAt';
 
@@ -21,12 +22,18 @@ export function StoryListScreen({ onOpen, onStartChat }: StoryListScreenProps) {
   const stories = useMyStories();
   const create = useCreateStory();
 
-  const startNew = () => create.mutate(undefined, { onSuccess: (story) => onOpen(story.id) });
+  const deleted = useDeletedNotice();
+  const open = (id: string) => {
+    deleted.dismiss();
+    onOpen(id);
+  };
+  const startNew = () => create.mutate(undefined, { onSuccess: (story) => open(story.id) });
   const newButton = <Button label="새 스토리" onPress={startNew} disabled={create.isPending} />;
 
   return (
     <Surface style={styles.container}>
       <ScreenHeader eyebrow="CHAR / CHAT" title="내 스토리" right={newButton} />
+      {deleted.visible ? <Notice message="스토리를 삭제했어요." /> : null}
       {create.error ? <Notice tone="alert" message={messageOf(create.error)} /> : null}
       {stories.isPending ? (
         <Text variant="caption" style={styles.status}>
@@ -56,7 +63,7 @@ export function StoryListScreen({ onOpen, onStartChat }: StoryListScreenProps) {
                 <Pressable
                   accessibilityRole="button"
                   accessibilityLabel={`${title} 편집`}
-                  onPress={() => onOpen(item.id)}
+                  onPress={() => open(item.id)}
                   style={({ pressed }) => [styles.row, pressed && styles.pressed]}
                 >
                   <View style={styles.rowText}>

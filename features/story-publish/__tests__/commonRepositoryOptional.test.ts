@@ -1,0 +1,306 @@
+// CREATE-US-05/07 공통 저장 계약: 선택 영역 basic(1번 기본 정보)·presets(5번 유저 프로필 프리셋)
+// 서버 프로토타입 기준(basic = StoryUpdateRequest, presets = id·name·image_id·description 배열).
+// 서버와 실제로 맞춰 본 결과가 아니라 요청·응답 변환만 검증한다.
+import { defaultExpression, toExpressionRow } from '@/shared/story-types';
+
+import { createCommonSaveRepository, type CommonSaveDocument } from '../commonRepository';
+
+const BASE = 'http://localhost:8000/api/v1';
+
+const document = (extra: Partial<CommonSaveDocument> = {}): CommonSaveDocument => ({
+  id: '1',
+  title: '가상',
+  saveState: 'draft',
+  updatedAt: '2026-11-17T00:00:00Z',
+  speech: defaultExpression(),
+  characters: [],
+  fewshots: [],
+  intros: [],
+  relations: [],
+  affinities: [],
+  ...extra,
+});
+
+const { story_id: _storyId, ...expression } = toExpressionRow('1', defaultExpression());
+
+/** 공통 응답. presets 키를 넣을지는 호출자가 정한다. */
+const response = (extra: Record<string, unknown> = {}, requestId = 'req') => ({
+  story_id: '1',
+  title: '가상',
+  save_state: 'draft',
+  saved_at: '2026-11-17T00:00:00Z',
+  expression,
+  characters: [],
+  fewshots: [],
+  intros: [],
+  relations: [],
+  affinities: [],
+  request_id: requestId,
+  ...extra,
+});
+
+let fetcher: jest.SpyInstance;
+const reply = (body: unknown) => fetcher.mockResolvedValueOnce({ ok: true, json: async () => body } as Response);
+const sentBody = (call = 0): Record<string, unknown> =>
+  JSON.parse(fetcher.mock.calls[call][1]?.body as string) as Record<string, unknown>;
+
+beforeEach(() => {
+  fetcher = jest.spyOn(globalThis, 'fetch');
+});
+afterEach(() => {
+  fetcher.mockRestore();
+});
+
+describe('presets 요청', () => {
+  it('CREATE-US-05-AC06: 작업본의 신규 프리셋은 서버 ID 없이 복원한다', async () => {
+    reply(
+      response({
+        presets_pending: true,
+        presets: [
+          { id: null, name: null, image_id: null, description: ' 미완성 ' },
+          { id: null, name: '{{user}}', image_id: null, description: null },
+        ],
+      }),
+    );
+    const loaded = await createCommonSaveRepository(BASE).load('1');
+    expect(loaded.presets?.map(({ id, detail }) => [id, detail])).toEqual([
+      [undefined, ' 미완성 '],
+      [undefined, ''],
+    ]);
+  });
+  it('CREATE-US-05: presets가 없거나 null이면 요청에서 빼서 서버가 기존 값을 유지한다', async () => {
+    const repository = createCommonSaveRepository(BASE);
+    reply(response());
+    reply(response());
+    await repository.save(document(), 'draft', 'manual', 'req');
+    await repository.save(document({ presets: null, basic: null }), 'draft', 'manual', 'req');
+    for (const call of [0, 1]) {
+      expect(sentBody(call)).not.toHaveProperty('presets');
+      expect(sentBody(call)).not.toHaveProperty('basic');
+    }
+  });
+
+  it('CREATE-US-05: 빈 배열은 전부 지우라는 뜻으로 그대로 보내고, 응답의 빈 배열을 복원한다', async () => {
+    reply(response({ presets: [] }));
+    const saved = await createCommonSaveRepository(BASE).save(document({ presets: [] }), 'draft', 'manual', 'req');
+    expect(sentBody().presets).toEqual([]);
+    expect(saved.presets).toEqual([]);
+  });
+
+  it('CREATE-US-05: 순서·id·이미지 id·원문({{user}})을 서버 필드로 바꿔 보내고 응답으로 복원한다', async () => {
+    const presets = [
+      { id: '11', name: '{{user}}', detail: '여행자', imageId: 7, photoUrl: 'https://img/7.png' },
+      { name: '새 프로필', detail: '', imageId: null, photoUrl: null },
+    ];
+    reply(
+      response({
+        presets: [
+          { id: 11, name: '{{user}}', image_id: 7, description: '여행자' },
+          { id: 12, name: '새 프로필', image_id: null, description: null },
+        ],
+      }),
+    );
+    const saved = await createCommonSaveRepository(BASE).save(document({ presets }), 'draft', 'manual', 'req');
+    expect(sentBody().presets).toEqual([
+      { id: 11, name: '{{user}}', image_id: 7, description: '여행자' },
+      { id: null, name: '새 프로필', image_id: null, description: null },
+    ]);
+    // 응답에는 표시용 주소가 없어 같은 이미지 id로 보낸 주소를 이어 쓴다. 새 프로필은 서버 id를 받는다.
+    expect(saved.presets).toEqual([
+      { id: '11', name: '{{user}}', detail: '여행자', imageId: 7, photoUrl: 'https://img/7.png' },
+      { id: '12', name: '새 프로필', detail: '', imageId: null, photoUrl: null },
+    ]);
+  });
+
+  it('서버가 발급하지 않은 프로필 id는 요청을 보내지 않고 막는다', async () => {
+    const repository = createCommonSaveRepository(BASE);
+    const presets = [{ id: 'local:1', name: 'a', detail: '', imageId: null, photoUrl: null }];
+    await expect(repository.save(document({ presets }), 'draft', 'manual', 'req')).rejects.toThrow('프로필 id');
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+});
+
+describe('presets 응답', () => {
+  it('응답에 presets가 없거나 null이면 빈 목록으로 지어내지 않는다', async () => {
+    const repository = createCommonSaveRepository(BASE);
+    reply(response());
+    reply(response({ presets: null }));
+    expect((await repository.load('1')).presets).toBeUndefined();
+    expect(await repository.load('1')).not.toHaveProperty('presets');
+  });
+
+  it('조회 응답의 presets를 복원한다 (표시용 주소는 없음)', async () => {
+    reply(response({ presets: [{ id: '5', name: '탐정', image_id: 3, description: '조수' }] }));
+    expect((await createCommonSaveRepository(BASE).load('1')).presets).toEqual([
+      { id: '5', name: '탐정', detail: '조수', imageId: 3, photoUrl: null },
+    ]);
+  });
+
+  describe('표시용 주소 image_url (읽기 전용)', () => {
+    const CUSTOM = 'https://custom.example:9443/api/v1';
+    const row = (extra: Record<string, unknown> = {}) => ({
+      id: 5,
+      name: '탐정',
+      image_id: 3,
+      description: null,
+      ...extra,
+    });
+    const submitted = [{ id: '5', name: '탐정', detail: '', imageId: 3, photoUrl: 'file:///picked.png' }];
+
+    it('CREATE-US-05: 서버 루트 기준 경로를 환경변수가 아닌 저장소의 baseUrl로 전체 주소로 바꾼다', async () => {
+      const previous = process.env.EXPO_PUBLIC_API_URL;
+      process.env.EXPO_PUBLIC_API_URL = 'http://env.example';
+      try {
+        reply(response({ presets: [row({ image_url: '/api/v1/creation/image-files/3' })] }));
+        const loaded = await createCommonSaveRepository(CUSTOM).load('1');
+        expect(loaded.presets?.[0].photoUrl).toBe('https://custom.example:9443/api/v1/creation/image-files/3');
+      } finally {
+        if (previous === undefined) delete process.env.EXPO_PUBLIC_API_URL;
+        else process.env.EXPO_PUBLIC_API_URL = previous;
+      }
+    });
+
+    it('CREATE-US-05: image_url이 명시적 null이면 보낸 사진으로 대체하지 않고 미리보기 없음', async () => {
+      reply(response({ presets: [row({ image_url: null })] }));
+      const saved = await createCommonSaveRepository(CUSTOM).save(
+        document({ presets: submitted }),
+        'draft',
+        'manual',
+        'req',
+      );
+      expect(saved.presets?.[0].photoUrl).toBeNull();
+    });
+
+    it('CREATE-US-05: image_url 키가 없을 때만 보낸 문서의 같은 이미지 id 주소를 이어 쓴다', async () => {
+      reply(response({ presets: [row()] }));
+      const saved = await createCommonSaveRepository(CUSTOM).save(
+        document({ presets: submitted }),
+        'draft',
+        'manual',
+        'req',
+      );
+      expect(saved.presets?.[0].photoUrl).toBe('file:///picked.png');
+      expect(sentBody().presets).toEqual([{ id: 5, name: '탐정', image_id: 3, description: null }]);
+    });
+
+    it.each([
+      ['다른 출처 절대 주소', 'https://evil.example/api/v1/creation/image-files/3'],
+      ['같은 출처라도 절대 주소', 'https://custom.example:9443/api/v1/creation/image-files/3'],
+      ['프로토콜 상대 주소', '//evil.example/x.png'],
+      ['탭이 끼어 있는 같은 출처 프로토콜 상대 주소', '/\t/custom.example:9443/x.png'],
+      ['역슬래시 우회', '/\\evil.example/x.png'],
+      ['루트 기준이 아닌 상대 경로', 'creation/image-files/3'],
+      ['javascript: 주소', 'javascript:alert(1)'],
+      ['빈 문자열', ''],
+      ['문자열이 아님', 3],
+    ])('CREATE-US-05: 받을 수 없는 image_url은 미리보기 없음으로 둔다: %s', async (_label, imageUrl) => {
+      reply(response({ presets: [row({ image_url: imageUrl })] }));
+      const saved = await createCommonSaveRepository(CUSTOM).save(
+        document({ presets: submitted }),
+        'draft',
+        'manual',
+        'req',
+      );
+      expect(saved.presets?.[0].photoUrl).toBeNull();
+    });
+
+    it('baseUrl이 전체 주소가 아니면 image_url을 쓰지 않는다', async () => {
+      reply(response({ presets: [row({ image_url: '/api/v1/creation/image-files/3' })] }));
+      const loaded = await createCommonSaveRepository('/api/v1').load('1');
+      expect(loaded.presets?.[0].photoUrl).toBeNull();
+    });
+  });
+
+  it.each([
+    ['배열이 아님', { id: 1 }],
+    [
+      '중복 id',
+      [
+        { id: 1, name: 'a', image_id: null, description: null },
+        { id: 1, name: 'b', image_id: null, description: null },
+      ],
+    ],
+    ['이미지 id가 정수가 아님', [{ id: 1, name: 'a', image_id: '3', description: null }]],
+    ['이름이 문자열이 아님', [{ id: 1, name: 3, image_id: null, description: null }]],
+  ])('형식이 맞지 않는 presets 응답은 거절한다: %s', async (_label, presets) => {
+    reply(response({ presets }));
+    await expect(createCommonSaveRepository(BASE).load('1')).rejects.toThrow();
+  });
+});
+
+describe('basic 요청', () => {
+  it('CREATE-US-01: basic이 있으면 기본 정보 저장(StoryUpdateRequest)과 같은 형식으로 함께 보낸다', async () => {
+    reply(response());
+    await createCommonSaveRepository(BASE).save(
+      document({
+        basic: {
+          title: '제목',
+          subtitle: '',
+          world: '세계',
+          tags: ['판타지'],
+          characters: [
+            { id: '7', name: '하나', detail: '' },
+            { name: '', detail: '새 인물' },
+          ],
+        },
+      }),
+      'draft',
+      'manual',
+      'req',
+    );
+    expect(sentBody().basic).toEqual({
+      title: '제목',
+      subtitle: null,
+      world_description: '세계',
+      tags: ['판타지'],
+      characters: [
+        { id: 7, name: '하나', description: null },
+        { id: null, name: null, description: '새 인물' },
+      ],
+    });
+    // 2~4번 영역은 그대로 함께 간다
+    expect(sentBody()).toMatchObject({ expression, save_state: 'draft', kind: 'save', mode: 'manual' });
+  });
+});
+
+describe('preserve_scene 요청', () => {
+  it.each(['save', 'temporary'] as const)(
+    'CREATE-US-07-AC03/07: preserveScene이 true이면 preserve_scene: true를 싣고 2~4번 호환 필드도 그대로 보낸다 (%s)',
+    async (kind) => {
+      reply(response());
+      await createCommonSaveRepository(BASE).save(document({ preserveScene: true }), 'draft', 'manual', 'req', kind);
+      expect(sentBody()).toMatchObject({
+        preserve_scene: true,
+        expression,
+        fewshots: [],
+        intros: [],
+        relations: [],
+        affinities: [],
+        save_state: 'draft',
+        kind,
+        mode: 'manual',
+      });
+      expect(new Headers(fetcher.mock.calls[0][1]?.headers).get('Idempotency-Key')).toBe('req');
+    },
+  );
+
+  it('CREATE-US-07-AC03/07: preserveScene이 없거나 false이면 preserve_scene 키를 싣지 않는다', async () => {
+    const repository = createCommonSaveRepository(BASE);
+    reply(response());
+    reply(response());
+    await repository.save(document(), 'draft', 'manual', 'req');
+    await repository.save(document({ preserveScene: false }), 'draft', 'manual', 'req');
+    for (const call of [0, 1]) expect(sentBody(call)).not.toHaveProperty('preserve_scene');
+  });
+
+  it('CREATE-US-07-AC03/07: 응답에서 preserveScene을 복원하지 않는다', async () => {
+    reply(response({ preserve_scene: true }));
+    const saved = await createCommonSaveRepository(BASE).save(
+      document({ preserveScene: true }),
+      'draft',
+      'manual',
+      'req',
+    );
+    expect(saved).not.toHaveProperty('preserveScene');
+  });
+});

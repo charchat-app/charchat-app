@@ -104,6 +104,14 @@ export async function createStory(): Promise<EditorStory> {
   return toEditorStory(dto);
 }
 
+/**
+ * 스토리를 삭제한다 (CREATE-US-07-AC10). 서버는 204(본문 없음)로 답하며, 복구할 수 없다.
+ * 실패하면 ApiError를 그대로 던진다. 자동으로 다시 호출하지 않는다.
+ */
+export async function deleteStory(id: string): Promise<void> {
+  await apiRequest<void>(`${STORIES}/${id}`, { method: 'DELETE' });
+}
+
 export async function saveStoryBasic(id: string, fields: StoryBasicFields): Promise<EditorStory> {
   const dto = await apiRequest<StoryResponseDto>(`${STORIES}/${id}`, {
     method: 'PUT',

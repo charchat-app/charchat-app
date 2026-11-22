@@ -163,6 +163,7 @@ it('바뀐 내용만 1분 주기로 임시 저장하고, 비공개·공개 스�
     >(
       ({ value, dirty }) =>
         useCommonSave(repository, {
+          storyId: '1',
           document: value,
           dirty,
           loading: false,
@@ -204,7 +205,14 @@ it('성패 불명확 재시도는 처음 표현·퓨샷·상태·키를 고정�
   const save = jest.fn().mockRejectedValueOnce(new Error('lost')).mockResolvedValueOnce(doc);
   const commit = jest.fn();
   const repository = repo(save);
-  const options = { document: doc, dirty: true, loading: false, pendingInput: false, captureCommit: () => commit };
+  const options = {
+    storyId: '1',
+    document: doc,
+    dirty: true,
+    loading: false,
+    pendingInput: false,
+    captureCommit: () => commit,
+  };
   const { result, rerender } = await renderHook<ReturnType<typeof useCommonSave>, Parameters<typeof useCommonSave>[1]>(
     (options) => useCommonSave(repository, options),
     {
@@ -229,7 +237,14 @@ it('공통 저장이 성공하면 스토리 목록·상세 캐시를 무효화�
   queryClient.setQueryData(storyKeys.list(), [{ id: '1', title: '가상', saveState: '임시 저장', updatedAt: '' }]);
   queryClient.setQueryData(storyKeys.detail('1'), { id: '1', saveState: '임시 저장' });
   queryClient.setQueryData(['other'], 1);
-  const options = { document: doc, dirty: true, loading: false, pendingInput: false, captureCommit: () => jest.fn() };
+  const options = {
+    storyId: '1',
+    document: doc,
+    dirty: true,
+    loading: false,
+    pendingInput: false,
+    captureCommit: () => jest.fn(),
+  };
   const { result } = await renderHook(() => useCommonSave(repo(save), options));
   const invalidated = (key: readonly unknown[]) => queryClient.getQueryState(key)?.isInvalidated;
   await act(() => result.current.save('public'));
@@ -249,7 +264,14 @@ it('매핑에 없는 거절 코드는 서버 detail을, 매핑된 코드는 앱 
     .mockRejectedValueOnce(new ApiError(422, 'INVALID_SPEAKER', '같은 스토리의 인물을 선택해 주세요.'))
     .mockRejectedValueOnce(new ApiError(422, 'MESSAGE_INTRO_CHANGED', '서버 문구'))
     .mockRejectedValueOnce(new ApiError(409, 'HTTP_ERROR', '요청 실패: 409'));
-  const options = { document: doc, dirty: true, loading: false, pendingInput: false, captureCommit: () => jest.fn() };
+  const options = {
+    storyId: '1',
+    document: doc,
+    dirty: true,
+    loading: false,
+    pendingInput: false,
+    captureCommit: () => jest.fn(),
+  };
   const { result } = await renderHook(() => useCommonSave(repo(save), options));
   await act(() => result.current.save('draft'));
   expect(result.current.error).toBe('같은 스토리의 인물을 선택해 주세요.');
@@ -281,7 +303,14 @@ it('저장 응답 전에 화면을 떠나도 성공하면 스토리 캐시를 �
       }),
   );
   queryClient.setQueryData(storyKeys.list(), [{ id: '1', title: '가상', saveState: '임시 저장', updatedAt: '' }]);
-  const options = { document: doc, dirty: true, loading: false, pendingInput: false, captureCommit: () => jest.fn() };
+  const options = {
+    storyId: '1',
+    document: doc,
+    dirty: true,
+    loading: false,
+    pendingInput: false,
+    captureCommit: () => jest.fn(),
+  };
   const { result, unmount } = await renderHook(() => useCommonSave(repo(save), options));
   let operation!: Promise<boolean>;
   await act(() => {
@@ -301,7 +330,14 @@ it('429·408 실패는 같은 요청으로 재시도할 수 있게 남겨 둔다
     .fn()
     .mockRejectedValueOnce(new ApiError(429, 'TOO_MANY_REQUESTS', '잠시 후 다시 시도해 주세요.'))
     .mockResolvedValueOnce(doc);
-  const options = { document: doc, dirty: true, loading: false, pendingInput: false, captureCommit: () => jest.fn() };
+  const options = {
+    storyId: '1',
+    document: doc,
+    dirty: true,
+    loading: false,
+    pendingInput: false,
+    captureCommit: () => jest.fn(),
+  };
   const { result } = await renderHook(() => useCommonSave(repo(save), options));
   await act(() => result.current.save('draft'));
   expect(result.current.pendingSave).toBe(true);

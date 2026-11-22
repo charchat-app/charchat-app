@@ -41,6 +41,11 @@ export type StoryImagesEditorProps = {
   unsavedCharacterNames?: string[];
   /** 사진을 끄는 동안 바깥 화면 스크롤을 멈추게 알린다 */
   onDragActiveChange?: (active: boolean) => void;
+  /**
+   * 사진 칸별 업로드(고르기·자르기·업로드) 진행 알림. source는 칸마다 고유하다(`story`, `character:<id>`).
+   * 호스트가 진행 중인 업로드가 끝날 때까지 저장을 막는 데 쓴다(선택).
+   */
+  onUploadActiveChange?: (source: string, active: boolean) => void;
 };
 
 /**
@@ -56,6 +61,7 @@ export function StoryImagesEditor({
   disabled = false,
   unsavedCharacterNames = [],
   onDragActiveChange,
+  onUploadActiveChange,
 }: StoryImagesEditorProps) {
   const missing = charactersMissingImages(values);
   return (
@@ -70,6 +76,7 @@ export function StoryImagesEditor({
         onChange={onChange}
         disabled={disabled}
         onDragActiveChange={onDragActiveChange}
+        onUploadActiveChange={onUploadActiveChange ? (active) => onUploadActiveChange('story', active) : undefined}
       />
       {values.characters.map((c) => (
         <ImageStrip
@@ -82,6 +89,9 @@ export function StoryImagesEditor({
           onChange={onChange}
           disabled={disabled}
           onDragActiveChange={onDragActiveChange}
+          onUploadActiveChange={
+            onUploadActiveChange ? (active) => onUploadActiveChange(`character:${c.characterId}`, active) : undefined
+          }
         />
       ))}
       {unsavedCharacterNames.length > 0 ? (
@@ -138,6 +148,7 @@ function ImageStrip({
   onChange,
   disabled,
   onDragActiveChange,
+  onUploadActiveChange,
 }: {
   title: string;
   hint: string;
@@ -147,6 +158,7 @@ function ImageStrip({
   onChange: StoryImagesEditorProps['onChange'];
   disabled: boolean;
   onDragActiveChange?: (active: boolean) => void;
+  onUploadActiveChange?: (active: boolean) => void;
 }) {
   const images = listOf(values, listKey);
   const max = MAX_IMAGES[target];
@@ -159,6 +171,7 @@ function ImageStrip({
       change((list) =>
         pending.kind === 'replace' ? replaceImage(list, pending.index, image) : addImage(list, image, max),
       ),
+    onActiveChange: onUploadActiveChange,
   });
   const ratio = target === 'story' ? '3:4' : '1:1';
   const busy = disabled || upload.busy;
