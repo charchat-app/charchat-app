@@ -13,6 +13,7 @@ import {
   type CreationSaveState,
 } from '@/shared/story-types';
 import type { UserProfilePresetRecord } from '@/shared/story-types/presets';
+import { DEFAULT_CONTENT_RATING, type ContentRating } from '@/shared/rating';
 
 import { toWriteDto } from '../api';
 import {
@@ -70,7 +71,14 @@ export type PresetSaveResult =
        */
       sentRowKeys: string[];
     }
-  | { ok: false };
+  | {
+      ok: false;
+      /**
+       * 요청을 보냈고 서버가 확실히 거절했음(성공 여부를 모르는 실패·보내기 전 확인 실패는 아님).
+       * 화면은 이 경우에만 마무리 키를 버린다(사전 조회 실패 뒤에는 같은 키로 다시 마무리할 수 있게 남긴다).
+       */
+      rejected?: true;
+    };
 
 type Operation = {
   document: CommonSaveDocument;
@@ -145,6 +153,12 @@ export function useStoryPresets(
   const failedFor = useRef<string | null>(null);
   // 같은 이유로 보내지 않은(거절·충돌) 기본 정보 내용(JSON). 자동 임시 저장은 실을 영역이 모두 이 기록과 같으면 보내지 않는다.
   const failedBasicFor = useRef<string | null>(null);
+  // CREATE-US-08-AC01/13 등급 선택. 조회 응답의 requested_rating(없으면 SAFE)으로 처음 한 번 채우고, 그 값이 비교 기준이다.
+  // 선택이 기준과 다를 때만 공통 저장 요청에 requested_rating으로 싣는다(같으면 빼서 서버가 유지한다).
+  const [rating, setRatingValue] = useState<ContentRating | null>(null);
+  const [ratingBaseline, setRatingBaseline] = useState<ContentRating | null>(null);
+  // 같은 이유로 보내지 않은(거절·충돌) 등급. 자동 임시 저장은 같은 선택을 주기마다 다시 보내지 않는다.
+  const failedRatingFor = useRef<ContentRating | null>(null);
 
   useEffect(() => {
     if (presets !== null || !query.data?.presets) return;
@@ -152,9 +166,17 @@ export function useStoryPresets(
     setBaseline(query.data.presets);
   }, [presets, query.data]);
 
+  useEffect(() => {
+    if (rating !== null || !query.data) return;
+    const restored = query.data.rating?.requested ?? DEFAULT_CONTENT_RATING;
+    setRatingValue(restored);
+    setRatingBaseline(restored);
+  }, [rating, query.data]);
+
   const status: PresetStatus =
     presets !== null ? 'ready' : query.isError ? 'error' : query.data ? 'unavailable' : 'loading';
   const dirty = presets !== null && baseline !== null && comparable(toRecords(presets)) !== comparable(baseline);
+  const ratingDirty = rating !== null && ratingBaseline !== null && rating !== ratingBaseline;
 
   /** 입력을 버리고 서버의 최신 프리셋으로 다시 채운다(불러오기 실패·동시 수정 뒤). */
   const reload = useCallback(async () => {
@@ -172,9 +194,17 @@ export function useStoryPresets(
       operation.current = null;
       failedFor.current = null;
       failedBasicFor.current = null;
+      failedRatingFor.current = null;
       setPendingKind(null);
       setError(null);
       client.setQueryData(storyCreationKey(storyId), result);
+      // CREATE-US-08-AC13 보낸 등급이 새 비교 기준이다(응답의 requested_rating이 있으면 그 값). 보내지 않았으면 선택을 그대로 둔다.
+      const sentRating = op.document.requestedRating ?? null;
+      if (sentRating !== null) {
+        const savedRating = result.rating?.requested ?? sentRating;
+        setRatingBaseline(savedRating);
+        setRatingValue((current) => (current === sentRating ? savedRating : current));
+      }
       // 상세(공개 정본의 기본 정보·공개 상태)는 「저장」이나 미등록 스토리의 기본 정보 임시 저장에서만 바뀐다.
       // 비공개·공개 스토리의 임시 저장(기본 정보 포함)은 임시 저장본만 바꾸므로 다시 받지 않는다.
       if (op.kind === 'save' || (op.document.basic && op.state === 'draft'))
@@ -209,6 +239,7 @@ export function useStoryPresets(
       if (!uncertain) {
         operation.current = null;
         if (op.document.presets) failedFor.current = comparable(op.document.presets);
+        if (op.document.requestedRating) failedRatingFor.current = op.document.requestedRating;
         if (op.document.images) {
           failedBasicFor.current = JSON.stringify({ basic: op.document.basic, images: op.document.images });
         } else if (op.document.basic) failedBasicFor.current = JSON.stringify(op.document.basic);
@@ -220,7 +251,7 @@ export function useStoryPresets(
           ? '저장 성공 여부를 확인하지 못했어요. 입력은 그대로이고, 다시 저장하면 같은 요청을 보내요.'
           : messageOf(failure),
       );
-      return { ok: false };
+      return uncertain ? { ok: false } : { ok: false, rejected: true };
     }
   };
 
@@ -263,6 +294,8 @@ export function useStoryPresets(
     const includePresets = !finalize && dirty && presets !== null && baseline !== null;
     const content = includePresets ? comparable(toRecords(presets)) : null;
     const basicContent = images ? JSON.stringify({ basic, images }) : basic ? JSON.stringify(basic) : null;
+    // CREATE-US-08-AC13 바뀐 등급 선택만 싣는다. 마무리(finalize) 요청에는 싣지 않는다.
+    const requestedRating: ContentRating | null = !finalize && ratingDirty ? rating : null;
     // 직접 저장은 지금처럼 시작할 때 안내를 지운다. 자동 저장은 남아 있는 직접 저장 안내(차단 사유 등)를
     // 시작만으로 지우지 않고, 자기 실패를 알릴 때만 안내와 그 의도(errorKind)를 바꾼다.
     // remember: 같은 내용을 자동 저장이 다시 보내지 않도록 이번에 실으려던 프리셋·기본 정보를 기억한다.
@@ -272,6 +305,7 @@ export function useStoryPresets(
       if (remember) {
         if (content !== null) failedFor.current = content;
         if (basicContent !== null) failedBasicFor.current = basicContent;
+        if (requestedRating !== null) failedRatingFor.current = requestedRating;
       }
       return { ok: false };
     };
@@ -284,9 +318,11 @@ export function useStoryPresets(
     }
     if (auto) {
       // CREATE-US-07-AC09: 바뀐 기본 정보·프리셋·이미지를 임시 저장으로만 보낸다.
-      if ((!includePresets && basic === null && images === null) || kind !== 'temporary') return { ok: false };
-      if (sameAsFailed(content, basicContent)) return { ok: false };
-    } else if (!finalize && !includePresets && images === null && basic === null) return { ok: false };
+      if ((!includePresets && basic === null && images === null && requestedRating === null) || kind !== 'temporary')
+        return { ok: false };
+      if (sameAsFailed(content, basicContent, requestedRating)) return { ok: false };
+    } else if (!finalize && !includePresets && images === null && basic === null && requestedRating === null)
+      return { ok: false };
 
     if (!auto) setError(null);
     let fresh: CommonSaveDocument;
@@ -297,6 +333,14 @@ export function useStoryPresets(
     }
     if (includePresets && (!fresh.presets || comparable(fresh.presets) !== comparable(baseline))) {
       return fail('다른 곳에서 유저 프로필이 바뀌어 저장하지 않았어요. 프로필을 다시 불러온 뒤 저장해 주세요.', true);
+    }
+    // CREATE-US-08-AC13 바꾼 등급을 보내기 전, 최신 선택이 이 화면의 기준과 같은지 본다(근사 사전 확인. 최종 판단은 서버).
+    // 최신 값이 고른 값과 같더라도 기준과 다르면 다른 곳의 변경이므로 일관되게 보내지 않는다.
+    if (requestedRating !== null && (fresh.rating?.requested ?? DEFAULT_CONTENT_RATING) !== ratingBaseline) {
+      return fail(
+        '다른 곳에서 콘텐츠 등급이 바뀌어 저장하지 않았어요. 최신 내용을 확인한 뒤 다시 저장해 주세요.',
+        true,
+      );
     }
     const blocked = blockers(fresh);
     // 자동 저장이 막힌 내용은 주기마다 다시 불러와 확인하지 않는다(입력을 고치면 다시 본다).
@@ -321,6 +365,8 @@ export function useStoryPresets(
         basic,
         presets: records,
         images,
+        // CREATE-US-08-AC13 다시 불러온 문서의 등급(rating, 응답 전용)은 요청에 싣지 않는다. 고른 등급만 싣는다.
+        requestedRating,
         preserveScene: true,
         ...(finalize && finalizeAutoRequestId ? { finalizeAutoRequestId } : {}),
       },
@@ -338,10 +384,78 @@ export function useStoryPresets(
     return send(op);
   };
 
+  /**
+   * CREATE-US-08-AC13 등급만 담긴 임시 저장본(rating_only_working_copy)을 「저장」으로 반영한다.
+   * 화면은 이 화면에 다른 미저장 변경(기본 정보·프리셋·사진 등)이 없을 때만 부른다.
+   * - 성공 여부를 모르는 앞선 요청이 있으면 그 요청을 처음 의도·같은 키·같은 본문으로 다시 보낸다.
+   * - 그 밖에는 최신 문서를 다시 불러와(사전 확인) 등급만 담긴 임시 저장본인지 보고, 그 working_copy_saved_at을
+   *   finalize_rating_working_copy_at으로 싣는다(kind save·mode manual·preserve_scene, 기본 정보·프리셋·사진 없음).
+   *   최종 확인은 서버가 잠금 아래에서 한다.
+   * - 임시 저장 뒤 등급을 다시 바꿨으면 그 선택을 requested_rating으로 함께 싣는다. 보내기 전 최신 선택이 이 화면의
+   *   기준과 다르면(다른 곳의 변경) 보내지 않는다.
+   * - 사전 조회가 실패하면 아무것도 보내지 않고 남기지 않는다(다시 누르면 새로 확인한다).
+   */
+  const finalizeRatingWorkingCopy = async (): Promise<PresetSaveResult> => {
+    setAttemptKind(operation.current?.kind ?? 'save');
+    if (operation.current) return send(operation.current);
+    const requestedRating: ContentRating | null = ratingDirty ? rating : null;
+    const fail = (message: string): PresetSaveResult => {
+      setError(message);
+      return { ok: false };
+    };
+    setError(null);
+    let fresh: CommonSaveDocument;
+    try {
+      fresh = await repository.load(storyId);
+    } catch (failure) {
+      return fail(`저장 전에 최신 내용을 불러오지 못해 저장하지 않았어요. (${messageOf(failure)})`);
+    }
+    const stagedAt = fresh.workingCopySavedAt;
+    if (
+      fresh.ratingOnlyWorkingCopy !== true ||
+      !stagedAt ||
+      stagedAt !== query.data?.workingCopySavedAt ||
+      fresh.imagesWorkingCopySavedAt ||
+      fresh.stagedBasic
+    ) {
+      // 확인하지 않은 임시본을 다음 저장에서 반영하지 않도록 이 화면의 조회 기준을 유지한다.
+      return fail(
+        '다른 곳에서 임시 저장한 내용이 바뀌어 저장하지 않았어요. 입력은 그대로예요. 최신 내용을 확인한 뒤 다시 저장해 주세요.',
+      );
+    }
+    if (requestedRating !== null && (fresh.rating?.requested ?? DEFAULT_CONTENT_RATING) !== ratingBaseline) {
+      return fail('다른 곳에서 콘텐츠 등급이 바뀌어 저장하지 않았어요. 최신 내용을 확인한 뒤 다시 저장해 주세요.');
+    }
+    const op: Operation = {
+      document: {
+        ...fresh,
+        basic: null,
+        presets: null,
+        images: null,
+        requestedRating,
+        preserveScene: true,
+        finalizeRatingWorkingCopyAt: stagedAt,
+      },
+      state: fresh.saveState,
+      kind: 'save',
+      mode: 'manual',
+      key: newFewshotKey('creation'),
+      rowKeys: [],
+      sentRowKeys: [],
+    };
+    operation.current = op;
+    return send(op);
+  };
+
   /** 실으려는 영역(null이 아닌 것)이 모두 방금 거절·충돌로 보내지 않은 내용과 같은지 */
-  const sameAsFailed = (presetContent: string | null, basicContent: string | null): boolean =>
+  const sameAsFailed = (
+    presetContent: string | null,
+    basicContent: string | null,
+    ratingContent: ContentRating | null = null,
+  ): boolean =>
     (presetContent === null || presetContent === failedFor.current) &&
-    (basicContent === null || basicContent === failedBasicFor.current);
+    (basicContent === null || basicContent === failedBasicFor.current) &&
+    (ratingContent === null || ratingContent === failedRatingFor.current);
 
   /**
    * CREATE-US-07-AC09 자동 임시 저장이 지금 보낼 것이 있는지(요청 없이 판단).
@@ -356,8 +470,9 @@ export function useStoryPresets(
     if (operation.current !== null) return false;
     const presetContent = dirty && presets !== null && baseline !== null ? comparable(toRecords(presets)) : null;
     const basicContent = images ? JSON.stringify({ basic, images }) : basic ? JSON.stringify(basic) : null;
-    if (presetContent === null && basicContent === null) return false;
-    return !sameAsFailed(presetContent, basicContent);
+    const ratingContent = ratingDirty ? rating : null;
+    if (presetContent === null && basicContent === null && ratingContent === null) return false;
+    return !sameAsFailed(presetContent, basicContent, ratingContent);
   };
 
   /**
@@ -384,6 +499,18 @@ export function useStoryPresets(
     setPresets: (update: (value: PresetValues[]) => PresetValues[]) =>
       setPresets((value) => (value === null ? value : update(value))),
     dirty,
+    /** CREATE-US-08 고른 등급(조회 전 null). 조회한 requested_rating이 없으면 SAFE다. */
+    rating,
+    /** 고른 등급이 마지막으로 저장(임시 저장 포함)한 선택과 다른지 */
+    ratingDirty,
+    /** 등급을 고른다. 성공 여부를 모르는 저장이 남아 있으면 같은 요청으로 다시 보내야 하므로 바꾸지 않는다. */
+    setRating: (next: ContentRating) => {
+      if (operation.current !== null) return;
+      setRatingValue((value) => (value === null ? value : next));
+    },
+    /** CREATE-US-08 마지막으로 받은 공통 문서의 임시 저장본에 등급 선택만 있음(rating_only_working_copy) */
+    ratingOnlyWorkingCopy: query.data?.ratingOnlyWorkingCopy === true,
+    finalizeRatingWorkingCopy,
     /** 성공 여부를 모르는 저장이 남아 있음. 같은 요청으로 다시 보내야 하므로 그동안 입력을 막는다. */
     pending,
     /** 남아 있는 요청의 저장 의도(temporary·save). 없으면 null. */

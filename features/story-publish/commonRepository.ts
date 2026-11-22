@@ -8,6 +8,7 @@ import {
   type CreationSaveKind,
 } from '@/shared/story-types';
 import type { UserProfilePresetRecord } from '@/shared/story-types/presets';
+import { isContentRating, isRatingReviewStatus, type ContentRating, type RatingReviewStatus } from '@/shared/rating';
 // 타입만 쓴다(실행 시 shared/media를 불러오지 않는다. 아래 resolveImageUrl 설명 참고).
 import type { ImageDto } from '@/shared/media';
 import { toWriteDto } from './api';
@@ -60,6 +61,39 @@ export type CommonSaveDocument = CreationSaveDocument & {
    * 보낸 요청 키와 같고 working_copy_saved_at이 있을 때만 둔다. 저장 요청에는 싣지 않는다.
    */
   finalizableAutoRequestId?: string;
+  /**
+   * CREATE-US-08 응답 전용(읽기): requested_rating·effective_rating·rating_review_status. 셋 다 응답에 없으면 키를 두지 않는다.
+   * 저장 요청에는 싣지 않는다(조회 응답을 펼쳐 다시 보내는 화면이 다른 화면의 선택을 되돌리지 않게, 보낼 때는 requestedRating).
+   */
+  rating?: CreationRating;
+  /**
+   * CREATE-US-08-AC13 요청 전용: 편집에서 고른 등급. 값이 있을 때만 requested_rating으로 싣고, undefined·null이면 빼서
+   * 서버가 기존 선택을 유지한다. 응답에서 채우지 않는다.
+   */
+  requestedRating?: ContentRating | null;
+  /**
+   * CREATE-US-08 응답 전용(읽기): rating_only_working_copy. 응답의 working_copy_saved_at이 가리키는 임시 저장본에
+   * 등급 선택만 있고 다른 미반영 영역이 없을 때만 true로 둔다. 그 밖에는 키를 두지 않는다. 저장 요청에는 싣지 않는다.
+   */
+  ratingOnlyWorkingCopy?: true;
+  /**
+   * CREATE-US-08-AC13 요청 전용: 등급만 담긴 임시 저장본을 반영하는 「저장」. 보내기 직전 조회한 working_copy_saved_at을
+   * finalize_rating_working_copy_at으로 싣는다. kind save·mode manual·preserve_scene이고 basic·presets·images·
+   * finalize_auto_request_id가 없을 때만 허용한다(그 밖이면 보내지 않고 오류). 소유·시각 확인은 서버가 잠금 아래에서 한다.
+   */
+  finalizeRatingWorkingCopyAt?: string;
+};
+
+/**
+ * CREATE-US-08 공통 저장 응답의 등급.
+ * - requested: 편집에서 저장한 선택(비공개·공개 스토리의 임시 저장 선택 포함). 저장한 적이 없으면 null.
+ * - effective: 정본에 적용된 등급. 이번 슬라이스의 저장은 바꾸지 않는다. 없으면 null.
+ * - reviewStatus: 등급 검토 상태. 없으면 null.
+ */
+export type CreationRating = {
+  requested: ContentRating | null;
+  effective: ContentRating | null;
+  reviewStatus: RatingReviewStatus | null;
 };
 
 /**
@@ -284,6 +318,27 @@ export function readStagedCharacterImages(value: unknown): StagedCharacterImages
   });
 }
 
+/**
+ * CREATE-US-08 응답의 등급 필드를 읽는다. 셋 다 없으면 undefined(서버가 알려 주지 않음). null은 null로 두고,
+ * 알 수 없는 값은 받지 않는다.
+ */
+export function readRating(source: Record<string, unknown>): CreationRating | undefined {
+  const { requested_rating: requested, effective_rating: effective, rating_review_status: status } = source;
+  if (requested === undefined && effective === undefined && status === undefined) return undefined;
+  const fail = () => new Error('등급 응답을 확인할 수 없습니다.');
+  const rating = (raw: unknown): ContentRating | null => {
+    if (raw === undefined || raw === null) return null;
+    if (!isContentRating(raw)) throw fail();
+    return raw;
+  };
+  if (status !== undefined && status !== null && !isRatingReviewStatus(status)) throw fail();
+  return {
+    requested: rating(requested),
+    effective: rating(effective),
+    reviewStatus: status === undefined || status === null ? null : status,
+  };
+}
+
 function parse(
   value: unknown,
   baseUrl: string,
@@ -311,6 +366,9 @@ function parse(
   if (stagedImages !== undefined) document.stagedCharacterImages = stagedImages;
   const finalizable = readFinalizableAutoRequestId(source, key);
   if (finalizable !== undefined) document.finalizableAutoRequestId = finalizable;
+  const rating = readRating(source);
+  if (rating !== undefined) document.rating = rating;
+  if (source.rating_only_working_copy === true && document.workingCopySavedAt) document.ratingOnlyWorkingCopy = true;
   return document;
 }
 /**
@@ -343,6 +401,21 @@ export function createCommonSaveRepository(
       const indexedAllowed = (kind === 'save' && mode === 'manual') || (kind === 'temporary' && mode === 'auto');
       if (!indexedAllowed && document.images?.characters?.some((entry) => 'basic_index' in entry))
         throw new Error('새 캐릭터 이미지는 「저장」이나 자동 임시 저장에서만 함께 보낼 수 있습니다.');
+      const finalizeRatingAt =
+        typeof document.finalizeRatingWorkingCopyAt === 'string' && document.finalizeRatingWorkingCopyAt
+          ? document.finalizeRatingWorkingCopyAt
+          : null;
+      if (
+        finalizeRatingAt !== null &&
+        (kind !== 'save' ||
+          mode !== 'manual' ||
+          document.preserveScene !== true ||
+          document.basic ||
+          document.presets ||
+          document.images ||
+          document.finalizeAutoRequestId)
+      )
+        throw new Error('등급만 담긴 임시 저장본은 다른 변경 없이 「저장」으로만 반영할 수 있습니다.');
       const { story_id: _storyId, ...expression } = toExpressionRow(document.id, document.speech);
       const headers = new Headers(await authorization());
       headers.set('Idempotency-Key', requestId);
@@ -363,10 +436,13 @@ export function createCommonSaveRepository(
               ...(document.presets ? { presets: presetsPayload(document.presets) } : {}),
               ...(document.images ? { images: document.images } : {}),
               ...(document.preserveScene === true ? { preserve_scene: true } : {}),
+              // CREATE-US-08-AC13 고른 등급만 싣는다. 빠지면 서버가 기존 선택을 유지한다.
+              ...(isContentRating(document.requestedRating) ? { requested_rating: document.requestedRating } : {}),
               // 명시적으로 넣은 마무리 키만 싣는다
               ...(typeof document.finalizeAutoRequestId === 'string' && document.finalizeAutoRequestId
                 ? { finalize_auto_request_id: document.finalizeAutoRequestId }
                 : {}),
+              ...(finalizeRatingAt !== null ? { finalize_rating_working_copy_at: finalizeRatingAt } : {}),
               save_state: state,
               kind,
               mode,
