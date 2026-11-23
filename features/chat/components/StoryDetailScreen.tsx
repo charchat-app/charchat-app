@@ -1,5 +1,5 @@
 // CHAT-US-01 스토리 상세와 인트로 선택
-import { useRef, useState } from 'react';
+import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
 import { Badge, Button, Notice, Section, Text, TextField } from '@/components/ui';
@@ -8,10 +8,10 @@ import { ConversationBubbles } from '@/features/chat/components/ConversationBubb
 import { ConversationFrame, ConversationLoadState } from '@/features/chat/components/ConversationFrame';
 import {
   isConversationAccessDenied,
+  isDefiniteStartRejection,
   useConversationStory,
   useStartConversation,
 } from '@/features/chat/hooks/useConversation';
-import { ApiError } from '@/lib/api-client';
 import type { ConversationProfile } from '@/shared/story-types';
 
 const keyForProfile = (profile: ConversationProfile) => `${profile.kind}:${profile.id}`;
@@ -26,10 +26,11 @@ export function StoryDetailScreen({
   onOpenSession: (id: number) => void;
 }) {
   const query = useConversationStory(storyId);
-  const accessDenied = isConversationAccessDenied(query.error);
-  const story = accessDenied ? undefined : query.data;
   const start = useStartConversation(storyId);
-  const submitting = useRef(false);
+  const accessDenied =
+    isConversationAccessDenied(query.error) ||
+    (query.isSuccess && query.data == null && isConversationAccessDenied(start.error));
+  const story = accessDenied ? undefined : query.data;
   const [introId, setIntroId] = useState<number>();
   const [profileKey, setProfileKey] = useState<string>();
   const [playName, setPlayName] = useState('');
@@ -37,18 +38,16 @@ export function StoryDetailScreen({
   const profile = story?.profiles.find((item) => keyForProfile(item) === profileKey);
   const sessionId = story?.existing_session_id;
 
-  const handleStart = () => {
-    if (submitting.current || !intro || !profile || sessionId != null) return;
-    submitting.current = true;
-    start.mutate(
-      { intro_id: intro.id, profile_kind: profile.kind, profile_id: profile.id, play_name: playName },
-      {
-        onSuccess: ({ id }) => onOpenSession(id),
-        onError: () => {
-          submitting.current = false;
-        },
-      },
-    );
+  const handleStart = (replay = false) => {
+    if (!story || query.getActionStory() !== story || sessionId != null) return;
+    if (!replay && (!intro || !profile)) return;
+    const input =
+      replay || !intro || !profile
+        ? undefined
+        : { intro_id: intro.id, profile_kind: profile.kind, profile_id: profile.id, play_name: playName };
+    start.submit(input, (id) => {
+      if (query.getActionStory()?.existing_session_id === id) onOpenSession(id);
+    });
   };
 
   return (
@@ -60,7 +59,7 @@ export function StoryDetailScreen({
           </Text>
           <Text variant="subheading">{story.subtitle}</Text>
           {story.effective_rating !== null ? <Badge label={story.effective_rating} /> : null}
-          {story.tags?.length ? (
+          {story.tags.length ? (
             <View style={styles.row}>
               {story.tags.map((tag) => (
                 <Badge key={tag} label={tag} />
@@ -85,8 +84,8 @@ export function StoryDetailScreen({
                   key={item.id}
                   label={item.title}
                   variant={item.id === intro?.id ? 'primary' : 'secondary'}
-                  disabled={start.isPending}
-                  accessibilityState={{ selected: item.id === intro?.id, disabled: start.isPending }}
+                  disabled={start.isPosting}
+                  accessibilityState={{ selected: item.id === intro?.id, disabled: start.isPosting }}
                   onPress={() => setIntroId(item.id)}
                 />
               ))}
@@ -97,8 +96,22 @@ export function StoryDetailScreen({
               <Text variant="caption">등록된 인트로가 없습니다.</Text>
             )}
           </Section>
+          {query.fetchStatus !== 'idle' ? (
+            <Text accessibilityLiveRegion="polite">스토리를 새로 불러오는 중…</Text>
+          ) : query.isError ? (
+            <>
+              <Notice tone="alert" message="최신 스토리를 불러오지 못했습니다." />
+              <Button label="다시 불러오기" variant="secondary" onPress={() => void query.refetch()} />
+            </>
+          ) : null}
           {sessionId != null ? (
-            <Button label="이어하기" onPress={() => onOpenSession(sessionId)} />
+            <Button
+              label="이어하기"
+              disabled={!query.canAct || start.isPosting}
+              onPress={() => {
+                if (!start.hasPendingPost() && query.getActionStory() === story) onOpenSession(sessionId);
+              }}
+            />
           ) : (
             <>
               <Section title="유저 프로필" description="대화에 사용할 프로필을 선택하세요." first>
@@ -124,9 +137,9 @@ export function StoryDetailScreen({
                             <Button
                               label={item.name}
                               accessibilityRole="radio"
-                              accessibilityState={{ checked, disabled: start.isPending }}
+                              accessibilityState={{ checked, disabled: start.isPosting }}
                               variant={checked ? 'primary' : 'secondary'}
-                              disabled={start.isPending}
+                              disabled={start.isPosting}
                               onPress={() => {
                                 if (checked) return;
                                 setProfileKey(key);
@@ -147,25 +160,32 @@ export function StoryDetailScreen({
                       accessibilityLabel="플레이 이름"
                       value={playName}
                       onChangeText={setPlayName}
-                      editable={!start.isPending}
+                      editable={!start.isPosting}
                     />
                   </>
                 ) : null}
               </Section>
-              {start.error ? (
-                <Notice
-                  tone="alert"
-                  message={
-                    start.error instanceof ApiError
-                      ? start.error.detail
-                      : '대화를 시작하지 못했습니다. 다시 시도해 주세요.'
-                  }
-                />
+              {start.attempt?.status === 'uncertain' ? (
+                <>
+                  <Notice
+                    tone="alert"
+                    message="대화방 생성 결과를 확인하지 못했습니다. 중복 생성을 막기 위해 이전 요청만 다시 보낼 수 있습니다."
+                  />
+                  {query.canAct ? (
+                    <>
+                      <Button label="다시 불러오기" variant="secondary" onPress={() => void query.refetch()} />
+                      <Button label="같은 요청 다시 보내기" variant="secondary" onPress={() => handleStart(true)} />
+                    </>
+                  ) : null}
+                </>
               ) : null}
+              {isDefiniteStartRejection(start.error) ? <Notice tone="alert" message={start.error.detail} /> : null}
               <Button
-                label={start.isPending ? '대화 시작 중…' : '대화 시작'}
-                disabled={start.isPending || !intro || !profile}
-                onPress={handleStart}
+                label={start.isPosting ? '대화 시작 중…' : '대화 시작'}
+                disabled={
+                  !query.canAct || start.isPosting || start.attempt?.status === 'uncertain' || !intro || !profile
+                }
+                onPress={() => handleStart()}
               />
             </>
           )}

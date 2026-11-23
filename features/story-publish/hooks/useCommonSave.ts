@@ -19,6 +19,7 @@ import {
 } from '@/shared/story-types';
 import type { CommonSaveRepository } from '../commonRepository';
 import { storyKeys } from './useStories';
+import { useStoryWriteLock, writeBlockedMessage } from './useStoryWriteLock';
 
 export function completionIssues(document: CreationSaveDocument): string[] {
   const issues: string[] = [];
@@ -83,6 +84,8 @@ const messages: Record<string, string> = {
   INVALID_AFFINITY_PERSON: '삭제된 캐릭터의 호감도가 남아 있습니다. 다시 불러온 뒤 저장해 주세요.',
 };
 type Options = {
+  /** 쓰기 잠금 키. 편집 화면(StoryEditorScreen)과 같은 QueryClient·스토리 id면 저장이 겹치지 않는다. */
+  storyId: string;
   document: CreationSaveDocument | null;
   dirty: boolean;
   loading: boolean;
@@ -109,6 +112,8 @@ export function rejectionMessage(failure: ApiError): string {
 }
 export function useCommonSave(repository: CommonSaveRepository, options: Options) {
   const queryClient = useQueryClient();
+  // 같은 QueryClient·스토리의 다른 화면(기본 설정의 저장·삭제)과 저장이 겹치지 않게 하는 잠금 (CREATE-US-07-AC03/07/09)
+  const lock = useStoryWriteLock(options.storyId);
   const [saving, setSaving] = useState(false),
     [error, setError] = useState<string | null>(null),
     [pendingSave, setPendingSave] = useState(false),
@@ -177,6 +182,14 @@ export function useCommonSave(repository: CommonSaveRepository, options: Options
           !current.document.imagesWorkingCopySavedAt);
       if (!current.dirty && unchanged) return true;
     }
+    // 이 화면 안의 자동→직접 대기열은 위에서 처리했다. 여기서는 다른 화면이 같은 스토리를 쓰는 중인지 본다.
+    // 자동 저장은 다음 주기에 다시 시도한다. 직접 저장은 조용히 버리지 않고 안내하며, 입력과
+    // 성패 불명확 재시도(pending, 같은 키)는 그대로 둔다.
+    const release = lock.acquire('save');
+    if (!release) {
+      if (mode === 'manual') setError(writeBlockedMessage(lock.peek()));
+      return false;
+    }
     const operation = pending.current ?? {
       document: current.document,
       state,
@@ -190,11 +203,11 @@ export function useCommonSave(repository: CommonSaveRepository, options: Options
     setSaving(true);
     setAutoSaving(operation.mode === 'auto');
     setError(null);
-    const run = send(operation);
+    const run = send(operation, release);
     inflight.current = run;
     return run;
   };
-  const send = async (operation: Operation): Promise<boolean> => {
+  const send = async (operation: Operation, release: () => void): Promise<boolean> => {
     try {
       const result = await repository.save(
         operation.document,
@@ -229,6 +242,8 @@ export function useCommonSave(repository: CommonSaveRepository, options: Options
       );
       return false;
     } finally {
+      // 잠금은 QueryClient 수명이라 화면을 떠났어도 풀어야 다른 화면이 저장·삭제할 수 있다.
+      release();
       busy.current = false;
       inflight.current = null;
       if (alive.current) {

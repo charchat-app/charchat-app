@@ -4,6 +4,7 @@ import { Button, Notice, ScreenHeader, Surface, Text, TopTabs } from '@/componen
 import {
   completionIssues,
   useCommonSave,
+  type CommonSaveDocument,
   type CommonSaveRepository,
   type FewshotRepository,
 } from '@/features/story-publish';
@@ -29,6 +30,22 @@ import { IntroEditorView } from './IntroEditorView';
 import { InitialStateView } from './initial-state/InitialStateView';
 
 const idle: PendingInput = { active: false, lengthDelta: 0 };
+
+/**
+ * CREATE-US-07-AC07/08 이 화면이 맡지 않는 영역(1번 기본 정보·5번 프리셋·6번 이미지)을 저장 문서에서 뺀다.
+ * 조회 응답(few.snapshot)에는 불러온 시점의 presets 등이 그대로 남아 있어, 펼쳐서 보내면 기본 설정 화면에서
+ * 그 뒤에 저장한 값을 이전 값으로 덮어쓸 수 있다. 빼면 요청에 키가 없어 서버가 기존 값을 유지한다.
+ * 사진 임시 저장본 반영(imagesWorkingCopySavedAt)은 서버의 작업본 처리라 그대로 둔다.
+ */
+function withoutForeignAreas(snapshot: FewshotsDocument): FewshotsDocument {
+  const {
+    basic: _basic,
+    presets: _presets,
+    images: _images,
+    ...scene
+  } = snapshot as FewshotsDocument & Partial<Pick<CommonSaveDocument, 'basic' | 'presets' | 'images'>>;
+  return scene;
+}
 
 export function CommonCreationWorkspace({
   repository,
@@ -93,7 +110,9 @@ export function CommonCreationWorkspace({
     lengthDelta: 0,
   };
   const document =
-    few.snapshot && speech ? { ...few.snapshot, speech, fewshots: few.groups, intros, relations, affinities } : null;
+    few.snapshot && speech
+      ? { ...withoutForeignAreas(few.snapshot), speech, fewshots: few.groups, intros, relations, affinities }
+      : null;
   const dirty =
     few.dirty ||
     (!!loaded && JSON.stringify(speech) !== JSON.stringify(loaded.speech)) ||
@@ -102,6 +121,7 @@ export function CommonCreationWorkspace({
     // 호감도는 값을 바꾸면 행이 끝으로 옮겨지므로 순서와 무관하게 비교한다.
     !sameAffinities(affinities, savedAffinities);
   const common = useCommonSave(repository, {
+    storyId,
     document,
     dirty,
     loading: few.loading,

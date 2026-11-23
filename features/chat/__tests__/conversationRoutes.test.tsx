@@ -5,11 +5,18 @@ import type { ReactElement } from 'react';
 
 import SessionRoute from '@/app/chat-session/[sessionId]';
 import StoryRoute from '@/app/story/[storyId]';
+import type { ConversationStory } from '@/shared/story-types';
 
 const mockParams = { storyId: '7', sessionId: '19' };
 const mockRouter = { push: jest.fn(), back: jest.fn(), canGoBack: jest.fn(() => true) };
 
-jest.mock('expo-router', () => ({ useLocalSearchParams: () => mockParams, useRouter: () => mockRouter }));
+let mockFocused = true;
+
+jest.mock('expo-router', () => ({
+  useLocalSearchParams: () => mockParams,
+  useRouter: () => mockRouter,
+  useIsFocused: () => mockFocused,
+}));
 jest.mock('@/lib/api-client', () => {
   const previous = process.env.EXPO_PUBLIC_API_URL;
   process.env.EXPO_PUBLIC_API_URL = 'http://localhost:8000/api/v1';
@@ -20,6 +27,17 @@ jest.mock('@/lib/api-client', () => {
     else process.env.EXPO_PUBLIC_API_URL = previous;
   }
 });
+// CHAT-US-02 대화 이력 조회는 chatRoom 테스트에서 검증한다. 이 파일은 CHAT-US-01 조회 횟수만 센다.
+jest.mock('@/features/chat/api', () => ({
+  ...jest.requireActual('@/features/chat/api'),
+  getChatTurns: jest.fn(async () => ({
+    messages: [],
+    active_generation: null,
+    last_failed_generation: null,
+    // 이 파일은 세션 응답의 모델 표시만 검증한다. 빈 값이면 대화방은 세션 모델을 보인다.
+    model: '',
+  })),
+}));
 
 const STORY_PATH = 'http://localhost:8000/api/v1/conversation/stories/7';
 const story = {
@@ -51,7 +69,7 @@ const story = {
   ],
   existing_session_id: null,
   tags: ['판타지'],
-};
+} satisfies ConversationStory;
 
 const clients: QueryClient[] = [];
 const show = (route: ReactElement) => {
@@ -75,6 +93,7 @@ beforeEach(() => {
   jest.clearAllMocks();
   mockParams.storyId = '7';
   mockParams.sessionId = '19';
+  mockFocused = true;
 });
 afterEach(() => {
   clients.splice(0).forEach((client) => client.clear());
@@ -107,7 +126,7 @@ it('KAN-16: 상세를 모두 펼쳐 보여 주고 첫 인트로 말풍선을 순
   expect(screen.queryByText('비가 내린다.')).not.toBeOnTheScreen();
   expect(fetchMock).toHaveBeenCalledTimes(1);
   expect(fetchMock).toHaveBeenCalledWith(STORY_PATH, expect.objectContaining({ signal: expect.anything() }));
-});
+}, 20_000); // 첫 React Native 렌더는 CI의 콜드 캐시에서 기본 5초를 넘길 수 있다.
 
 it('KAN-16: 인트로와 프로필을 선택하고 이름 원문으로 대화방을 한 번만 만든다', async () => {
   let finishPost!: (result: Response) => void;
@@ -174,6 +193,383 @@ it('KAN-16: 서버가 반환한 기존 방은 POST 없이 이어한다', async (
   expect(fetchMock).toHaveBeenCalledTimes(1);
 });
 
+it('CHAT-US-01: 캐시가 있는 새 상세 화면에서도 최신 조회 전에는 이어할 수 없다', async () => {
+  const fetchMock = jest
+    .spyOn(globalThis, 'fetch')
+    .mockResolvedValueOnce(response({ ...story, existing_session_id: 21 }));
+  const view = await show(<StoryRoute />);
+  expect(await screen.findByRole('button', { name: '이어하기' })).toBeEnabled();
+  await view.unmount();
+
+  let finish!: (value: Response) => void;
+  fetchMock.mockReturnValueOnce(new Promise((resolve) => (finish = resolve)));
+  await render(
+    <QueryClientProvider client={clients[0]}>
+      <StoryRoute />
+    </QueryClientProvider>,
+  );
+  const resume = screen.getByRole('button', { name: '이어하기' });
+  expect(resume).toBeDisabled();
+  await fireEvent.press(resume);
+  expect(mockRouter.push).not.toHaveBeenCalled();
+  await act(async () => finish(response({}, 503)));
+  const reload = await screen.findByRole('button', { name: '다시 불러오기' });
+  expect(screen.getByRole('button', { name: '이어하기' })).toBeDisabled();
+  await fireEvent.press(screen.getByRole('button', { name: '이어하기' }));
+  expect(mockRouter.push).not.toHaveBeenCalled();
+  fetchMock.mockResolvedValueOnce(response({ ...story, existing_session_id: 24 }));
+  await fireEvent.press(reload);
+  await waitFor(() => expect(screen.getByRole('button', { name: '이어하기' })).toBeEnabled());
+  await fireEvent.press(screen.getByRole('button', { name: '이어하기' }));
+  expect(mockRouter.push).toHaveBeenCalledWith({ pathname: '/chat-session/[sessionId]', params: { sessionId: '24' } });
+  expect(fetchMock).toHaveBeenCalledTimes(3);
+});
+
+it('CHAT-US-01: 복귀 조회와 503 동안 오래된 인트로로 시작하지 않고 이름 편집을 보존한다', async () => {
+  const fetchMock = jest.spyOn(globalThis, 'fetch').mockResolvedValueOnce(response(story));
+  const view = await show(<StoryRoute />);
+  await fireEvent.press(await screen.findByRole('button', { name: '온실' }));
+  await fireEvent.press(screen.getByRole('radio', { name: '여행자' }));
+  await fireEvent.changeText(screen.getByLabelText('플레이 이름'), '복귀 뒤에도 남는 이름');
+
+  const rerender = () =>
+    view.rerender(
+      <QueryClientProvider client={clients[0]}>
+        <StoryRoute />
+      </QueryClientProvider>,
+    );
+  mockFocused = false;
+  await rerender();
+  let finish!: (value: Response) => void;
+  fetchMock.mockReturnValueOnce(new Promise((resolve) => (finish = resolve)));
+  mockFocused = true;
+  await rerender();
+  const start = screen.getByRole('button', { name: '대화 시작' });
+  expect(start).toBeDisabled();
+  await fireEvent.press(start);
+  await act(async () => finish(response({}, 503)));
+
+  const retry = await screen.findByRole('button', { name: '다시 불러오기' });
+  expect(screen.getByRole('button', { name: '대화 시작' })).toBeDisabled();
+  expect(screen.getByLabelText('플레이 이름')).toHaveDisplayValue('복귀 뒤에도 남는 이름');
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+  fetchMock.mockResolvedValueOnce(response({ ...story, intros: [{ ...story.intros[0], id: 13, title: '새 입구' }] }));
+  await fireEvent.press(retry);
+  expect(await screen.findByRole('button', { name: '새 입구', selected: true })).toBeOnTheScreen();
+  fetchMock.mockResolvedValueOnce(response({ id: 19 }, 201));
+  await fireEvent.press(screen.getByRole('button', { name: '대화 시작' }));
+  await waitFor(() => expect(mockRouter.push).toHaveBeenCalledTimes(1));
+  expect(fetchMock.mock.calls.map(([, options]) => options?.method ?? 'GET')).toEqual(['GET', 'GET', 'GET', 'POST']);
+  expect(JSON.parse(String(fetchMock.mock.lastCall?.[1]?.body))).toMatchObject({
+    intro_id: 13,
+    play_name: '복귀 뒤에도 남는 이름',
+  });
+});
+
+it('CHAT-US-01: 첫 조회 도중 떠났다가 복귀하면 이전 응답이 아니라 복귀 후 응답을 사용한다', async () => {
+  let finishOld!: (value: Response) => void;
+  const fetchMock = jest
+    .spyOn(globalThis, 'fetch')
+    .mockReturnValueOnce(new Promise((resolve) => (finishOld = resolve)))
+    .mockResolvedValueOnce(response({ ...story, existing_session_id: 24 }));
+  const view = await show(<StoryRoute />);
+  const rerender = () =>
+    view.rerender(
+      <QueryClientProvider client={clients[0]}>
+        <StoryRoute />
+      </QueryClientProvider>,
+    );
+  mockFocused = false;
+  await rerender();
+  mockFocused = true;
+  await rerender();
+  await act(async () => finishOld(response({ ...story, existing_session_id: 21 })));
+  await fireEvent.press(await screen.findByRole('button', { name: '이어하기' }));
+  expect(mockRouter.push).toHaveBeenCalledWith({ pathname: '/chat-session/[sessionId]', params: { sessionId: '24' } });
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+});
+
+it.each([
+  ['네트워크', () => Promise.reject(new TypeError('response lost after commit'))],
+  ['시간 초과', () => Promise.reject(new DOMException('request aborted', 'AbortError'))],
+  ['본문 누락', () => Promise.resolve(response({}, 201))],
+] as const)('CHAT-US-01: 방 저장 뒤 %s 오류가 나면 상세를 조회해 이어하기만 허용한다', async (_label, loseResponse) => {
+  const fetchMock = jest
+    .spyOn(globalThis, 'fetch')
+    .mockResolvedValueOnce(response(story))
+    .mockImplementationOnce(loseResponse)
+    .mockResolvedValueOnce(response({ ...story, existing_session_id: 31 }));
+  await show(<StoryRoute />);
+  await fireEvent.press(await screen.findByRole('radio', { name: '여행자' }));
+  await fireEvent.press(screen.getByRole('button', { name: '대화 시작' }));
+  const resume = await screen.findByRole('button', { name: '이어하기', disabled: false });
+  expect(mockRouter.push).not.toHaveBeenCalled();
+  expect(screen.queryByRole('button', { name: '대화 시작' })).not.toBeOnTheScreen();
+  await fireEvent.press(resume);
+  expect(mockRouter.push).toHaveBeenCalledWith({ pathname: '/chat-session/[sessionId]', params: { sessionId: '31' } });
+  expect(fetchMock.mock.calls.map(([, options]) => options?.method ?? 'GET')).toEqual(['GET', 'POST', 'GET']);
+});
+
+it('CHAT-US-01: 불확실한 POST 뒤 조회가 실패하면 막고, 빈 조회 뒤에도 재진입한 동일 스토리에서는 원본만 재전송한다', async () => {
+  const fetchMock = jest
+    .spyOn(globalThis, 'fetch')
+    .mockResolvedValueOnce(response(story))
+    .mockResolvedValueOnce(response({}, 503))
+    .mockResolvedValueOnce(response({}, 503));
+  const view = await show(<StoryRoute />);
+  await fireEvent.press(await screen.findByRole('radio', { name: '여행자' }));
+  await fireEvent.changeText(screen.getByLabelText('플레이 이름'), '첫 요청');
+  await fireEvent.press(screen.getByRole('button', { name: '대화 시작' }));
+  const reload = await screen.findByRole('button', { name: '다시 불러오기' });
+  expect(screen.getByRole('button', { name: '대화 시작' })).toBeDisabled();
+  expect(screen.queryByRole('button', { name: '이어하기' })).not.toBeOnTheScreen();
+  await fireEvent.changeText(screen.getByLabelText('플레이 이름'), '다른 내용');
+  await fireEvent.press(screen.getByRole('button', { name: '대화 시작' }));
+  expect(fetchMock).toHaveBeenCalledTimes(3);
+
+  fetchMock.mockResolvedValueOnce(response(story));
+  await fireEvent.press(reload);
+  expect(await screen.findByRole('button', { name: '같은 요청 다시 보내기' })).toBeEnabled();
+  expect(screen.getByRole('button', { name: '대화 시작' })).toBeDisabled();
+  await view.unmount();
+  fetchMock.mockResolvedValueOnce(response(story));
+  await render(
+    <QueryClientProvider client={clients[0]}>
+      <StoryRoute />
+    </QueryClientProvider>,
+  );
+  const replay = await screen.findByRole('button', { name: '같은 요청 다시 보내기' });
+  await waitFor(() => expect(replay).toBeEnabled());
+  await fireEvent.press(await screen.findByRole('radio', { name: '내 모험가' }));
+  await fireEvent.press(screen.getByRole('button', { name: '대화 시작' }));
+  fetchMock.mockResolvedValueOnce(response({ id: 31 }, 201));
+  await fireEvent.press(replay);
+  await waitFor(() => expect(mockRouter.push).toHaveBeenCalledTimes(1));
+  const bodies = fetchMock.mock.calls
+    .filter(([, options]) => options?.method === 'POST')
+    .map(([, options]) => options?.body);
+  expect(bodies).toEqual(
+    Array(2).fill(JSON.stringify({ intro_id: 11, profile_kind: 'preset', profile_id: 6, play_name: '첫 요청' })),
+  );
+});
+
+it('KAN-16: 교체된 인트로의 재전송이 422면 새 조회에서 빈 방을 확인한 뒤 새 요청을 보낸다', async () => {
+  const updatedStory = { ...story, intros: [{ ...story.intros[0], id: 13, title: '새 입구' }] };
+  let finishRead!: (value: Response) => void;
+  const fetchMock = jest
+    .spyOn(globalThis, 'fetch')
+    .mockResolvedValueOnce(response(story))
+    .mockRejectedValueOnce(new TypeError('response lost without commit'))
+    .mockResolvedValueOnce(response(updatedStory))
+    .mockResolvedValueOnce(response({ code: 'CONVERSATION_INTRO_NOT_FOUND', detail: '인트로가 없습니다.' }, 422))
+    .mockReturnValueOnce(new Promise((resolve) => (finishRead = resolve)))
+    .mockResolvedValueOnce(response({ id: 19 }, 201));
+  await show(<StoryRoute />);
+  await fireEvent.press(await screen.findByRole('radio', { name: '여행자' }));
+  await fireEvent.press(screen.getByRole('button', { name: '대화 시작' }));
+  await fireEvent.press(await screen.findByRole('button', { name: '같은 요청 다시 보내기' }));
+
+  expect(await screen.findByText('스토리를 새로 불러오는 중…')).toBeOnTheScreen();
+  await fireEvent.press(screen.getByRole('button', { name: /대화 시작/ }));
+  expect(fetchMock.mock.calls.map(([, options]) => options?.method ?? 'GET')).toEqual([
+    'GET',
+    'POST',
+    'GET',
+    'POST',
+    'GET',
+  ]);
+  await act(async () => finishRead(response(updatedStory)));
+  await fireEvent.press(await screen.findByRole('button', { name: '대화 시작', disabled: false }));
+  await waitFor(() => expect(mockRouter.push).toHaveBeenCalledTimes(1));
+  const postedIntroIds = fetchMock.mock.calls
+    .filter(([, options]) => options?.method === 'POST')
+    .map(([, options]) => JSON.parse(String(options?.body)).intro_id);
+  expect(postedIntroIds).toEqual([11, 11, 13]);
+});
+
+it.each(['다시 불러오기', '재진입'] as const)(
+  'KAN-16: 재전송 422 뒤 GET이 실패하면 계속 막고 %s의 성공으로만 새 시작을 허용한다',
+  async (recovery) => {
+    const updatedStory = { ...story, intros: [story.intros[1]] };
+    const fetchMock = jest
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(response(story))
+      .mockRejectedValueOnce(new TypeError('response lost'))
+      .mockResolvedValueOnce(response(updatedStory))
+      .mockResolvedValueOnce(response({ code: 'CONVERSATION_INTRO_NOT_FOUND' }, 422))
+      .mockResolvedValueOnce(response({}, 503))
+      .mockResolvedValueOnce(response(updatedStory));
+    const view = await show(<StoryRoute />);
+    await fireEvent.press(await screen.findByRole('radio', { name: '여행자' }));
+    await fireEvent.press(screen.getByRole('button', { name: '대화 시작' }));
+    await fireEvent.press(await screen.findByRole('button', { name: '같은 요청 다시 보내기' }));
+
+    await screen.findByRole('button', { name: '다시 불러오기' });
+    expect(screen.getByRole('button', { name: '대화 시작' })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: '같은 요청 다시 보내기' })).not.toBeOnTheScreen();
+    await fireEvent.press(screen.getByRole('button', { name: '대화 시작' }));
+    expect(fetchMock).toHaveBeenCalledTimes(5);
+
+    if (recovery === '다시 불러오기') {
+      // 느린 실행에서는 버튼이 다시 그려질 수 있어, 누를 때 현재 버튼을 다시 찾는다.
+      await fireEvent.press(screen.getByRole('button', { name: '다시 불러오기' }));
+    } else {
+      await view.unmount();
+      await render(
+        <QueryClientProvider client={clients[0]}>
+          <StoryRoute />
+        </QueryClientProvider>,
+      );
+      await fireEvent.press(await screen.findByRole('radio', { name: '여행자' }));
+    }
+    // 콜드 실행(CI 첫 렌더)에서 재조회 뒤 다시 그리기가 기본 1초를 넘을 수 있어 대기만 늘린다.
+    expect(
+      await screen.findByRole('button', { name: '대화 시작', disabled: false }, { timeout: 5000 }),
+    ).toBeOnTheScreen();
+    expect(fetchMock.mock.calls.map(([, options]) => options?.method ?? 'GET')).toEqual([
+      'GET',
+      'POST',
+      'GET',
+      'POST',
+      'GET',
+      'GET',
+    ]);
+  },
+  15000,
+);
+
+it('KAN-16: 재전송 422 전에 시작한 GET은 버리고 새 GET에서 확인한 방만 이어한다', async () => {
+  let rejectReplay!: (value: Response) => void;
+  let finishOldRead!: (value: Response) => void;
+  let finishNewRead!: (value: Response) => void;
+  const fetchMock = jest
+    .spyOn(globalThis, 'fetch')
+    .mockResolvedValueOnce(response(story))
+    .mockRejectedValueOnce(new TypeError('response lost'))
+    .mockResolvedValueOnce(response(story))
+    .mockReturnValueOnce(new Promise((resolve) => (rejectReplay = resolve)))
+    .mockReturnValueOnce(new Promise((resolve) => (finishOldRead = resolve)))
+    .mockReturnValueOnce(new Promise((resolve) => (finishNewRead = resolve)));
+  await show(<StoryRoute />);
+  await fireEvent.press(await screen.findByRole('radio', { name: '여행자' }));
+  await fireEvent.press(screen.getByRole('button', { name: '대화 시작' }));
+  await fireEvent.press(await screen.findByRole('button', { name: '같은 요청 다시 보내기' }));
+  await act(async () => {
+    void clients[0].invalidateQueries({ queryKey: ['conversation', 'story', '7'] });
+  });
+  expect(fetchMock).toHaveBeenCalledTimes(5);
+  const oldSignal = fetchMock.mock.calls[4][1]?.signal;
+  await act(async () => rejectReplay(response({ code: 'CONVERSATION_INTRO_NOT_FOUND' }, 422)));
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(6));
+  expect(oldSignal?.aborted).toBe(true);
+  await act(async () => finishOldRead(response(story)));
+  expect(screen.getByRole('button', { name: '대화 시작' })).toBeDisabled();
+  expect(mockRouter.push).not.toHaveBeenCalled();
+
+  await act(async () => finishNewRead(response({ ...story, existing_session_id: 32 })));
+  await fireEvent.press(await screen.findByRole('button', { name: '이어하기', disabled: false }));
+  expect(mockRouter.push).toHaveBeenCalledWith({ pathname: '/chat-session/[sessionId]', params: { sessionId: '32' } });
+  expect(screen.queryByRole('button', { name: '대화 시작' })).not.toBeOnTheScreen();
+  expect(fetchMock).toHaveBeenCalledTimes(6);
+});
+
+it('KAN-16: 재전송 422 뒤 재조회가 접근을 거부하면 이전 상세와 대화 액션을 숨긴다', async () => {
+  const fetchMock = jest
+    .spyOn(globalThis, 'fetch')
+    .mockResolvedValueOnce(response(story))
+    .mockRejectedValueOnce(new TypeError('response lost'))
+    .mockResolvedValueOnce(response(story))
+    .mockResolvedValueOnce(response({ code: 'CONVERSATION_INTRO_NOT_FOUND' }, 422))
+    .mockResolvedValueOnce(response({}, 403));
+  await show(<StoryRoute />);
+  await fireEvent.press(await screen.findByRole('radio', { name: '여행자' }));
+  await fireEvent.press(screen.getByRole('button', { name: '대화 시작' }));
+  await fireEvent.press(await screen.findByRole('button', { name: '같은 요청 다시 보내기' }));
+
+  expect(await screen.findByText('스토리를 불러오지 못했습니다.')).toBeOnTheScreen();
+  expect(screen.queryByText('달빛 정원')).not.toBeOnTheScreen();
+  expect(screen.queryByRole('button', { name: /대화 시작|이어하기|다시 시도/ })).not.toBeOnTheScreen();
+  expect(mockRouter.push).not.toHaveBeenCalled();
+  expect(fetchMock).toHaveBeenCalledTimes(5);
+});
+
+it('CHAT-US-01: 한 스토리의 미확정 요청이 다른 스토리의 시작을 막지 않는다', async () => {
+  const fetchMock = jest
+    .spyOn(globalThis, 'fetch')
+    .mockResolvedValueOnce(response(story))
+    .mockRejectedValueOnce(new TypeError('response lost'))
+    .mockResolvedValueOnce(response(story));
+  const view = await show(<StoryRoute />);
+  await fireEvent.press(await screen.findByRole('radio', { name: '여행자' }));
+  await fireEvent.press(screen.getByRole('button', { name: '대화 시작' }));
+  await screen.findByRole('button', { name: '같은 요청 다시 보내기' });
+
+  mockParams.storyId = '8';
+  fetchMock.mockResolvedValueOnce(response({ ...story, id: 8 })).mockResolvedValueOnce(response({ id: 31 }, 201));
+  await view.rerender(
+    <QueryClientProvider client={clients[0]}>
+      <StoryRoute />
+    </QueryClientProvider>,
+  );
+  await fireEvent.press(await screen.findByRole('radio', { name: '내 모험가' }));
+  expect(screen.queryByRole('button', { name: '같은 요청 다시 보내기' })).not.toBeOnTheScreen();
+  await fireEvent.press(screen.getByRole('button', { name: '대화 시작' }));
+  await waitFor(() => expect(mockRouter.push).toHaveBeenCalledTimes(1));
+  expect(fetchMock.mock.lastCall?.[0]).toBe(`${STORY_PATH.slice(0, -1)}8/sessions`);
+});
+
+it('CHAT-US-01: 같은 스토리를 다시 열어도 아직 진행 중인 POST와 중복 요청을 보내지 않는다', async () => {
+  let finish!: (value: Response) => void;
+  const pendingPost = new Promise<Response>((resolve) => (finish = resolve));
+  const fetchMock = jest
+    .spyOn(globalThis, 'fetch')
+    .mockResolvedValueOnce(response(story))
+    .mockReturnValueOnce(pendingPost);
+  const view = await show(<StoryRoute />);
+  await fireEvent.press(await screen.findByRole('radio', { name: '여행자' }));
+  await fireEvent.press(screen.getByRole('button', { name: '대화 시작' }));
+  await view.unmount();
+  fetchMock.mockResolvedValueOnce(response(story));
+  await render(
+    <QueryClientProvider client={clients[0]}>
+      <StoryRoute />
+    </QueryClientProvider>,
+  );
+  await screen.findByRole('radio', { name: '내 모험가' });
+  await fireEvent.press(screen.getByRole('radio', { name: '내 모험가' }));
+  try {
+    const action = screen.getByRole('button', { name: /대화 시작/ });
+    expect(action).toBeDisabled();
+    await fireEvent.press(action);
+    expect(fetchMock.mock.calls.map(([, options]) => options?.method ?? 'GET')).toEqual(['GET', 'POST', 'GET']);
+  } finally {
+    await act(async () => finish(response({ id: 31 }, 201)));
+  }
+  await waitFor(() => expect(screen.getByRole('button', { name: '이어하기' })).toBeEnabled());
+  expect(mockRouter.push).not.toHaveBeenCalled();
+});
+
+it('CHAT-US-01: POST 접근 거부 후 재조회가 503이어도 이전 상세와 액션이 되살아나지 않는다', async () => {
+  const fetchMock = jest
+    .spyOn(globalThis, 'fetch')
+    .mockResolvedValueOnce(response(story))
+    .mockResolvedValueOnce(response({}, 403))
+    .mockResolvedValueOnce(response({}, 503));
+  await show(<StoryRoute />);
+  await fireEvent.press(await screen.findByRole('radio', { name: '여행자' }));
+  await fireEvent.press(screen.getByRole('button', { name: '대화 시작' }));
+  expect(await screen.findByText('스토리를 불러오지 못했습니다.')).toBeOnTheScreen();
+  expect(screen.queryByText('달빛 정원')).not.toBeOnTheScreen();
+  expect(screen.queryByRole('button', { name: '다시 시도' })).not.toBeOnTheScreen();
+
+  await refetchConversation('story', '7');
+  expect(screen.queryByText('달빛 정원')).not.toBeOnTheScreen();
+  expect(screen.queryByRole('button', { name: /대화 시작|이어하기/ })).not.toBeOnTheScreen();
+  expect(screen.getByRole('button', { name: '다시 시도' })).toBeOnTheScreen();
+  expect(mockRouter.push).not.toHaveBeenCalled();
+  expect(fetchMock).toHaveBeenCalledTimes(3);
+});
+
 it('KAN-16: 플레이 이름 검증 실패를 보여 주고 입력을 수정해 다시 시작한다', async () => {
   const fetchMock = jest
     .spyOn(globalThis, 'fetch')
@@ -202,6 +598,7 @@ it('KAN-16: 프로필이 없으면 추가가 필요함을 안내하고 대화나
     response({
       ...story,
       profiles: [],
+      tags: [],
       effective_rating: null,
       rating: '19세',
     }),
@@ -212,6 +609,7 @@ it('KAN-16: 프로필이 없으면 추가가 필요함을 안내하고 대화나
   await fireEvent.press(add);
   expect(screen.getByRole('button', { name: '대화 시작' })).toBeDisabled();
   expect(screen.queryByText(/등급|19세|전체 이용가/)).not.toBeOnTheScreen();
+  expect(screen.queryByText('판타지')).not.toBeOnTheScreen();
   expect(mockRouter.push).not.toHaveBeenCalled();
   expect(fetchMock).toHaveBeenCalledTimes(1);
 });
@@ -255,6 +653,7 @@ const session = {
   story_title: '달빛 정원',
   model: 'applied-model',
   read_only: false,
+  play_name: '여행자',
   messages: story.intros[0].messages,
   characters: [{ id: 2, name: '윤슬' }],
 };
@@ -269,7 +668,9 @@ it('KAN-16: 대화방에 서버의 말풍선, 등장 캐릭터, 적용된 모델
   expect(screen.getAllByTestId('conversation-bubble')[0]).toHaveTextContent('나레이터문이 열렸다.');
   expect(screen.getAllByTestId('conversation-bubble')[2]).toHaveTextContent('유저실례합니다.');
   expect(screen.queryByText('읽기 전용')).not.toBeOnTheScreen();
-  expect(screen.queryByRole('button', { name: /모델|전송/ })).not.toBeOnTheScreen();
+  expect(screen.queryByRole('button', { name: /모델/ })).not.toBeOnTheScreen();
+  // CHAT-US-02: 열린 대화방에는 입력창이 있다.
+  expect(await screen.findByLabelText('메시지 입력')).toBeOnTheScreen();
   expect(fetchMock).toHaveBeenCalledWith(
     'http://localhost:8000/api/v1/conversation/sessions/19',
     expect.objectContaining({ signal: expect.anything() }),
@@ -287,6 +688,7 @@ it('KAN-16: 읽기 전용 방은 빈 대화 상태를 표시하고 모델 값이
   expect(screen.getByText('표시할 대화가 없습니다.')).toBeOnTheScreen();
   expect(screen.queryByText(/모델/)).not.toBeOnTheScreen();
   expect(screen.queryByRole('button', { name: /전송/ })).not.toBeOnTheScreen();
+  expect(screen.queryByLabelText('메시지 입력')).not.toBeOnTheScreen();
 });
 
 it('KAN-16: 대화방 재조회가 읽기 전용 응답을 반환하면 대화 내용을 계속 표시한다', async () => {

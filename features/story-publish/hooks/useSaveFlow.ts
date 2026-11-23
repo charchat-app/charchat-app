@@ -15,6 +15,11 @@ export type SaveFlow = {
   saveAll: (saveBasic: SaveBasicStep, saveImages: SaveImagesStep) => Promise<boolean>;
   /** 기본 정보는 다시 보내지 않고 이미지 단계만 다시 시도한다. 이미 진행 중이면 false. */
   retryImages: (saveImages: SaveImagesStep) => Promise<boolean>;
+  /**
+   * 사진 단계 없이 한 요청만 같은 진행 잠금 안에서 보낸다(CREATE-US-05-AC06 임시 저장).
+   * 앞선 사진 단계 실패(imageError)는 지우지 않는다. 이미 진행 중이면 false.
+   */
+  run: (job: () => Promise<unknown>) => Promise<boolean>;
 };
 
 export function useSaveFlow(): SaveFlow {
@@ -60,5 +65,13 @@ export function useSaveFlow(): SaveFlow {
     [guarded, runImages],
   );
 
-  return { running, imageError, saveAll, retryImages };
+  const run = useCallback(
+    (job: () => Promise<unknown>) =>
+      guarded(async () => {
+        await job();
+      }),
+    [guarded],
+  );
+
+  return { running, imageError, saveAll, retryImages, run };
 }

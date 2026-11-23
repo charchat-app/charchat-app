@@ -32,6 +32,8 @@ export type ConversationSession = ConversationSessionCreated & {
   read_only: boolean;
   messages: ConversationMessage[];
   characters: ConversationCharacter[];
+  /** CHAT-US-02: 세션에 적용된 플레이 이름. 서버가 항상 준다. */
+  play_name: string;
 };
 
 export type ConversationStory = {
@@ -44,15 +46,55 @@ export type ConversationStory = {
   intros: ConversationIntro[];
   profiles: ConversationProfile[];
   existing_session_id: number | null;
-  tags?: string[];
+  tags: string[];
 };
 
-// CHAT-US-03 내 대화 목록 조회 투영
-export type ConversationSessionListItem = Pick<ConversationSession, 'id' | 'story_title' | 'read_only'> & {
-  story_id: number;
+// CHAT-US-02 메시지 전송·응답 (KAN-17). 아래 타입은 서버 계약 초안에 맞춘 추가분이다.
+
+/** 메시지 한 부분의 발화자 종류. user = 세션에 적용된 플레이 프로필 */
+export type ChatSpeakerKind = ConversationMessage['speaker_kind'];
+
+/** 전송할 메시지 부분. character_id는 세션 캐릭터 id(`ConversationSession.characters[].id`)다. */
+export type ChatMessagePartInput = {
+  speaker_kind: ChatSpeakerKind;
+  character_id: number | null;
+  body: string;
 };
 
-export type ConversationSessionPage = {
-  sessions: ConversationSessionListItem[];
-  next_before_id: number | null;
+/** 저장된 메시지 부분. speaker_name: user → 적용 플레이 이름, character → 현재 이름, narrator → null */
+export type ChatMessagePart = ChatMessagePartInput & { speaker_name: string | null };
+
+export type ChatMessage = {
+  id: number;
+  role: 'user' | 'assistant';
+  parts: ChatMessagePart[];
+  created_at: string;
 };
+
+/** pending·streaming = 진행 중. 나머지는 끝난 상태다. */
+export type ChatGenerationStatus = 'pending' | 'streaming' | 'completed' | 'failed' | 'failed_partial' | 'save_failed';
+
+export type ChatGeneration = {
+  id: number;
+  session_id: number;
+  status: ChatGenerationStatus;
+  user_message_id: number;
+  assistant_message: ChatMessage | null;
+  /** 요청한 offset부터 현재까지 모인 원문 */
+  text: string;
+  /** 지금까지 모인 원문 전체 길이(코드 포인트). 다음 조회의 offset */
+  next_offset: number;
+  error_code: string | null;
+  retryable: boolean;
+};
+
+export type ChatTurns = {
+  /** 저장된 이력만(유저 메시지 + 완료된 AI 응답). 인트로는 포함하지 않는다. */
+  messages: ChatMessage[];
+  active_generation: ChatGeneration | null;
+  last_failed_generation: ChatGeneration | null;
+  /** 이 세션의 응답 모델. 서버가 항상 문자열로 준다. */
+  model: string;
+};
+
+export type SendChatMessageInput = { request_id: string; parts: ChatMessagePartInput[] };
