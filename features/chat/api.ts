@@ -1,10 +1,12 @@
-// CHAT-US-01 대화 진입 API · CHAT-US-02 메시지 전송·응답 API
+// CHAT-US-01 대화 진입 API · CHAT-US-02 메시지 전송·응답 API · CHAT-US-03 내 대화 목록·요청 ID 확인
 import { ApiError, apiRequest } from '@/lib/api-client';
 import type {
   ChatGeneration,
+  ChatGenerationLookup,
   ChatTurns,
   ConversationSession,
   ConversationSessionCreated,
+  ConversationSessionPage,
   ConversationStory,
   SendChatMessageInput,
   StartConversationInput,
@@ -58,3 +60,17 @@ export const retryGeneration = (id: number, requestId: string) =>
     method: 'POST',
     body: JSON.stringify({ request_id: requestId }),
   });
+
+/** 내 대화 목록. beforeId보다 작은 세션 ID를 최신순으로 읽는다(CHAT-US-03-AC01). */
+export const getConversationSessions = (beforeId: number | null, signal: AbortSignal) =>
+  apiRequest<ConversationSessionPage>(
+    `/conversation/sessions${beforeId === null ? '' : `?before_id=${idSegment(String(beforeId))}`}`,
+    { signal },
+  );
+
+/** 결과를 모르는 전송을 새로 만들지 않고 기존 request_id로 조회만 한다(CHAT-US-03-AC09). */
+export const findGenerationsByRequest = (sessionId: string, requestId: string, signal?: AbortSignal) =>
+  apiRequest<ChatGenerationLookup>(
+    `${sessionPath(sessionId)}/generations?request_id=${encodeURIComponent(requestId)}`,
+    { signal },
+  );

@@ -1,8 +1,9 @@
-// CHAT-US-01 대화 진입 조회
+// CHAT-US-01 대화 진입 조회 · CHAT-US-03 내 대화 목록
 import {
   type QueryClient,
   type QueryFunctionContext,
   skipToken,
+  useInfiniteQuery,
   useMutation,
   useQuery,
   useQueryClient,
@@ -10,7 +11,12 @@ import {
 import { useIsFocused } from 'expo-router';
 import { useLayoutEffect, useRef, useState } from 'react';
 
-import { getConversationSession, getConversationStory, startConversation } from '@/features/chat/api';
+import {
+  getConversationSession,
+  getConversationSessions,
+  getConversationStory,
+  startConversation,
+} from '@/features/chat/api';
 import { ApiError } from '@/lib/api-client';
 import type { ConversationStory, StartConversationInput } from '@/shared/story-types';
 
@@ -179,5 +185,31 @@ export function useConversationSession(id: string) {
     queryKey: ['conversation', 'session', id],
     queryFn: (context) => fetchConversation(context, (signal) => getConversationSession(id, signal)),
     retry: false,
+  });
+}
+
+/** 목록에 생성 중인 대화가 있으면 이 간격으로 다시 읽어 표시를 갱신한다(CHAT-US-03-AC11). */
+export const SESSION_LIST_REFRESH_MS = 3000;
+
+export const sessionsKey = (ownerId: string | null) => ['conversation', 'sessions', ownerId] as const;
+
+export function useConversationSessions(ownerId: string | null) {
+  return useInfiniteQuery({
+    queryKey: sessionsKey(ownerId),
+    queryFn: (context) => fetchConversation(context, (signal) => getConversationSessions(context.pageParam, signal)),
+    initialPageParam: null as number | null,
+    getNextPageParam: ({ next_before_id }, _pages, lastCursor) =>
+      next_before_id !== null &&
+      Number.isSafeInteger(next_before_id) &&
+      next_before_id > 0 &&
+      (lastCursor === null || next_before_id < lastCursor)
+        ? next_before_id
+        : undefined,
+    enabled: ownerId !== null,
+    retry: false,
+    refetchInterval: (query) =>
+      query.state.data?.pages.some((page) => page.sessions.some((session) => session.generating))
+        ? SESSION_LIST_REFRESH_MS
+        : false,
   });
 }
