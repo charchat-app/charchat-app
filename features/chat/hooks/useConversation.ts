@@ -1,7 +1,18 @@
 // CHAT-US-01 대화 진입 조회
-import { type QueryFunctionContext, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  type QueryFunctionContext,
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/react-query';
 
-import { getConversationSession, getConversationStory, startConversation } from '@/features/chat/api';
+import {
+  getConversationSession,
+  getConversationSessions,
+  getConversationStory,
+  startConversation,
+} from '@/features/chat/api';
 import { ApiError } from '@/lib/api-client';
 import type { ConversationStory, StartConversationInput } from '@/shared/story-types';
 
@@ -48,10 +59,30 @@ export function useConversationStory(id: string) {
   });
 }
 
-export function useConversationSession(id: string) {
+export const conversationSessionKey = (id: string, ownerId: string | null) =>
+  ['conversation', 'session', id, ownerId] as const;
+
+export function useConversationSession(id: string, ownerId: string | null) {
   return useQuery({
-    queryKey: ['conversation', 'session', id],
+    queryKey: conversationSessionKey(id, ownerId),
     queryFn: (context) => fetchConversation(context, (signal) => getConversationSession(id, signal)),
+    retry: false,
+  });
+}
+
+export function useConversationSessions(ownerId: string | null) {
+  return useInfiniteQuery({
+    queryKey: ['conversation', 'sessions', ownerId],
+    queryFn: (context) => fetchConversation(context, (signal) => getConversationSessions(context.pageParam, signal)),
+    initialPageParam: null as number | null,
+    getNextPageParam: ({ next_before_id }, _pages, lastCursor) =>
+      next_before_id !== null &&
+      Number.isSafeInteger(next_before_id) &&
+      next_before_id > 0 &&
+      (lastCursor === null || next_before_id < lastCursor)
+        ? next_before_id
+        : undefined,
+    enabled: ownerId !== null,
     retry: false,
   });
 }

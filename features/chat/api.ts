@@ -3,6 +3,7 @@ import { ApiError, apiRequest } from '@/lib/api-client';
 import type {
   ConversationSession,
   ConversationSessionCreated,
+  ConversationSessionPage,
   ConversationStory,
   StartConversationInput,
 } from '@/shared/story-types';
@@ -24,3 +25,9 @@ export const startConversation = (id: string, input: StartConversationInput) =>
 
 export const getConversationSession = (id: string, signal: AbortSignal) =>
   apiRequest<ConversationSession>(`/conversation/sessions/${idSegment(id)}`, { signal });
+
+export const getConversationSessions = (beforeId: number | null, signal: AbortSignal) =>
+  apiRequest<ConversationSessionPage>(
+    `/conversation/sessions${beforeId === null ? '' : `?before_id=${idSegment(String(beforeId))}`}`,
+    { signal },
+  );

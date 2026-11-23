@@ -46,3 +46,13 @@ export type ConversationStory = {
   existing_session_id: number | null;
   tags?: string[];
 };
+
+// CHAT-US-03 내 대화 목록 조회 투영
+export type ConversationSessionListItem = Pick<ConversationSession, 'id' | 'story_title' | 'read_only'> & {
+  story_id: number;
+};
+
+export type ConversationSessionPage = {
+  sessions: ConversationSessionListItem[];
+  next_before_id: number | null;
+};
