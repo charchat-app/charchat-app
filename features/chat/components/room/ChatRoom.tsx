@@ -1,4 +1,4 @@
-// CHAT-US-02 대화방: 이력·스트리밍 응답·생성 진행 표시·입력창을 묶는다
+// CHAT-US-02 대화방: 이력·스트리밍 응답·생성 진행 표시·입력창을 묶는다 · CHAT-US-03 작성 중 입력 기기 보관
 import { useQueryClient } from '@tanstack/react-query';
 import { StyleSheet, View } from 'react-native';
 
@@ -34,7 +34,7 @@ export function ChatRoom({ session, onBack }: { session: ConversationSession; on
   const sessionId = String(session.id);
   const client = useQueryClient();
   const turns = useChatTurns(sessionId, true);
-  const { draft, update } = useChatDraft(sessionId);
+  const { draft, update, deviceUnavailable } = useChatDraft(sessionId, !session.read_only);
   const sender = useSendMessage(sessionId);
   const retrier = useRetryGeneration(sessionId, turns.data);
   const messages = turns.data?.messages ?? [];
@@ -138,6 +138,9 @@ export function ChatRoom({ session, onBack }: { session: ConversationSession; on
             onPress={() => void turns.refetch()}
           />
         </>
+      ) : null}
+      {deviceUnavailable && !session.read_only ? (
+        <Text variant="caption">이 기기에 작성 중인 내용을 보관하지 못했습니다. 입력은 계속할 수 있습니다.</Text>
       ) : null}
       {attempt?.status === 'uncertain' ? (
         <>
