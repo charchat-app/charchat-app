@@ -1,7 +1,9 @@
 // CHAT-US-02 메시지 전송: 전송 시도마다 요청 ID 하나, 결과를 모르면 같은 ID로만 다시 확인한다
+// CHAT-US-03 결과를 모르는 요청 ID는 기기에 남겨, 다시 열면 서버에 조회만 해서 이어 간다(AC09)
 import { skipToken, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useEffect } from 'react';
 
-import { sendChatMessage } from '@/features/chat/api';
+import { findGenerationsByRequest, sendChatMessage } from '@/features/chat/api';
 import {
   acceptGeneration,
   draftKey,
@@ -11,6 +13,7 @@ import {
 } from '@/features/chat/hooks/chatCache';
 import { fromMessageParts, isDraftEmpty, type MessageDraft } from '@/features/chat/messageDraft';
 import { newRequestId } from '@/features/chat/requestId';
+import { clearSendAttempt, loadSendAttempt, saveSendAttempt } from '@/features/chat/sendAttemptStorage';
 import type { ChatGeneration, ChatMessagePartInput } from '@/shared/story-types';
 
 type AttemptBase = { requestId: string; parts: ChatMessagePartInput[] };
@@ -40,6 +43,7 @@ export function useSendMessage(sessionId: string) {
     onSuccess: (generation, sent) => {
       setAttempt({ ...sent, status: 'accepted', generation });
       acceptGeneration(client, sessionId, generation);
+      void clearSendAttempt(sessionId, sent.requestId);
     },
     onError: (error, sent) => {
       if (isDefiniteRejection(error)) {
@@ -53,6 +57,7 @@ export function useSendMessage(sessionId: string) {
           restored,
           message: REJECTION_MESSAGES[error.code] ?? error.detail,
         });
+        void clearSendAttempt(sessionId, sent.requestId);
       } else {
         // 접수 여부를 모른다. 새 요청을 만들지 않고 같은 요청 ID로만 다시 확인한다(AC14·AC15).
         setAttempt({ ...sent, status: 'uncertain' });
@@ -65,6 +70,43 @@ export function useSendMessage(sessionId: string) {
   const isBusy = (value: SendAttempt | null | undefined) =>
     value?.status === 'posting' || value?.status === 'uncertain';
 
+  // 앱·브라우저를 닫았다 열어 이 실행에 기록이 없으면, 기기에 남은 요청 ID로 서버 상태를 조회만 한다.
+  // 찾으면 접수된 생성으로 이어 가고, 없으면 같은 요청 ID로만 다시 확인할 수 있게 둔다(새 요청 없음).
+  useEffect(() => {
+    let active = true;
+    let checking: SendAttempt | null = null;
+    const controller = new AbortController();
+    void (async () => {
+      if (current() != null) return;
+      const stored = await loadSendAttempt(sessionId);
+      if (!active || !stored || current() != null) return;
+      checking = { ...stored, status: 'posting' };
+      setAttempt(checking);
+      try {
+        const { generations } = await findGenerationsByRequest(sessionId, stored.requestId, controller.signal);
+        if (!active) return;
+        const found = generations.find((generation) => generation.session_id === Number(sessionId));
+        if (found) {
+          setAttempt({ ...stored, status: 'accepted', generation: found });
+          acceptGeneration(client, sessionId, found);
+          void clearSendAttempt(sessionId, stored.requestId);
+          return;
+        }
+      } catch {
+        if (!active) return;
+      }
+      setAttempt({ ...stored, status: 'uncertain' });
+    })();
+    return () => {
+      active = false;
+      controller.abort();
+      // 확인 도중 나가면 다음에 들어올 때 다시 확인하도록 표시를 거둔다.
+      if (checking && current() === checking) setAttempt(null);
+    };
+    // 대화방에 들어올 때 한 번만 확인한다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [client, sessionId]);
+
   return {
     attempt,
     isBusy: isBusy(attempt),
@@ -73,6 +115,7 @@ export function useSendMessage(sessionId: string) {
       if (isBusy(current())) return false;
       const next: AttemptBase = { requestId: newRequestId(), parts };
       setAttempt({ ...next, status: 'posting' });
+      void saveSendAttempt(sessionId, next);
       mutation.mutate(next);
       return true;
     },
