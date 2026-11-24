@@ -12,7 +12,6 @@ import {
   type DraftProblem,
   type DraftSpeaker,
   draftLength,
-  emptyDraft,
   inputMaxLength,
   limitText,
   MESSAGE_MAX_LENGTH,
@@ -40,7 +39,7 @@ export function ChatComposer({
   labelOf: (speaker: DraftSpeaker) => string;
   /** 응답 생성 중 등 지금 보낼 수 없는 이유. 작성·수정은 계속 허용한다(AC06). */
   blockedReason: string | null;
-  /** 접수 시작에 성공하면 true. 그때만 입력창을 비운다. */
+  /** 접수 시작에 성공하면 true. 입력창을 비우는 일은 보낸 쪽이 맡는다(기기 보관분 정리 시점 때문). */
   onSend: (parts: ChatMessagePartInput[]) => boolean;
 }) {
   const colors = useTheme();
@@ -70,11 +69,7 @@ export function ChatComposer({
       return;
     }
     if (blockedReason) return;
-    if (onSend(toMessageParts(draft))) {
-      // 보낸 내용만 비우고 다음 발화자는 유저 캐릭터로 되돌린다(AC01·AC05).
-      update(() => emptyDraft());
-      setPickerOpen(false);
-    }
+    if (onSend(toMessageParts(draft))) setPickerOpen(false);
   };
 
   return (

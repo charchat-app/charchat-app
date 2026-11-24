@@ -120,6 +120,41 @@ export function cancelPendingDraft(storage: ChatDraftStorage, key: string) {
   }
 }
 
+/**
+ * 화면 밖에서 원문을 되돌릴 때처럼 기다리지 않고 바로 보관한다(예약된 보관은 취소).
+ * 실제로 기록했으면 true. 계정이 바뀌었거나 저장소를 쓸 수 없으면 false.
+ */
+export async function writeDraftNow(
+  storage: ChatDraftStorage,
+  key: string,
+  text: string,
+  canPersist: () => boolean,
+): Promise<boolean> {
+  if (!canPersist()) return false;
+  cancelPendingDraft(storage, key);
+  if ('kind' in storage) {
+    try {
+      await enqueueNativeWrite(storage, key, async () => {
+        if (!canPersist()) throw new Error('owner changed');
+        await storage.setItem(key, text);
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  try {
+    const generation = storage.getItem(generationKey(key));
+    const target = payloadKey(key, generation);
+    storage.setItem(target, text);
+    if (storage.getItem(generationKey(key)) === generation) return true;
+    storage.removeItem(target);
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 export function persistDraft(
   storage: ChatDraftStorage,
   key: string,

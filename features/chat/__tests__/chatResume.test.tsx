@@ -7,7 +7,7 @@ import * as identity from '@/features/chat/conversationIdentity';
 import { encodeDraft } from '@/features/chat/draftCodec';
 import { chatDraftKey, readDraft } from '@/features/chat/draftPersistence';
 import * as storage from '@/features/chat/draftStorage';
-import type { DraftStorage } from '@/features/chat/draftStorage.types';
+import type { DraftStorage, NativeDraftStorage } from '@/features/chat/draftStorage.types';
 import { sendAttemptKey } from '@/features/chat/sendAttemptStorage';
 import type { ChatGeneration, ChatMessage, ChatTurns, ConversationSession } from '@/shared/story-types';
 
@@ -283,6 +283,190 @@ it('CHAT-US-03-AC09: 조회로 찾지 못하면 새로 보내지 않고, 누를 
   await waitFor(() => expect(server.postBodies()).toEqual([{ request_id: 'msg-unknown-01', parts }]));
   await waitFor(() => expect(entries.has(sendAttemptKey('8', '19')!)).toBe(false));
   expect(input()).toHaveDisplayValue('새 메시지');
+});
+
+/** 앱 기기 저장소(AsyncStorage)처럼 비동기로 읽고 쓴다. 특정 키의 읽기를 늦추거나 쓰기를 실패시킬 수 있다. */
+function nativeStorage({
+  beforeGet,
+  failSet,
+}: { beforeGet?: (key: string) => Promise<void> | undefined; failSet?: (key: string) => boolean } = {}) {
+  const native: NativeDraftStorage = {
+    kind: 'native',
+    getItem: async (key) => {
+      await beforeGet?.(key);
+      return entries.get(key) ?? null;
+    },
+    setItem: async (key, value) => {
+      if (failSet?.(key)) throw new Error('quota');
+      entries.set(key, value);
+    },
+    removeItem: async (key) => void entries.delete(key),
+  };
+  return native;
+}
+
+/** 앱은 켜 둔 채 대화방만 나간다(메모리 캐시와 진행 중인 요청은 남는다). */
+async function leaveRoom() {
+  await act(async () => {
+    views.forEach((view) => view.unmount());
+  });
+  views = [];
+}
+
+const settle = () => act(async () => new Promise((resolve) => setTimeout(resolve, 600)));
+
+it('CHAT-US-03-AC09: 이전 전송 기록을 읽는 동안에는 입력만 받고, 새 전송은 막아 이전 요청 ID를 덮어쓰지 않는다', async () => {
+  const server = fakeServer();
+  const recordKey = sendAttemptKey('8', '19')!;
+  const parts = [{ speaker_kind: 'user', character_id: null, body: '이전 전송' }];
+  entries.set(recordKey, JSON.stringify({ requestId: 'msg-earlier-01', parts }));
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  jest
+    .spyOn(storage, 'getDraftStorage')
+    .mockReturnValue(nativeStorage({ beforeGet: (key) => (key === recordKey ? gate : undefined) }));
+  // 대화 이력이 기기 저장소보다 먼저 도착한 상태.
+  await openApp('19');
+  await fireEvent.changeText(input(), '새 메시지');
+  expect(input()).toHaveDisplayValue('새 메시지');
+  expect(screen.getByText('이전 전송 기록을 확인하는 중입니다.')).toBeOnTheScreen();
+  expect(sendButton()).toBeDisabled();
+  await fireEvent.press(sendButton());
+  expect(server.postBodies()).toHaveLength(0);
+  expect(JSON.parse(entries.get(recordKey)!).requestId).toBe('msg-earlier-01');
+
+  await act(async () => release());
+  await waitFor(() => expect(server.lookups()).toEqual([`${BASE}/sessions/19/generations?request_id=msg-earlier-01`]));
+  expect(await screen.findByRole('button', { name: '보낸 메시지 접수 확인' })).toBeOnTheScreen();
+  expect(server.postBodies()).toHaveLength(0);
+  expect(JSON.parse(entries.get(recordKey)!).requestId).toBe('msg-earlier-01');
+  expect(input()).toHaveDisplayValue('새 메시지');
+});
+
+it('CHAT-US-03-AC09: 이전 전송 기록이 없으면 확인이 끝난 뒤 바로 보낼 수 있다', async () => {
+  const server = fakeServer();
+  jest.spyOn(storage, 'getDraftStorage').mockReturnValue(nativeStorage());
+  await openApp('19');
+  await fireEvent.changeText(input(), '바로 보낼 말');
+  await waitFor(() => expect(sendButton()).toBeEnabled());
+  expect(screen.queryByText('이전 전송 기록을 확인하는 중입니다.')).not.toBeOnTheScreen();
+  await fireEvent.press(sendButton());
+  await waitFor(() => expect(server.postBodies()).toHaveLength(1));
+  expect(server.lookups()).toHaveLength(0);
+});
+
+it('CHAT-US-03-AC05·AC09: 전송 복구 기록을 남기지 못하면 결과를 모르는 동안 기기의 초안을 지우지 않는다', async () => {
+  const server = fakeServer();
+  const recordKey = sendAttemptKey('8', '19')!;
+  jest.spyOn(storage, 'getDraftStorage').mockReturnValue(nativeStorage({ failSet: (key) => key === recordKey }));
+  server.onPost.mockImplementationOnce(() => Promise.reject(new TypeError('network lost')));
+  await openApp('19');
+  await fireEvent.changeText(input(), '잃으면 안 되는 말');
+  await waitFor(() => expect(entries.get(chatDraftKey('8', '19')!)).toContain('잃으면 안 되는 말'), {
+    timeout: 2000,
+  });
+  await fireEvent.press(sendButton());
+  await screen.findByRole('button', { name: '보낸 메시지 접수 확인' });
+  // 전송은 막지 않고 입력창은 비우지만, 기기의 초안은 남긴다.
+  expect(server.postBodies()).toHaveLength(1);
+  expect(input()).toHaveDisplayValue('');
+  await settle();
+  expect(entries.has(recordKey)).toBe(false);
+  expect(entries.get(chatDraftKey('8', '19')!)).toContain('잃으면 안 되는 말');
+
+  await closeApp();
+  await openApp('19');
+  await waitFor(() => expect(input()).toHaveDisplayValue('잃으면 안 되는 말'));
+});
+
+it('CHAT-US-03-AC07: 전송 복구 기록을 남기지 못해도 접수가 확인되면 기기의 초안을 지운다', async () => {
+  const server = fakeServer();
+  const recordKey = sendAttemptKey('8', '19')!;
+  jest.spyOn(storage, 'getDraftStorage').mockReturnValue(nativeStorage({ failSet: (key) => key === recordKey }));
+  await openApp('19');
+  await fireEvent.changeText(input(), '접수될 말');
+  await waitFor(() => expect(entries.get(chatDraftKey('8', '19')!)).toContain('접수될 말'), { timeout: 2000 });
+  server.state.turns = { ...emptyTurns, messages: [userMessage], active_generation: generation() };
+  await fireEvent.press(sendButton());
+  await waitFor(() => expect(server.postBodies()).toHaveLength(1));
+  await waitFor(() => expect(entries.has(chatDraftKey('8', '19')!)).toBe(false));
+  await closeApp();
+  server.state.turns = emptyTurns;
+  await openApp('19');
+  await settle();
+  expect(input()).toHaveDisplayValue('');
+});
+
+it('CHAT-US-03-AC05: 방을 나간 뒤 전송이 거절되면 입력이 비어 있을 때 원문을 기기에 되돌리고 전송 기록을 지운다', async () => {
+  const server = fakeServer();
+  const recordKey = sendAttemptKey('8', '19')!;
+  let answer!: (response: Response) => void;
+  server.onPost.mockImplementationOnce(
+    () =>
+      new Promise<Response>((resolve) => {
+        answer = resolve;
+      }),
+  );
+  await openApp('19');
+  await fireEvent.changeText(input(), '거절될 말');
+  await fireEvent.press(sendButton());
+  await waitFor(() => expect(server.postBodies()).toHaveLength(1));
+  await waitFor(() => expect(entries.has(recordKey)).toBe(true));
+  await waitFor(() => expect(draftOf('8', '19')).toBe(''));
+
+  await leaveRoom();
+  await act(async () => answer(json({ code: 'MESSAGE_INVALID_SPEAKER', detail: 'invalid speaker' }, 422)));
+  await waitFor(() => expect(entries.has(recordKey)).toBe(false));
+  expect(draftOf('8', '19')).toContain('거절될 말');
+
+  await closeApp();
+  await openApp('19');
+  // 되돌린 원문은 기존 거절 처리와 같이 발화자별 부분으로 입력창에 들어온다.
+  expect(await screen.findByText('거절될 말')).toBeOnTheScreen();
+  expect(screen.queryByTestId('chat-pending-bubble')).not.toBeOnTheScreen();
+  expect(server.lookups()).toHaveLength(0);
+  expect(sendButton()).toBeEnabled();
+});
+
+it('CHAT-US-03-AC05: 방을 나간 뒤 거절돼도 새로 쓴 초안은 덮어쓰지 않고, 거절된 원문은 다시 열었을 때 보인다', async () => {
+  const server = fakeServer();
+  const recordKey = sendAttemptKey('8', '19')!;
+  let answer!: (response: Response) => void;
+  server.onPost.mockImplementationOnce(
+    () =>
+      new Promise<Response>((resolve) => {
+        answer = resolve;
+      }),
+  );
+  await openApp('19');
+  await fireEvent.changeText(input(), '거절될 말');
+  await fireEvent.press(sendButton());
+  await waitFor(() => expect(entries.has(recordKey)).toBe(true));
+  await fireEvent.changeText(input(), '새로 쓴 말');
+  await waitFor(() => expect(draftOf('8', '19')).toContain('새로 쓴 말'), { timeout: 2000 });
+
+  await leaveRoom();
+  await act(async () => answer(json({ code: 'MESSAGE_INVALID_SPEAKER', detail: 'invalid speaker' }, 422)));
+  await waitFor(() => expect(JSON.parse(entries.get(recordKey) ?? '{}').rejected).toBeTruthy());
+  expect(draftOf('8', '19')).toContain('새로 쓴 말');
+
+  await closeApp();
+  await openApp('19');
+  await waitFor(() => expect(input()).toHaveDisplayValue('새로 쓴 말'));
+  expect(screen.getByTestId('chat-pending-bubble')).toHaveTextContent('여행자거절될 말');
+  expect(screen.getByText(/선택한 발화자를 이 대화에서 쓸 수 없습니다/)).toBeOnTheScreen();
+  expect(server.lookups()).toHaveLength(0);
+  expect(sendButton()).toBeEnabled();
+
+  // 안내를 닫으면 그때 전송 기록을 정리한다.
+  await fireEvent.press(screen.getByRole('button', { name: '전송 실패 안내 닫기' }));
+  await waitFor(() => expect(entries.has(recordKey)).toBe(false));
+  await closeApp();
+  await openApp('19');
+  await settle();
+  expect(screen.queryByTestId('chat-pending-bubble')).not.toBeOnTheScreen();
 });
 
 it('CHAT-US-03-AC05: 기기 저장소를 쓸 수 없어도 입력은 계속하고 안내한다', async () => {

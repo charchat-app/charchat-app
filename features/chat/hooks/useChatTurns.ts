@@ -38,6 +38,9 @@ export function useChatDraft(sessionId: string, persist = false) {
   const written = useRef(new WeakSet<MessageDraft>([draft]));
   // 이용자가 고치거나 거절된 내용이 되돌아온 뒤에만 기기 보관분을 바꾼다. 처음 빈 화면이 보관분을 지우지 않는다.
   const touched = useRef(false);
+  // 보낸 뒤 비운 입력은 전송 복구 기록이 확보될 때까지 기기 보관분을 지우지 않는다(CHAT-US-03-AC05·AC09).
+  const sentHold = useRef<Promise<boolean> | null>(null);
+  const latest = useRef(draft);
   const [deviceUnavailable, setDeviceUnavailable] = useState(false);
   const { data } = useQuery<MessageDraft>({
     queryKey: key,
@@ -80,19 +83,31 @@ export function useChatDraft(sessionId: string, persist = false) {
 
   useEffect(() => {
     written.current.add(draft);
+    latest.current = draft;
     client.setQueryData<MessageDraft>(draftKey(sessionId), draft);
+    const hold = sentHold.current;
+    sentHold.current = null;
     if (!touched.current || storageKey === null) return;
     const storage = getDraftStorage();
     if (!storage) return;
+    const persist = (text: string) =>
+      persistDraft(
+        storage,
+        storageKey,
+        text,
+        canPersist,
+        () => setDeviceUnavailable(true),
+        () => setDeviceUnavailable(false),
+      );
+    if (hold) {
+      // 기록이 확보되거나 접수가 확인된 뒤, 그 사이 새로 고친 내용이 없을 때만 지운다.
+      void hold.then((secured) => {
+        if (secured && latest.current === draft) persist('');
+      });
+      return;
+    }
     // 마지막 변경 뒤 약 0.5초 멈추면 보관하고, 모두 지우면 바로 지운다(AC06·AC07).
-    persistDraft(
-      storage,
-      storageKey,
-      encodeDraft(draft),
-      canPersist,
-      () => setDeviceUnavailable(true),
-      () => setDeviceUnavailable(false),
-    );
+    persist(encodeDraft(draft));
   }, [canPersist, client, sessionId, draft, storageKey]);
 
   // 거절된 전송 내용을 되돌리는 등 캐시가 밖에서 바뀌면 화면에도 반영한다.
@@ -106,7 +121,17 @@ export function useChatDraft(sessionId: string, persist = false) {
 
   const update = useCallback((change: (draft: MessageDraft) => MessageDraft) => {
     touched.current = true;
+    sentHold.current = null;
     setDraft(change);
   }, []);
-  return { draft, update, deviceUnavailable };
+  /**
+   * 보낸 내용을 입력창에서 비운다. 기기 보관분은 `secured`가 true가 될 때(전송 복구 기록 확보 또는
+   * 접수 확인)까지 남겨, 응답이 사라져도 앱을 다시 열면 원문을 되찾을 수 있게 한다.
+   */
+  const clearSent = useCallback((secured: Promise<boolean>, next: MessageDraft) => {
+    touched.current = true;
+    sentHold.current = secured;
+    setDraft(next);
+  }, []);
+  return { draft, update, clearSent, deviceUnavailable };
 }

@@ -15,6 +15,7 @@ import { useChatDraft, useChatTurns } from '@/features/chat/hooks/useChatTurns';
 import { type GenerationStream, useGenerationStream } from '@/features/chat/hooks/useGenerationStream';
 import { useRetryGeneration } from '@/features/chat/hooks/useRetryGeneration';
 import { type SendAttempt, useSendMessage } from '@/features/chat/hooks/useSendMessage';
+import { emptyDraft } from '@/features/chat/messageDraft';
 import type { ChatMessage, ConversationMessage, ConversationSession } from '@/shared/story-types';
 
 const PENDING_NOTES: Record<SendAttempt['status'], string | null> = {
@@ -34,7 +35,7 @@ export function ChatRoom({ session, onBack }: { session: ConversationSession; on
   const sessionId = String(session.id);
   const client = useQueryClient();
   const turns = useChatTurns(sessionId, true);
-  const { draft, update, deviceUnavailable } = useChatDraft(sessionId, !session.read_only);
+  const { draft, update, clearSent, deviceUnavailable } = useChatDraft(sessionId, !session.read_only);
   const sender = useSendMessage(sessionId);
   const retrier = useRetryGeneration(sessionId, turns.data);
   const messages = turns.data?.messages ?? [];
@@ -71,15 +72,25 @@ export function ChatRoom({ session, onBack }: { session: ConversationSession; on
 
   const blockedReason = !turns.isSuccess
     ? '대화 이력을 불러온 뒤 보낼 수 있습니다.'
-    : attempt?.status === 'posting'
-      ? '메시지를 보내는 중입니다.'
-      : attempt?.status === 'uncertain'
-        ? '이전 메시지의 접수 여부를 먼저 확인하세요.'
-        : retrier.isBusy
-          ? '재시도 요청을 처리하는 중입니다.'
-          : active
-            ? 'AI 응답이 끝나면 보낼 수 있습니다.'
-            : null;
+    : sender.checking
+      ? '이전 전송 기록을 확인하는 중입니다.'
+      : attempt?.status === 'posting'
+        ? '메시지를 보내는 중입니다.'
+        : attempt?.status === 'uncertain'
+          ? '이전 메시지의 접수 여부를 먼저 확인하세요.'
+          : retrier.isBusy
+            ? '재시도 요청을 처리하는 중입니다.'
+            : active
+              ? 'AI 응답이 끝나면 보낼 수 있습니다.'
+              : null;
+
+  const send = (parts: Parameters<typeof sender.send>[0]) => {
+    const secured = sender.send(parts);
+    if (!secured) return false;
+    // 보낸 내용만 비우고 다음 발화자는 유저 캐릭터로 되돌린다(CHAT-US-02-AC01·AC05).
+    clearSent(secured, emptyDraft());
+    return true;
+  };
 
   return (
     <ConversationFrame
@@ -100,7 +111,7 @@ export function ChatRoom({ session, onBack }: { session: ConversationSession; on
             options={options}
             labelOf={labelOf}
             blockedReason={blockedReason}
-            onSend={sender.send}
+            onSend={send}
           />
         )
       }
