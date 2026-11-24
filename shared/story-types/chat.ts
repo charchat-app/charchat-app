@@ -98,3 +98,30 @@ export type ChatTurns = {
 };
 
 export type SendChatMessageInput = { request_id: string; parts: ChatMessagePartInput[] };
+
+// CHAT-US-03 내 대화 목록·재접속 이어하기 (KAN-24). 아래 타입은 추가분이다.
+
+/** 내 대화 목록 한 줄. 미리보기는 저장된(완료) 메시지에서만 만든다. */
+export type ConversationSessionSummary = {
+  id: number;
+  story_id: number;
+  story_title: string;
+  read_only: boolean;
+  /** 세션에 고정된 모델 표시 이름 */
+  model: string;
+  /** 세션에 적용된 플레이 이름 */
+  play_name: string;
+  /** 응답을 만드는 중인 생성이 있다 */
+  generating: boolean;
+  last_message_preview: string | null;
+  last_activity_at: string | null;
+};
+
+export type ConversationSessionPage = {
+  sessions: ConversationSessionSummary[];
+  /** 다음 페이지 커서(이 ID보다 작은 세션). 없으면 null */
+  next_before_id: number | null;
+};
+
+/** 기존 request_id로 찾은 생성. 같은 세션의 request_id는 하나뿐이라 0개 또는 1개다. */
+export type ChatGenerationLookup = { generations: ChatGeneration[] };

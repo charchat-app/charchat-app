@@ -17,6 +17,7 @@
     "test:fixtures": "node --test scripts/story-fixture-server.test.mjs"
   },
   "dependencies": {
+    "@react-native-async-storage/async-storage": "2.2.0",
     "@tanstack/react-query": "^5.107.2",
     "expo": "~58.0.25",
     "expo-constants": "~58.0.16",
