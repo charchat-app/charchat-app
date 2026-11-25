@@ -391,24 +391,53 @@ it.each(['다시 불러오기', '재진입'] as const)(
   'KAN-16: 재전송 422 뒤 GET이 실패하면 계속 막고 %s의 성공으로만 새 시작을 허용한다',
   async (recovery) => {
     const updatedStory = { ...story, intros: [story.intros[1]] };
+    let rejectReplay!: (value: Response) => void;
+    let failRead!: (value: Response) => void;
     const fetchMock = jest
       .spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce(response(story))
       .mockRejectedValueOnce(new TypeError('response lost'))
       .mockResolvedValueOnce(response(updatedStory))
-      .mockResolvedValueOnce(response({ code: 'CONVERSATION_INTRO_NOT_FOUND' }, 422))
-      .mockResolvedValueOnce(response({}, 503))
+      .mockReturnValueOnce(new Promise((resolve) => (rejectReplay = resolve)))
+      .mockReturnValueOnce(new Promise((resolve) => (failRead = resolve)))
       .mockResolvedValueOnce(response(updatedStory));
     const view = await show(<StoryRoute />);
     await fireEvent.press(await screen.findByRole('radio', { name: '여행자' }));
     await fireEvent.press(screen.getByRole('button', { name: '대화 시작' }));
-    await fireEvent.press(await screen.findByRole('button', { name: '같은 요청 다시 보내기' }));
+    // 불확실 POST 뒤 조회(3번째 호출)가 끝나 재전송 버튼이 활성화된 뒤에만 재전송한다.
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+      expect(screen.queryByText('스토리를 새로 불러오는 중…')).not.toBeOnTheScreen();
+      expect(screen.getByRole('button', { name: '같은 요청 다시 보내기' })).toBeEnabled();
+    });
+    await fireEvent.press(screen.getByRole('button', { name: '같은 요청 다시 보내기' }));
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(fetchMock.mock.lastCall?.[1]?.method).toBe('POST');
 
-    await screen.findByRole('button', { name: '다시 불러오기' });
+    // 422를 받으면 새 GET이 시작되고, 그 GET이 끝나기 전에는 시작·재전송·이어하기를 막는다.
+    await act(async () => rejectReplay(response({ code: 'CONVERSATION_INTRO_NOT_FOUND' }, 422)));
+    // 호출 수만이 아니라 화면에 재조회 중 안내가 보일 때까지 기다린다.
+    expect(await screen.findByText('스토리를 새로 불러오는 중…')).toBeOnTheScreen();
+    expect(fetchMock).toHaveBeenCalledTimes(5);
+    expect(fetchMock.mock.lastCall?.[1]?.method ?? 'GET').toBe('GET');
+    expect(screen.queryByText('최신 스토리를 불러오지 못했습니다.')).not.toBeOnTheScreen();
+    expect(screen.queryByRole('button', { name: '같은 요청 다시 보내기' })).not.toBeOnTheScreen();
+    expect(screen.queryByRole('button', { name: '이어하기' })).not.toBeOnTheScreen();
+    // 재전송 상태가 남아 '대화 시작 중…'으로 보일 수 있다. 어느 쪽이든 막혀 있어야 한다.
+    const blockedStart = screen.getByRole('button', { name: /^대화 시작( 중…)?$/ });
+    expect(blockedStart).toBeDisabled();
+    await fireEvent.press(blockedStart);
+    expect(fetchMock).toHaveBeenCalledTimes(5);
+
+    // GET 503 뒤에는 불확실 안내가 아니라 최신 조회 실패 안내와 다시 불러오기만 보인다.
+    await act(async () => failRead(response({}, 503)));
+    expect(await screen.findByText('최신 스토리를 불러오지 못했습니다.')).toBeOnTheScreen();
+    expect(screen.getAllByRole('button', { name: '다시 불러오기' })).toHaveLength(1);
     expect(screen.getByRole('button', { name: '대화 시작' })).toBeDisabled();
     expect(screen.queryByRole('button', { name: '같은 요청 다시 보내기' })).not.toBeOnTheScreen();
     await fireEvent.press(screen.getByRole('button', { name: '대화 시작' }));
     expect(fetchMock).toHaveBeenCalledTimes(5);
+    expect(mockRouter.push).not.toHaveBeenCalled();
 
     if (recovery === '다시 불러오기') {
       // 느린 실행에서는 버튼이 다시 그려질 수 있어, 누를 때 현재 버튼을 다시 찾는다.
@@ -463,7 +492,13 @@ it('KAN-16: 재전송 422 전에 시작한 GET은 버리고 새 GET에서 확인
   await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(6));
   expect(oldSignal?.aborted).toBe(true);
   await act(async () => finishOldRead(response(story)));
-  expect(screen.getByRole('button', { name: '대화 시작' })).toBeDisabled();
+  // 버려진 GET이 끝나도 새 GET이 남아 있으므로 재조회 중 안내가 유지된다.
+  expect(screen.getByText('스토리를 새로 불러오는 중…')).toBeOnTheScreen();
+  // 새 GET이 진행 중이면 재전송 상태가 남아 '대화 시작 중…'으로 보일 수 있다. 어느 쪽이든 막혀 있어야 한다.
+  const blockedStart = screen.getByRole('button', { name: /^대화 시작( 중…)?$/ });
+  expect(blockedStart).toBeDisabled();
+  await fireEvent.press(blockedStart);
+  expect(fetchMock).toHaveBeenCalledTimes(6);
   expect(mockRouter.push).not.toHaveBeenCalled();
 
   await act(async () => finishNewRead(response({ ...story, existing_session_id: 32 })));
