@@ -1,7 +1,7 @@
-import { useLocalSearchParams, useNavigation, useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useFocusEffect, useLocalSearchParams, useNavigation, useRouter } from 'expo-router';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
-import { StoryEditorScreen } from '@/features/story-publish';
+import { StoryEditorScreen, useForgetStoryEditorCache } from '@/features/story-publish';
 import { confirmUnsavedLeave, useUnsavedCreationGuard } from '@/features/story-scene';
 
 /** 제작 → 스토리 편집 */
@@ -22,6 +22,37 @@ export default function StoryEditorRoute() {
     // 한 번에 한 번만 닫는다. router 참조가 바뀌어도 다시 닫지 않는다.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [deleted, leaving]);
+  // CREATE-US-07 말투·서술 작업 화면 열기. 두 번 눌러도 한 번만 쌓고, 편집 화면에 다시 포커스되면 풀린다.
+  // 작업 화면의 저장·공개가 임시 저장본 기본 정보(새 캐릭터 등)를 정본에 반영할 수 있으므로, 넘긴 뒤에는 편집 화면을
+  // 내려 두고(언마운트 정리는 그대로 돈다) 돌아오면 편집 조회 캐시를 지운 다음 새 key로 다시 마운트해 서버 값으로 채운다.
+  const openingSpeech = useRef(false);
+  const [handedOff, setHandedOff] = useState(false);
+  const [generation, setGeneration] = useState(0);
+  const forgetEditorCache = useForgetStoryEditorCache(storyId);
+  useFocusEffect(
+    useCallback(() => {
+      const returning = openingSpeech.current;
+      openingSpeech.current = false;
+      if (returning) {
+        // 새 편집 화면이 마운트되기 전에 지워야 이전 캐시로 입력 폼·비교 기준을 채우지 않는다.
+        forgetEditorCache();
+        setGeneration((g) => g + 1);
+        setHandedOff(false);
+      }
+      return () => {
+        // 실제로 작업 화면으로 넘어가 포커스를 잃었을 때만 내린다.
+        if (openingSpeech.current) {
+          setUnsaved(false);
+          setHandedOff(true);
+        }
+      };
+    }, [forgetEditorCache]),
+  );
+  const openSpeech = () => {
+    if (openingSpeech.current || !navigation.isFocused()) return;
+    openingSpeech.current = true;
+    router.push({ pathname: '/create/scene/[storyId]', params: { storyId, fromEditor: '1' } });
+  };
   const back = () => {
     // 웹 딥 링크에서는 back/replace가 탭 이동이 되어 화면 제거 가드를 거치지 않으므로 헤더 버튼이 직접 확인한다.
     if (unsaved && !deleted) {
@@ -31,14 +62,17 @@ export default function StoryEditorRoute() {
     if (router.canGoBack()) router.back();
     else router.replace('/create');
   };
+  // 작업 화면으로 넘긴 동안은 편집 화면을 두지 않는다(돌아오면 위 포커스 처리로 새로 마운트).
+  if (handedOff) return null;
   return (
     <StoryEditorScreen
-      key={storyId}
+      key={`${storyId}:${generation}`}
       storyId={storyId}
       onBack={back}
       onDeleted={() => setDeleted(true)}
       isRouteFocused={() => navigation.isFocused()}
       onUnsavedChange={setUnsaved}
+      onOpenSpeech={openSpeech}
     />
   );
 }
