@@ -44,6 +44,7 @@ import {
   type StoryImagesSaveMode,
   type StoryImagesSnapshot,
 } from '../imagesRepository';
+import { formatRatingReviewFeedback } from '../ratingReviewFeedback';
 import { formatSavedAt } from '../savedAt';
 import type { EditorStory, StoryBasicFields } from '../types';
 
@@ -1327,6 +1328,10 @@ export function StoryEditorScreen({
                 disabled={writeBlocked || presetState.pending || presetState.rating === null}
                 applied={creation.data?.rating?.effective ?? null}
                 reviewStatus={creation.data?.rating?.reviewStatus ?? null}
+                feedback={formatRatingReviewFeedback(creation.data?.rating)}
+                refreshStatus={presetState.reviewRefresh}
+                onRefresh={() => void presetState.refreshRatingReview()}
+                refreshDisabled={saving || presetState.pending}
               />
             ) : (
               <Notice message={`${TABS[tab]} 탭은 아직 연결되지 않았어요.`} />

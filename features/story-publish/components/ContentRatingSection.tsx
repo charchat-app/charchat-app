@@ -1,7 +1,7 @@
-// CREATE-US-08-AC01·AC12(제작자 화면 일부) 공개 범위 탭의 등급 선택과 적용 등급·검토 상태 표시
+// CREATE-US-08-AC01·AC09·AC10·AC12(제작자 화면 일부) 공개 범위 탭의 등급 선택, 적용 등급·검토 상태·검토 결과 안내 표시
 import { Platform, Pressable, StyleSheet, View, type ViewProps } from 'react-native';
 
-import { Text } from '@/components/ui';
+import { Button, Notice, Text } from '@/components/ui';
 import { MinTouchSize, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import {
@@ -11,6 +11,9 @@ import {
   type RatingReviewStatus,
 } from '@/shared/rating';
 import type { SaveState } from '@/shared/story-types';
+
+import type { ReviewRefreshStatus } from '../hooks/useStoryPresets';
+import type { RatingReviewFeedback } from '../ratingReviewFeedback';
 
 export type ContentRatingSectionProps = {
   /** 지금 공개 상태(표시만 한다. 이 부품은 공개 상태를 바꾸지 않는다) */
@@ -23,7 +26,16 @@ export type ContentRatingSectionProps = {
   applied: ContentRating | null;
   /** 등급 검토 상태. 서버가 알려 주지 않았으면 null */
   reviewStatus: RatingReviewStatus | null;
+  /** CREATE-US-08-AC09·AC10·AC12 검토 결과 안내(고정 문구) */
+  feedback: RatingReviewFeedback;
+  /** 검토 상태 새로고침 진행 상태 */
+  refreshStatus: ReviewRefreshStatus;
+  /** 검토 상태를 한 번 다시 확인한다(feedback.canRefresh일 때만 버튼을 보인다) */
+  onRefresh: () => void;
+  refreshDisabled: boolean;
 };
+
+export const REVIEW_REFRESH_FAILED = '검토 상태를 확인하지 못했어요. 입력과 적용 등급은 그대로예요.';
 
 const RADIO_GROUP_WEB: ViewProps = { accessibilityRole: 'radiogroup', accessibilityLabel: '콘텐츠 등급' };
 
@@ -38,7 +50,12 @@ export function ContentRatingSection({
   disabled,
   applied,
   reviewStatus,
+  feedback,
+  refreshStatus,
+  onRefresh,
+  refreshDisabled,
 }: ContentRatingSectionProps) {
+  const loading = refreshStatus === 'loading';
   const c = useTheme();
   return (
     <View style={styles.container}>
@@ -82,6 +99,25 @@ export function ContentRatingSection({
       <View style={[styles.applied, { borderColor: c.border }]}>
         <Text variant="body">{`적용 등급: ${applied ?? '아직 없음'}`}</Text>
         <Text variant="body">{`등급 검토: ${reviewStatus ? RATING_REVIEW_STATUS_LABELS[reviewStatus] : '정보 없음'}`}</Text>
+        {feedback.kind === 'none' ? null : (
+          <View style={styles.feedback} accessibilityLiveRegion="polite">
+            <Text variant="body">{feedback.title}</Text>
+            {feedback.details.map((line) => (
+              <Text key={line} variant="caption">
+                {line}
+              </Text>
+            ))}
+          </View>
+        )}
+        {feedback.canRefresh ? (
+          <Button
+            label={loading ? '검토 상태 확인 중…' : '검토 상태 새로고침'}
+            variant="secondary"
+            onPress={onRefresh}
+            disabled={refreshDisabled || loading}
+          />
+        ) : null}
+        {refreshStatus === 'failed' ? <Notice tone="alert" message={REVIEW_REFRESH_FAILED} /> : null}
       </View>
     </View>
   );
@@ -103,4 +139,5 @@ const styles = StyleSheet.create({
   disabled: { opacity: 0.5 },
   pressed: { opacity: 0.8 },
   applied: { gap: Spacing.one, borderTopWidth: 1, paddingTop: Spacing.three },
+  feedback: { gap: Spacing.one, marginTop: Spacing.two },
 });

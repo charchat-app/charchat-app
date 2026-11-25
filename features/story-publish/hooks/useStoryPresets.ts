@@ -22,6 +22,7 @@ import {
   type CommonSaveDocument,
   type CommonSaveRepository,
   type CreationImagesPayload,
+  type CreationRating,
   type StagedBasicFields,
 } from '../commonRepository';
 import type { StoryBasicFields } from '../types';
@@ -99,6 +100,22 @@ type Operation = {
   /** 거르지 않은 basic.characters 행 key(PresetSaveResult.sentRowKeys). 기본 정보를 보내지 않았으면 []. */
   sentRowKeys: string[];
 };
+
+/** CREATE-US-08-AC12 검토 상태 새로고침: idle(대기)·loading(조회 중)·failed(조회 실패, 화면 상태는 그대로) */
+export type ReviewRefreshStatus = 'idle' | 'loading' | 'failed';
+
+/**
+ * CREATE-US-08-AC12 새로고침 응답에서 적용 등급·검토 상태·검토 사유만 가져온다.
+ * 고른 등급(requested)은 이 화면이 가진 값을 그대로 둔다(조회 응답으로 선택·비교 기준을 바꾸지 않는다).
+ */
+function mergeReviewResult(current: CreationRating | undefined, fresh: CreationRating): CreationRating {
+  return {
+    requested: current ? current.requested : fresh.requested,
+    effective: fresh.effective,
+    reviewStatus: fresh.reviewStatus,
+    ...(fresh.reason ? { reason: fresh.reason } : {}),
+  };
+}
 
 /** 비교용: 화면 표시 주소(photoUrl)는 이미지 identity가 아니므로 빼고 비교한다. */
 function comparable(records: UserProfilePresetRecord[]) {
@@ -178,6 +195,79 @@ export function useStoryPresets(
   const dirty = presets !== null && baseline !== null && comparable(toRecords(presets)) !== comparable(baseline);
   const ratingDirty = rating !== null && ratingBaseline !== null && rating !== ratingBaseline;
 
+  // CREATE-US-08-AC12 검토 상태 새로고침. 상태는 그 요청을 시작한 스토리 id와 함께 둔다(다른 스토리로 바뀌면 idle).
+  const [reviewRefreshState, setReviewRefreshState] = useState<{ storyId: string; status: ReviewRefreshStatus }>({
+    storyId,
+    status: 'idle',
+  });
+  const reviewRefresh: ReviewRefreshStatus =
+    reviewRefreshState.storyId === storyId ? reviewRefreshState.status : 'idle';
+  // 저장 요청(send)을 보낼 때마다 늘린다. 새로고침은 시작할 때 값과 다르면 응답을 버린다.
+  const writeEpoch = useRef(0);
+  const refreshController = useRef<AbortController | null>(null);
+  // 화면을 떠나거나 다른 스토리로 바뀌면 진행 중인 새로고침을 멈추고 응답을 버린다.
+  useEffect(
+    () => () => {
+      refreshController.current?.abort();
+      refreshController.current = null;
+    },
+    [storyId],
+  );
+
+  /**
+   * CREATE-US-08-AC12 검토 상태를 GET(/creation) 한 번으로 다시 확인한다. 저장(PUT)·새 요청·자동 재시도는 없다.
+   * 반영하는 것은 적용 등급·검토 상태·검토 사유뿐이다. 고른 등급(requested)·입력·임시 저장본·저장 시각 등
+   * 나머지 조회 값은 이 화면이 가진 그대로 둔다(다시 연 화면은 새 조회로 모두 보여 준다).
+   * 다음이면 응답을 버린다: 그사이 저장 요청을 보냄, 캐시의 공통 문서가 바뀜(저장 응답·다시 불러오기),
+   * 화면을 떠남·스토리가 바뀜. 성공 여부를 모르는 저장이 남아 있으면 보내지 않는다.
+   */
+  const refreshRatingReview = async (): Promise<void> => {
+    if (operation.current !== null || refreshController.current !== null) return;
+    const id = storyId;
+    const key = storyCreationKey(id);
+    if (!client.getQueryData<CommonSaveDocument>(key)) return;
+    const epoch = writeEpoch.current;
+    const controller = new AbortController();
+    refreshController.current = controller;
+    setReviewRefreshState({ storyId: id, status: 'loading' });
+    // 이미 진행 중인 같은 문서 조회(refetch)는 이 새로고침보다 먼저 시작한 오래된 조회다.
+    // 늦게 끝나 새로고침 결과를 덮지 않도록 먼저 멈추고(끝날 때까지 기다린다) 그 뒤의 캐시를 기준으로 삼는다.
+    await client.cancelQueries({ queryKey: key, exact: true });
+    // 기다리는 동안 저장을 보냈거나 화면을 떠났거나 스토리가 바뀌었으면 조회하지 않는다.
+    if (refreshController.current !== controller || controller.signal.aborted) return;
+    const startData = client.getQueryData<CommonSaveDocument>(key);
+    if (epoch !== writeEpoch.current || operation.current !== null || !startData) {
+      refreshController.current = null;
+      setReviewRefreshState({ storyId: id, status: 'idle' });
+      return;
+    }
+    let fresh: CommonSaveDocument;
+    try {
+      fresh = await repository.load(id, controller.signal);
+    } catch {
+      if (refreshController.current !== controller || controller.signal.aborted) return;
+      refreshController.current = null;
+      setReviewRefreshState({ storyId: id, status: 'failed' });
+      return;
+    }
+    if (refreshController.current !== controller || controller.signal.aborted) return;
+    refreshController.current = null;
+    const current = client.getQueryData<CommonSaveDocument>(key);
+    // 그사이 저장을 보냈거나(진행 중 포함) 캐시 문서가 바뀌었으면 버린다. 반영할 때도 rating 밖의 값은 캐시 그대로다.
+    // 스토리가 바뀌거나 화면을 떠나면 위 abort 검사에서 이미 멈춘다(key도 시작한 스토리 id 기준).
+    if (
+      epoch === writeEpoch.current &&
+      operation.current === null &&
+      current !== undefined &&
+      current === startData &&
+      fresh.rating
+    ) {
+      const merged = mergeReviewResult(current.rating, fresh.rating);
+      client.setQueryData<CommonSaveDocument>(key, { ...current, rating: merged });
+    }
+    setReviewRefreshState({ storyId: id, status: 'idle' });
+  };
+
   /** 입력을 버리고 서버의 최신 프리셋으로 다시 채운다(불러오기 실패·동시 수정 뒤). */
   const reload = useCallback(async () => {
     const fresh = await query.refetch();
@@ -189,6 +279,13 @@ export function useStoryPresets(
   }, [query]);
 
   const send = async (op: Operation): Promise<PresetSaveResult> => {
+    // 저장 요청을 보내기 시작했다. 이보다 먼저 시작한 검토 상태 새로고침은 멈추고 응답을 반영하지 않는다.
+    writeEpoch.current += 1;
+    if (refreshController.current) {
+      refreshController.current.abort();
+      refreshController.current = null;
+    }
+    setReviewRefreshState({ storyId, status: 'idle' });
     try {
       const result = await repository.save(op.document, op.state, op.mode, op.key, op.kind);
       operation.current = null;
@@ -511,6 +608,10 @@ export function useStoryPresets(
     /** CREATE-US-08 마지막으로 받은 공통 문서의 임시 저장본에 등급 선택만 있음(rating_only_working_copy) */
     ratingOnlyWorkingCopy: query.data?.ratingOnlyWorkingCopy === true,
     finalizeRatingWorkingCopy,
+    /** CREATE-US-08-AC12 검토 상태 새로고침 진행 상태 */
+    reviewRefresh,
+    /** CREATE-US-08-AC12 검토 상태를 GET 한 번으로 다시 확인한다(적용 등급·검토 상태·사유만 반영) */
+    refreshRatingReview,
     /** 성공 여부를 모르는 저장이 남아 있음. 같은 요청으로 다시 보내야 하므로 그동안 입력을 막는다. */
     pending,
     /** 남아 있는 요청의 저장 의도(temporary·save). 없으면 null. */

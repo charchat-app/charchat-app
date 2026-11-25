@@ -8,7 +8,14 @@ import {
   type CreationSaveKind,
 } from '@/shared/story-types';
 import type { UserProfilePresetRecord } from '@/shared/story-types/presets';
-import { isContentRating, isRatingReviewStatus, type ContentRating, type RatingReviewStatus } from '@/shared/rating';
+import {
+  isContentRating,
+  isRatingReviewStatus,
+  readRatingReviewReason,
+  type ContentRating,
+  type RatingReviewReason,
+  type RatingReviewStatus,
+} from '@/shared/rating';
 // 타입만 쓴다(실행 시 shared/media를 불러오지 않는다. 아래 resolveImageUrl 설명 참고).
 import type { ImageDto } from '@/shared/media';
 import { toWriteDto } from './api';
@@ -94,7 +101,17 @@ export type CreationRating = {
   requested: ContentRating | null;
   effective: ContentRating | null;
   reviewStatus: RatingReviewStatus | null;
+  /**
+   * CREATE-US-08-AC09·AC10·AC12 마지막 검토가 적격이 아니었던 이유(rating_review_reason, 허용 목록 코드만).
+   * 완료(completed)에는 ineligible·undetermined, 실패(failed)에는 unavailable만 받는다. 없거나 null이면 키를 두지 않는다.
+   * null이 아닌데 읽을 수 없거나 상태와 어긋나면 UNRECOGNIZED_REVIEW_REASON(중립 표시)으로 남긴다(통과로 짐작하지 않게).
+   */
+  reason?: RatingReviewReason | UnrecognizedReviewReason;
 };
+
+/** CREATE-US-08 서버가 사유를 보냈지만 읽을 수 없음(원문은 두지 않는다). 화면은 통과·부적격 어느 쪽도 말하지 않는다. */
+export type UnrecognizedReviewReason = { outcome: 'unrecognized' };
+export const UNRECOGNIZED_REVIEW_REASON: UnrecognizedReviewReason = Object.freeze({ outcome: 'unrecognized' });
 
 /**
  * 임시 저장본 기본 정보(읽기 전용). tags·characters가 null이면 서버가 그 항목을 바꾸지 않고 유지한다는 뜻이다
@@ -332,11 +349,31 @@ export function readRating(source: Record<string, unknown>): CreationRating | un
     return raw;
   };
   if (status !== undefined && status !== null && !isRatingReviewStatus(status)) throw fail();
+  const reviewStatus = status === undefined || status === null ? null : status;
+  const reason = readReasonFor(reviewStatus, source.rating_review_reason);
   return {
     requested: rating(requested),
     effective: rating(effective),
-    reviewStatus: status === undefined || status === null ? null : status,
+    reviewStatus,
+    ...(reason ? { reason } : {}),
   };
+}
+
+/**
+ * CREATE-US-08-AC09·AC10·AC12 검토 사유를 허용 목록으로 읽고, 검토 상태와 맞을 때만 쓴다
+ * (완료 = ineligible·undetermined, 실패 = unavailable). 없거나 null이면 null이다.
+ * null이 아닌 값이 읽을 수 없거나 상태와 어긋나면 중립 표시(UNRECOGNIZED_REVIEW_REASON)를 돌려준다.
+ * 사유가 이상해도 나머지 응답은 읽는다.
+ */
+function readReasonFor(
+  status: RatingReviewStatus | null,
+  raw: unknown,
+): RatingReviewReason | UnrecognizedReviewReason | null {
+  if (raw === undefined || raw === null) return null;
+  const reason = readRatingReviewReason(raw);
+  if (reason !== null && status === 'completed' && reason.outcome !== 'unavailable') return reason;
+  if (reason !== null && status === 'failed' && reason.outcome === 'unavailable') return reason;
+  return UNRECOGNIZED_REVIEW_REASON;
 }
 
 function parse(
