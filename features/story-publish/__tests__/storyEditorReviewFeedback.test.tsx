@@ -323,6 +323,147 @@ describe('CREATE-US-08-AC09·AC10·AC12 검토 결과 안내', () => {
   });
 });
 
+describe('CREATE-US-08-AC09 검증된 대상(targets) 표시', () => {
+  // 서버 계약(요청 기준): rating_review_reason.targets = [{ reason, kind, label }] (선택). 실제 서버와 맞춰 본 결과가 아니다.
+  const TARGETED = (targets: unknown, reasons = ['underage_stated', 'restricted_kinship']): Rating => ({
+    ...INELIGIBLE,
+    rating_review_reason: { outcome: 'ineligible', reasons, targets },
+  });
+  const LUNA = { reason: 'underage_stated', kind: 'character', label: '루나' };
+  const PAIR = { reason: 'restricted_kinship', kind: 'relationship', label: '루나 · 하준' };
+  // 표시된 대상이 전부라고 암시하지 않는다(서버가 같은 사유의 다른 대상을 뺐을 수 있다)
+  const NONEXHAUSTIVE = '표시된 캐릭터·관계는 일부일 수 있어요. 다른 캐릭터 설명과 관계도 직접 확인해 주세요.';
+  const OLD_COMPLETE_COPY = /표시된 캐릭터·관계를 확인해 주세요|표시되지 않은 캐릭터·관계도 있어요/;
+  const LUNA_LINE = '캐릭터 「루나」: 성인 나이에 미치지 않는다고 적혀 있어요.';
+  const PAIR_LINE = '관계 「루나 · 하준」: 친부모·자녀 또는 친형제자매 관계예요.';
+  const GENERIC_AGE = '성인 나이에 미치지 않는다고 적힌 인물이 있어요.';
+  const GENERIC_KIN = '친부모·자녀 또는 친형제자매 관계가 있어요.';
+
+  it('조회 응답의 캐릭터·관계 대상을 사유 문구와 함께 보여 주고, 한계 안내 대신 일부일 수 있다는 안내를 보여 준다', async () => {
+    await open('private', TARGETED([LUNA, { ...PAIR, label: '  루나 · 하준 ' }]));
+    expect(
+      screen.getByText('미성년자 또는 제한된 혈연 관계가 확인되어 UNSAFE 등급을 적용할 수 없어요.'),
+    ).toBeOnTheScreen();
+    expect(screen.getByText(LUNA_LINE)).toBeOnTheScreen();
+    expect(screen.getByText(PAIR_LINE)).toBeOnTheScreen();
+    expect(screen.getByText(NONEXHAUSTIVE)).toBeOnTheScreen();
+    expect(allText()).not.toMatch(OLD_COMPLETE_COPY);
+    expect(screen.queryByText(LIMITATION)).toBeNull();
+    expect(screen.queryByText(GENERIC_AGE)).toBeNull();
+    expect(screen.queryByText(GENERIC_KIN)).toBeNull();
+    expect(checked('UNSAFE')).toBe(true);
+    expect(allText()).not.toMatch(RAW_CODES);
+    expect(allText()).not.toMatch(/character|relationship/);
+    // 공통 저장소가 읽은 캐시에도 검증된 대상만, 서버가 보낸 순서대로 있다(이름 앞뒤 공백 제거)
+    expect(client.getQueryData<CommonSaveDocument>(CREATION_KEY)?.rating?.reason).toEqual({
+      outcome: 'ineligible',
+      reasons: ['restricted_kinship', 'underage_stated'],
+      targets: [LUNA, PAIR],
+    });
+    expect(callsTo(SAVE)).toBe(0);
+  });
+
+  it('일부 사유에만 대상이 있으면 나머지는 일반 문구로 두고 일부 표시 안내를 보여 준다', async () => {
+    await open('private', TARGETED([LUNA]));
+    expect(screen.getByText(LUNA_LINE)).toBeOnTheScreen();
+    expect(screen.getByText(GENERIC_KIN)).toBeOnTheScreen();
+    expect(screen.getByText(NONEXHAUSTIVE)).toBeOnTheScreen();
+    expect(screen.queryByText(GENERIC_AGE)).toBeNull();
+    expect(screen.queryByText(LIMITATION)).toBeNull();
+    expect(allText()).not.toMatch(OLD_COMPLETE_COPY);
+  });
+
+  it('서버가 낼 수 있는 60자 넘는 이름(캐릭터 100자, 관계 「유저 ↔ 」 + 2996자)도 버리지 않고 보여 준다', async () => {
+    const longName = '가'.repeat(100);
+    const longPair = `유저 ↔ ${'나'.repeat(2996)}`;
+    await open(
+      'private',
+      TARGETED([
+        { ...LUNA, label: longName },
+        { ...PAIR, label: longPair },
+      ]),
+    );
+    expect(screen.getByText(`캐릭터 「${longName}」: 성인 나이에 미치지 않는다고 적혀 있어요.`)).toBeOnTheScreen();
+    expect(screen.getByText(`관계 「${longPair}」: 친부모·자녀 또는 친형제자매 관계예요.`)).toBeOnTheScreen();
+    expect(screen.getByText(NONEXHAUSTIVE)).toBeOnTheScreen();
+    expect(screen.queryByText(LIMITATION)).toBeNull();
+  });
+
+  it('판단 불가 대상은 그 사유 문구로만 보여 주고 부적격으로 말하지 않는다', async () => {
+    await open('private', {
+      ...UNDETERMINED,
+      rating_review_reason: {
+        outcome: 'undetermined',
+        reasons: ['age_undetermined'],
+        targets: [{ reason: 'age_undetermined', kind: 'character', label: '하준' }],
+      },
+    });
+    expect(screen.getByText('캐릭터 「하준」: 나이를 확인할 수 없어요.')).toBeOnTheScreen();
+    expect(screen.getByText('미성년자나 제한된 관계로 확인된 것은 아니에요.')).toBeOnTheScreen();
+    expect(screen.getByText(NONEXHAUSTIVE)).toBeOnTheScreen();
+    expect(allText()).not.toMatch(OLD_COMPLETE_COPY);
+    expect(screen.queryByText(/확인되어 UNSAFE/)).toBeNull();
+    expect(screen.queryByText(LIMITATION)).toBeNull();
+  });
+
+  it('다른 사유의 대상·맞지 않는 종류·위험한 이름·모르는 키는 버리고 일반 문구와 한계 안내로 돌아간다', async () => {
+    await open(
+      'private',
+      TARGETED([
+        // 사유 목록에 없는 코드(다른 사유) — 이름을 붙이지 않는다
+        { reason: 'minor_depicted', kind: 'character', label: '하준' },
+        // 코드와 맞지 않는 종류
+        { reason: 'underage_stated', kind: 'relationship', label: '루나 · 하준' },
+        { reason: 'restricted_kinship', kind: 'character', label: '세라' },
+        // 줄바꿈·제어 문자가 든 이름, 너무 긴 이름
+        { reason: 'underage_stated', kind: 'character', label: '루나\n평가기 원문: 14세' },
+        { reason: 'underage_stated', kind: 'character', label: '가'.repeat(3002) },
+        // 모르는 키(평가기 원문)
+        { ...LUNA, raw: '평가기 원문' },
+        // 모르는 종류
+        { reason: 'underage_stated', kind: 'scene', label: '장면' },
+      ]),
+    );
+    expect(screen.getByText(GENERIC_AGE)).toBeOnTheScreen();
+    expect(screen.getByText(GENERIC_KIN)).toBeOnTheScreen();
+    expect(screen.getByText(LIMITATION)).toBeOnTheScreen();
+    expect(screen.queryByText(NONEXHAUSTIVE)).toBeNull();
+    expect(screen.queryByText(/「/)).toBeNull();
+    expect(allText()).not.toMatch(/하준|세라|루나|평가기|장면|가{3002}|scene/);
+    expect(allText()).not.toMatch(RAW_CODES);
+    expect(client.getQueryData<CommonSaveDocument>(CREATION_KEY)?.rating?.reason).toEqual({
+      outcome: 'ineligible',
+      reasons: ['restricted_kinship', 'underage_stated'],
+    });
+  });
+
+  it('대상 목록 모양이 다르면 사유는 그대로 두고 일반 문구와 한계 안내를 보여 준다', async () => {
+    await open('private', TARGETED('루나는 미성년'));
+    expect(
+      screen.getByText('미성년자 또는 제한된 혈연 관계가 확인되어 UNSAFE 등급을 적용할 수 없어요.'),
+    ).toBeOnTheScreen();
+    expect(screen.getByText(GENERIC_AGE)).toBeOnTheScreen();
+    expect(screen.getByText(GENERIC_KIN)).toBeOnTheScreen();
+    expect(screen.getByText(LIMITATION)).toBeOnTheScreen();
+    expect(screen.queryByText(/루나/)).toBeNull();
+  });
+
+  it('일시 장애 뒤 새로고침(GET만)으로 받은 대상도 같은 규칙으로 보여 준다', async () => {
+    await open('private', OUTAGE);
+    expect(screen.queryByText(/「/)).toBeNull();
+    nextCreation(() =>
+      creationDto('private', TARGETED([LUNA, { reason: 'minor_depicted', kind: 'character', label: '하준' }])),
+    );
+    await press(REFRESH);
+    expect(screen.getByText(LUNA_LINE)).toBeOnTheScreen();
+    expect(screen.getByText(GENERIC_KIN)).toBeOnTheScreen();
+    expect(screen.getByText(NONEXHAUSTIVE)).toBeOnTheScreen();
+    expect(screen.queryByText(/하준/)).toBeNull();
+    expect(callsTo(SAVE)).toBe(0);
+    expect(unexpectedCalls()).toEqual([]);
+  });
+});
+
 describe('CREATE-US-08-AC12 새로고침은 입력·저장 시각을 건드리지 않는다', () => {
   it('미저장 변경이 있는 채로 새로고침해도 고른 등급·미저장 표시·저장 시각은 그대로이고 적용 결과만 바뀐다', async () => {
     const unsaved = jest.fn();

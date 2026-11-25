@@ -51,6 +51,41 @@ describe('CREATE-US-08-AC09·AC10 조회 응답의 검토 사유', () => {
     });
   });
 
+  it('CREATE-US-08-AC09: 조회 응답의 대상(targets)을 허용 목록으로 읽고 잘못된 대상만 버린다', async () => {
+    reply(
+      response({
+        ...COMPLETED,
+        rating_review_reason: {
+          outcome: 'ineligible',
+          reasons: ['underage_stated'],
+          targets: [
+            { reason: 'underage_stated', kind: 'character', label: '루나' },
+            { reason: 'underage_stated', kind: 'character', label: '평가기 원문\n미성년' },
+            { reason: 'minor_depicted', kind: 'character', label: '하준' },
+          ],
+        },
+      }),
+    );
+    const loaded = await createCommonSaveRepository(BASE).load('1');
+    expect(loaded.rating?.reason).toEqual({
+      outcome: 'ineligible',
+      reasons: ['underage_stated'],
+      targets: [{ reason: 'underage_stated', kind: 'character', label: '루나' }],
+    });
+    expect(JSON.stringify(loaded.rating)).not.toMatch(/평가기|하준/);
+  });
+
+  it('CREATE-US-08-AC09: 대상 목록이 읽을 수 없어도 사유는 그대로 둔다(중립 표시로 바꾸지 않는다)', async () => {
+    reply(
+      response({
+        ...COMPLETED,
+        rating_review_reason: { outcome: 'ineligible', reasons: ['underage_stated'], targets: '루나는 미성년' },
+      }),
+    );
+    const loaded = await createCommonSaveRepository(BASE).load('1');
+    expect(loaded.rating?.reason).toEqual({ outcome: 'ineligible', reasons: ['underage_stated'] });
+  });
+
   it('CREATE-US-08-AC10: 완료·판단 불가 사유를 읽는다', async () => {
     reply(response({ ...COMPLETED, rating_review_reason: { outcome: 'undetermined', reasons: ['age_undetermined'] } }));
     const loaded = await createCommonSaveRepository(BASE).load('1');

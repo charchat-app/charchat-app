@@ -1,7 +1,7 @@
 // CREATE-US-08-AC09·AC10·AC12 제작자에게 보여 줄 등급 검토 결과 안내(고정 문구).
-// 서버 코드 원문은 보여 주지 않는다. 서버가 대상 캐릭터·관계 id를 보내지 않으므로 대상 이름을 지어내지 않는다.
-// 적용 등급은 effective만 쓴다(고른 등급 requested로 짐작하지 않는다).
-import type { RatingReviewReason, RatingReviewReasonCode } from '@/shared/rating';
+// 서버 코드 원문은 보여 주지 않는다. 대상 이름은 서버가 보낸 검증된 표시 이름(targets, shared/rating이 엄격히 읽음)만
+// 쓰고 지어내지 않는다. 적용 등급은 effective만 쓴다(고른 등급 requested로 짐작하지 않는다).
+import type { RatingReviewReason, RatingReviewReasonCode, RatingReviewTargetKind } from '@/shared/rating';
 
 import type { CreationRating } from './commonRepository';
 
@@ -26,10 +26,43 @@ const REASON_TEXT: Record<RatingReviewReasonCode, string> = {
   evaluator_failure: '검토 시스템에 일시적인 문제가 있었어요.',
 };
 
-/** 서버가 대상 id를 보내지 않는 한계(지어내지 않는다) */
-const TARGET_LIMITATION = '어느 캐릭터·관계인지는 아직 알려 드리지 못해요. 캐릭터 설명과 관계를 직접 확인해 주세요.';
+/** CREATE-US-08-AC09 대상과 함께 보여 줄 사유 문구(대상 종류는 shared/rating이 코드에 맞춰 이미 확인했다) */
+const TARGET_REASON_TEXT: Record<RatingReviewReasonCode, string> = {
+  underage_stated: '성인 나이에 미치지 않는다고 적혀 있어요.',
+  minor_depicted: '미성년자로 묘사됐어요.',
+  restricted_kinship: '친부모·자녀 또는 친형제자매 관계예요.',
+  age_undetermined: '나이를 확인할 수 없어요.',
+  kinship_undetermined: '혈연 관계를 확인할 수 없어요.',
+  invalid_signals: REASON_TEXT.invalid_signals,
+  evaluator_failure: REASON_TEXT.evaluator_failure,
+};
+const TARGET_KIND_TEXT: Record<RatingReviewTargetKind, string> = { character: '캐릭터', relationship: '관계' };
 
-const reasonLines = (reason: RatingReviewReason) => reason.reasons.map((code) => REASON_TEXT[code]);
+/** 대상이 하나도 없을 때: 서버가 대상을 알려 주지 않은 한계(지어내지 않는다). 예전 문구 그대로 */
+const TARGET_LIMITATION = '어느 캐릭터·관계인지는 아직 알려 드리지 못해요. 캐릭터 설명과 관계를 직접 확인해 주세요.';
+/**
+ * 대상이 하나라도 있을 때. 서버는 이름을 확인할 수 없는 대상을 같은 사유 안에서도 뺄 수 있으므로,
+ * 모든 사유에 대상이 있어도 표시된 대상이 전부라고 말하지 않는다.
+ */
+const NONEXHAUSTIVE_TARGET_GUIDANCE =
+  '표시된 캐릭터·관계는 일부일 수 있어요. 다른 캐릭터 설명과 관계도 직접 확인해 주세요.';
+
+/**
+ * 사유 코드 순서대로, 그 코드의 대상이 있으면 대상마다 고정 문구 한 줄, 없으면 일반 문구 한 줄을 만든다.
+ * 대상은 자기 코드의 문구와만 묶인다(다른 사유를 대상에 붙이지 않는다).
+ */
+function reasonLines(reason: RatingReviewReason): string[] {
+  return reason.reasons.flatMap((code) => {
+    const targets = (reason.targets ?? []).filter((target) => target.reason === code);
+    if (targets.length === 0) return [REASON_TEXT[code]];
+    return targets.map((target) => `${TARGET_KIND_TEXT[target.kind]} 「${target.label}」: ${TARGET_REASON_TEXT[code]}`);
+  });
+}
+
+function targetGuidance(reason: RatingReviewReason): string {
+  const shown = (reason.targets ?? []).some((target) => reason.reasons.includes(target.reason));
+  return shown ? NONEXHAUSTIVE_TARGET_GUIDANCE : TARGET_LIMITATION;
+}
 
 export function formatRatingReviewFeedback(rating: CreationRating | undefined): RatingReviewFeedback {
   const status = rating?.reviewStatus ?? null;
@@ -67,7 +100,7 @@ export function formatRatingReviewFeedback(rating: CreationRating | undefined): 
         return {
           kind: 'ineligible',
           title: '미성년자 또는 제한된 혈연 관계가 확인되어 UNSAFE 등급을 적용할 수 없어요.',
-          details: [...reasonLines(reason), TARGET_LIMITATION],
+          details: [...reasonLines(reason), targetGuidance(reason)],
           canRefresh: false,
         };
       if (reason?.outcome === 'undetermined')
@@ -77,7 +110,7 @@ export function formatRatingReviewFeedback(rating: CreationRating | undefined): 
           details: [
             ...reasonLines(reason),
             '미성년자나 제한된 관계로 확인된 것은 아니에요.',
-            TARGET_LIMITATION,
+            targetGuidance(reason),
             '인물의 나이와 관계를 분명히 적어 주세요.',
           ],
           canRefresh: false,
