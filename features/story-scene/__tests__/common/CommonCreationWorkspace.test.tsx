@@ -4,6 +4,8 @@ import type { ReactElement, ReactNode } from 'react';
 import { defaultExpression, emptyScene, type CreationSaveDocument, type FewshotCharacter } from '@/shared/story-types';
 import type { CommonSaveRepository, EditorStory } from '@/features/story-publish';
 import { ApiError } from '@/lib/api-client';
+import { usePreventRemove } from 'expo-router';
+import { Alert } from 'react-native';
 import { CommonCreationWorkspace } from '../../components/CommonCreationWorkspace';
 
 jest.mock('react-native-safe-area-context', () => require('react-native-safe-area-context/jest/mock').default);
@@ -84,6 +86,46 @@ function fixture(overlong = false) {
   };
   return { repository, save, stored: () => data };
 }
+// CREATE-US-07: 편집 화면에서 push로 쌓이면 뒤로 가기로 제거되므로 작성 중 스토리의 미저장 편집도 가드를 켠다.
+it.each([
+  [false, false],
+  [true, true],
+])('작성 중 스토리 미저장 편집의 이탈 가드: guardDraftLeave=%s → %s', async (guardDraftLeave, guarded) => {
+  const { repository } = fixture();
+  await render(<CommonCreationWorkspace repository={repository} storyId="1" guardDraftLeave={guardDraftLeave} />);
+  await waitFor(() => expect(screen.getByLabelText('커스텀 문체')).toBeTruthy());
+  expect(jest.mocked(usePreventRemove).mock.calls.at(-1)?.[0]).toBe(false);
+  await fireEvent.changeText(screen.getByLabelText('커스텀 문체'), '바뀐 문체');
+  expect(jest.mocked(usePreventRemove).mock.calls.at(-1)?.[0]).toBe(guarded);
+});
+// CREATE-US-07: push로 쌓인 화면은 머리글 뒤로 가기를 보이고, 미저장 편집이면 확인 뒤에만 제거된다.
+it('onBack이 있으면 머리글 뒤로 가기를 보이고 누르면 부른다. 없으면 보이지 않는다', async () => {
+  const { repository } = fixture();
+  const onBack = jest.fn();
+  const view = await render(<CommonCreationWorkspace repository={repository} storyId="1" onBack={onBack} />);
+  await waitFor(() => expect(screen.getByLabelText('커스텀 문체')).toBeTruthy());
+  await fireEvent.press(screen.getByRole('button', { name: '기본 설정으로 돌아가기' }));
+  expect(onBack).toHaveBeenCalledTimes(1);
+  await view.unmount();
+  await render(<CommonCreationWorkspace repository={repository} storyId="1" />);
+  await waitFor(() => expect(screen.getByLabelText('커스텀 문체')).toBeTruthy());
+  expect(screen.queryByRole('button', { name: '기본 설정으로 돌아가기' })).toBeNull();
+});
+it('미저장 편집 중 머리글 뒤로 가기는 확인 뒤 가드를 끄고 onBack을 부른다', async () => {
+  const { repository } = fixture();
+  const alert = jest.spyOn(Alert, 'alert').mockImplementation(() => undefined);
+  const onBack = jest.fn();
+  await render(<CommonCreationWorkspace repository={repository} storyId="1" guardDraftLeave onBack={onBack} />);
+  await waitFor(() => expect(screen.getByLabelText('커스텀 문체')).toBeTruthy());
+  await fireEvent.changeText(screen.getByLabelText('커스텀 문체'), '바뀐 문체');
+  await fireEvent.press(screen.getByRole('button', { name: '기본 설정으로 돌아가기' }));
+  expect(onBack).not.toHaveBeenCalled();
+  const buttons = alert.mock.lastCall?.[2] ?? [];
+  await act(async () => buttons.find((b) => b.text === '나가기')?.onPress?.());
+  expect(jest.mocked(usePreventRemove).mock.calls.at(-1)?.[0]).toBe(false);
+  expect(onBack).toHaveBeenCalledTimes(1);
+  alert.mockRestore();
+});
 it('탭 이동으로 표현·퓨샷을 공통 임시 저장하고 비공개 확정 후 재진입 복원한다', async () => {
   const { repository, save, stored } = fixture();
   const view = await render(<CommonCreationWorkspace repository={repository} storyId="1" />);

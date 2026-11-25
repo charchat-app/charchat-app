@@ -8,7 +8,7 @@ import {
   type CommonSaveRepository,
   type FewshotRepository,
 } from '@/features/story-publish';
-import { useUnsavedCreationGuard } from '../hooks/useUnsavedCreationGuard';
+import { confirmUnsavedLeave, useUnsavedCreationGuard } from '../hooks/useUnsavedCreationGuard';
 import { Spacing } from '@/constants/theme';
 import {
   applyAllocatedIds,
@@ -50,9 +50,15 @@ function withoutForeignAreas(snapshot: FewshotsDocument): FewshotsDocument {
 export function CommonCreationWorkspace({
   repository,
   storyId,
+  guardDraftLeave = false,
+  onBack,
 }: {
   repository: CommonSaveRepository;
   storyId: string;
+  /** 스택 뒤로 가기로 제거될 수 있으면 작성 중 스토리의 미저장 편집도 이탈 확인을 거친다. */
+  guardDraftLeave?: boolean;
+  /** 있으면 머리글에 뒤로 가기 버튼을 보인다. 미저장 확인은 여기서 하고, 확정 뒤 가드를 끈 다음 부른다. */
+  onBack?: () => void;
 }) {
   const [tab, setTab] = useState(0),
     [loaded, setLoaded] = useState<CreationSaveDocument | null>(null);
@@ -144,13 +150,29 @@ export function CommonCreationWorkspace({
     },
   });
   const completed = !!few.snapshot && few.snapshot.saveState !== 'draft';
-  useUnsavedCreationGuard(!!few.snapshot && completed && (dirty || pendingInput.active || common.pendingSave));
+  const guarded =
+    !!few.snapshot && (completed || guardDraftLeave) && (dirty || pendingInput.active || common.pendingSave);
+  // 머리글 뒤로 가기에서 나가기를 확정했다. 가드를 먼저 끈 뒤(다음 커밋) onBack으로 화면을 닫는다.
+  const [leaving, setLeaving] = useState(false);
+  useUnsavedCreationGuard(guarded && !leaving);
+  useEffect(() => {
+    if (leaving) onBack?.();
+    // 한 번만 닫는다. onBack 참조가 바뀌어도 다시 부르지 않는다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [leaving]);
+  const back = onBack
+    ? () => {
+        if (leaving) return;
+        if (guarded) confirmUnsavedLeave(() => setLeaving(true));
+        else onBack();
+      }
+    : undefined;
   const issues = document ? completionIssues(document) : [];
   // 직접 저장이 진행 중이거나 기다리는 중. 자동 임시 저장만 진행 중일 때는 저장 버튼을 막지 않고, 누르면 이어서 저장한다.
   const manualBusy = (common.saving && !common.autoSaving) || common.waiting;
   return (
     <Surface style={styles.screen}>
-      <ScreenHeader eyebrow="CHAR / CHAT" title="제작" />
+      <ScreenHeader eyebrow="CHAR / CHAT" title="제작" onBack={back} backLabel="기본 설정으로 돌아가기" />
       <TopTabs
         tabs={['말투·서술', '대화 예시', '인트로', '초기 상태', '저장·공개']}
         activeIndex={tab}

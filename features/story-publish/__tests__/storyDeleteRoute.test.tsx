@@ -18,6 +18,8 @@ const mockRouter = {
 };
 const mockIsFocused = jest.fn();
 const mockUsePreventRemove = jest.fn();
+// 안정된 참조의 캐시 정리 콜백. 이 테스트는 삭제 뒤 이동만 보므로 호출 여부는 확인하지 않는다.
+const mockForgetEditorCache = jest.fn();
 let mockEditorProps: EditorProps | undefined;
 
 jest.mock('expo-router', () => ({
@@ -25,6 +27,7 @@ jest.mock('expo-router', () => ({
   useNavigation: () => ({ isFocused: mockIsFocused }),
   useLocalSearchParams: () => ({ storyId: '7' }),
   usePreventRemove: (...args: unknown[]) => mockUsePreventRemove(...args),
+  useFocusEffect: jest.fn(),
 }));
 jest.mock('@/features/story-scene', () => jest.requireActual('../../story-scene/hooks/useUnsavedCreationGuard'));
 jest.mock('@/features/story-publish', () => ({
@@ -32,6 +35,7 @@ jest.mock('@/features/story-publish', () => ({
     mockEditorProps = props;
     return null;
   },
+  useForgetStoryEditorCache: () => mockForgetEditorCache,
 }));
 
 async function renderRoute(): Promise<EditorProps> {

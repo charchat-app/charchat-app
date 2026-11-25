@@ -115,7 +115,19 @@ export type StoryEditorScreenProps = {
    * 있는지 바뀔 때마다 알린다. 이탈 확인은 라우트가 맡는다. 미등록 스토리·삭제된 스토리는 항상 false다.
    */
   onUnsavedChange?: (unsaved: boolean) => void;
+  /**
+   * CREATE-US-07 「말투·서술」 탭을 눌렀을 때 2~4번 작업 화면으로 넘긴다. 라우트가 이동을 맡는다.
+   * 저장하지 않은 변경(미등록 스토리 포함)·저장·업로드가 남아 있으면 부르지 않고 안내한다(입력은 그대로).
+   * 넘기지 않으면 지금처럼 탭만 바꾼다.
+   */
+  onOpenSpeech?: () => void;
 };
+
+const SPEECH_TAB = TABS.indexOf('말투·서술');
+const SPEECH_DIRTY_MESSAGE =
+  '저장하지 않은 변경이 있어 말투·서술로 이동하지 않았어요. 입력은 그대로예요. 먼저 저장해 주세요.';
+const SPEECH_BUSY_MESSAGE = '저장하는 중에는 말투·서술로 이동할 수 없어요. 저장이 끝난 뒤 다시 눌러 주세요.';
+const SPEECH_LOADING_MESSAGE = '저장된 내용을 불러오는 중이에요. 불러온 뒤 다시 눌러 주세요.';
 
 const alwaysFocused = () => true;
 
@@ -129,6 +141,7 @@ export function StoryEditorScreen({
   onDeleted,
   isRouteFocused = alwaysFocused,
   onUnsavedChange,
+  onOpenSpeech,
 }: StoryEditorScreenProps) {
   const c = useTheme();
   const queryClient = useQueryClient();
@@ -141,6 +154,8 @@ export function StoryEditorScreen({
   const remove = useDeleteStory(storyId);
   const [tab, setTab] = useState(0);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  // CREATE-US-07 말투·서술로 넘기지 못한 이유. 다른 탭을 누르거나 넘기면 지운다.
+  const [speechNotice, setSpeechNotice] = useState<string | null>(null);
   const mounted = useRef(true);
   // 캐릭터를 끄는 동안 화면 스크롤을 멈춘다 (AC14: 드래그와 페이지 스크롤이 겹치지 않게)
   const [dragging, setDragging] = useState(false);
@@ -1194,7 +1209,54 @@ export function StoryEditorScreen({
   };
   // 자동 임시 저장 중에도 저장 버튼은 눌러 대기열에 넣을 수 있다. 그 밖의 쓰기 버튼은 지금처럼 막는다.
   const saveBlocked = autoSaving ? uploading : writeBlocked;
+  /**
+   * CREATE-US-07 말투·서술 넘기기. 작업 화면은 서버에 저장된 내용만 불러오므로, 이 화면에 저장되지 않은 입력이
+   * 남아 있으면(미등록 스토리 포함) 넘기지 않는다. 자동 저장·직접 저장을 대신 보내지 않고 입력도 버리지 않는다.
+   * 같은 틱의 누름도 판단하도록 업로드·자동 저장은 ref로, 쓰기 잠금은 peek()으로 본다. 두 번 누름은 라우트가 한 번만 쌓는다.
+   */
+  const openSpeech = (open: () => void) => {
+    if (uploadSources.current.size > 0) {
+      setSpeechNotice(UPLOAD_WAIT_MESSAGE);
+      return;
+    }
+    if (
+      autoActive.current ||
+      queuedSave !== null ||
+      flow.running ||
+      waitingForSave.current ||
+      // 같은 틱에 저장 버튼과 함께 눌러도 렌더를 기다리지 않고 지금 잠금 상태를 본다.
+      peek() !== 'idle'
+    ) {
+      setSpeechNotice(SPEECH_BUSY_MESSAGE);
+      return;
+    }
+    if (presetState.status === 'loading') {
+      setSpeechNotice(SPEECH_LOADING_MESSAGE);
+      return;
+    }
+    const dirty =
+      basicChanged() ||
+      presetState.dirty ||
+      presetState.pending ||
+      imagesPendingRef.current !== null ||
+      flow.imageError !== null ||
+      storyImagesDirty() ||
+      savedFacesChanged() ||
+      newFacesChanged();
+    if (dirty) {
+      setSpeechNotice(SPEECH_DIRTY_MESSAGE);
+      return;
+    }
+    if (!mounted.current || !isRouteFocused()) return;
+    setSpeechNotice(null);
+    open();
+  };
   const changeTab = (next: number) => {
+    if (next === SPEECH_TAB && onOpenSpeech) {
+      openSpeech(onOpenSpeech);
+      return;
+    }
+    setSpeechNotice(null);
     // 업로드 중에 탭을 바꾸면 업로드 주인(편집기)이 언마운트되어 결과를 잃으므로 머문다.
     if (uploadSources.current.size > 0) return;
     if (next !== tab) autoSaveRef.current();
@@ -1223,6 +1285,7 @@ export function StoryEditorScreen({
         {deleteError && !(tab === PUBLISH_TAB && confirmingDelete) ? (
           <Notice tone="alert" message={deleteError} />
         ) : null}
+        {speechNotice ? <Notice tone="alert" message={speechNotice} /> : null}
         {tab === 0 ? (
           <>
             {issues.length > 0 ? (
