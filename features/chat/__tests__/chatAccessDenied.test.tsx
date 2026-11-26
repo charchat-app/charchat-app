@@ -1,6 +1,6 @@
 // CHAT-US-04 (KAN-26) 내 대화가 아닌 대화방 주소의 접근 불가 안내와 홈 이동
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { fireEvent, render, screen } from '@testing-library/react-native';
+import { act, fireEvent, render, screen } from '@testing-library/react-native';
 
 import SessionRoute from '@/app/chat-session/[sessionId]';
 
@@ -53,7 +53,7 @@ it.each([404, 403])(
     await show();
 
     expect(await screen.findByText('접속할 수 없습니다')).toBeOnTheScreen();
-    expect(screen.getByText('이 대화방은 열 수 없어요. 내 대화만 볼 수 있습니다.')).toBeOnTheScreen();
+    expect(screen.getByText('이 대화방은 열 수 없습니다. 내 대화만 볼 수 있습니다.')).toBeOnTheScreen();
     // 대화 내용·오류 재시도 대신 공통 안내만 보인다.
     expect(screen.queryByTestId('conversation-bubble')).not.toBeOnTheScreen();
     expect(screen.queryByText('대화방을 불러오지 못했습니다.')).not.toBeOnTheScreen();
@@ -82,13 +82,50 @@ it('CHAT-US-04-AC04: 이전 화면이 있으면 뒤로와 홈 이동을 모두 �
 it.each([
   [401, false],
   [503, true],
-])('CHAT-US-04-AC04: %i 응답은 접근 불가 안내로 묶지 않는다', async (status, retryable) => {
-  jest.spyOn(globalThis, 'fetch').mockImplementation(async () => problem(status));
-  await show();
+])(
+  'CHAT-US-04-AC04: %i 응답은 접근 불가 안내로 묶지 않는다 (설계: 로그인 필요·장애는 따로 처리)',
+  async (status, retryable) => {
+    jest.spyOn(globalThis, 'fetch').mockImplementation(async () => problem(status));
+    await show();
 
-  expect(await screen.findByText('대화방을 불러오지 못했습니다.')).toBeOnTheScreen();
-  expect(screen.queryByText('접속할 수 없습니다')).not.toBeOnTheScreen();
-  expect(screen.queryByRole('button', { name: '홈으로 이동' })).not.toBeOnTheScreen();
-  if (retryable) expect(screen.getByRole('button', { name: '다시 시도' })).toBeOnTheScreen();
-  else expect(screen.queryByRole('button', { name: '다시 시도' })).not.toBeOnTheScreen();
+    expect(await screen.findByText('대화방을 불러오지 못했습니다.')).toBeOnTheScreen();
+    expect(screen.queryByText('접속할 수 없습니다')).not.toBeOnTheScreen();
+    expect(screen.queryByRole('button', { name: '홈으로 이동' })).not.toBeOnTheScreen();
+    if (retryable) expect(screen.getByRole('button', { name: '다시 시도' })).toBeOnTheScreen();
+    else expect(screen.queryByRole('button', { name: '다시 시도' })).not.toBeOnTheScreen();
+  },
+);
+
+it('CHAT-US-04-AC04: 방을 연 채로 이력 조회가 거절되면 대화방을 다시 확인해 안내로 바꾼다', async () => {
+  const room = {
+    id: 19,
+    story_title: '달빛 정원',
+    model: '루나',
+    read_only: false,
+    play_name: '여행자',
+    messages: [{ speaker_kind: 'narrator', speaker_name: null, body: '문이 열렸다.' }],
+    characters: [{ id: 2, name: '윤슬' }],
+  };
+  const turns = { messages: [], active_generation: null, last_failed_generation: null, model: '', model_id: 1 };
+  let denied = false;
+  const fetchMock = jest.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+    const url = String(input);
+    if (url.endsWith('/conversation/sessions/19')) return denied ? problem(404) : response(room, 200);
+    if (url.endsWith('/conversation/sessions/19/turns')) return denied ? problem(404) : response(turns, 200);
+    return response({ models: [], default_model_id: null }, 200);
+  });
+  await show();
+  expect(await screen.findByText('달빛 정원')).toBeOnTheScreen();
+  expect(screen.getByText('문이 열렸다.')).toBeOnTheScreen();
+
+  // 스토리가 비공개로 바뀌는 등으로 이 방에 더 들어갈 수 없게 된 뒤, 전송·생성 완료가 이력을 다시 읽는다.
+  denied = true;
+  await act(async () => {
+    await clients[0].invalidateQueries({ queryKey: ['conversation', 'turns', '19'], exact: true });
+  });
+
+  expect(await screen.findByText('접속할 수 없습니다')).toBeOnTheScreen();
+  expect(screen.queryByText('문이 열렸다.')).not.toBeOnTheScreen();
+  expect(screen.queryByText('달빛 정원')).not.toBeOnTheScreen();
+  expect(fetchMock.mock.calls.filter(([input]) => String(input).endsWith('/sessions/19'))).toHaveLength(2);
 });

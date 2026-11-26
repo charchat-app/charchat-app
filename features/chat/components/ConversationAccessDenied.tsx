@@ -4,7 +4,7 @@ import { ConversationFrame } from '@/features/chat/components/ConversationFrame'
 
 /** 최종 안내 문구·디자인은 아직 정하지 않았다(대화 4 설계). 지금 문구는 설계의 안내 취지를 따른 임시안이다. */
 export const ACCESS_DENIED_TITLE = '접속할 수 없습니다';
-export const ACCESS_DENIED_DESCRIPTION = '이 대화방은 열 수 없어요. 내 대화만 볼 수 있습니다.';
+export const ACCESS_DENIED_DESCRIPTION = '이 대화방은 열 수 없습니다. 내 대화만 볼 수 있습니다.';
 
 export function ConversationAccessDenied({
   title,

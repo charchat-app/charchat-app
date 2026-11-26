@@ -24,6 +24,17 @@ export function isDefiniteRejection(error: unknown): error is ApiError {
 export const refreshTurns = (client: QueryClient, sessionId: string) =>
   client.invalidateQueries({ queryKey: turnsKey(sessionId), exact: true });
 
+/**
+ * CHAT-US-04-AC04: 방을 연 채로 이력·생성 조회가 403·404로 거절되면(스토리가 비공개·삭제되어 방에 더 들어갈 수 없게 됨 등)
+ * 대화방 조회를 다시 해서, 서버가 같은 거절을 주면 대화방 화면이 접근 불가 안내로 바뀌게 한다.
+ * 키는 useConversationSession의 대화방 조회 키와 같다.
+ */
+export function recheckSessionAccess(client: QueryClient, sessionId: string, error: unknown) {
+  if (error instanceof ApiError && (error.status === 403 || error.status === 404)) {
+    void client.invalidateQueries({ queryKey: ['conversation', 'session', sessionId], exact: true });
+  }
+}
+
 /** 전송·재시도가 접수된 생성을 바로 진행 중으로 표시하고, 저장된 이력은 서버에서 다시 읽는다. */
 export function acceptGeneration(client: QueryClient, sessionId: string, generation: ChatGeneration) {
   client.setQueryData<ChatTurns>(turnsKey(sessionId), (old) =>
