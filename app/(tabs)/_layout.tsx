@@ -6,7 +6,7 @@ import { isCreationEditorPath } from '@/features/story-publish';
 import { Radius } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 
-/** 웹에서 제작 탭을 모바일 폭으로 가운데 정렬한다. 네이티브에는 적용하지 않는다. */
+/** 웹에서 탭 화면과 하단 탭을 모바일 폭으로 가운데 정렬한다. 네이티브에는 적용하지 않는다. */
 const WEB_MOBILE_FRAME: ViewStyle | undefined =
   Platform.OS === 'web' ? { width: '100%', maxWidth: 480, alignSelf: 'center' } : undefined;
 
@@ -24,8 +24,9 @@ export default function TabsLayout() {
         headerShown: false,
         tabBarActiveTintColor: colors.accentText,
         tabBarInactiveTintColor: colors.tabText,
-        tabBarStyle: { backgroundColor: colors.footer, borderTopColor: colors.footerBorder },
-        sceneStyle: { backgroundColor: colors.background },
+        // 웹에서는 홈·대화도 제작 탭과 같은 모바일 폭으로 화면과 하단 탭을 가운데 정렬한다.
+        tabBarStyle: [{ backgroundColor: colors.footer, borderTopColor: colors.footerBorder }, WEB_MOBILE_FRAME],
+        sceneStyle: [{ backgroundColor: colors.background }, WEB_MOBILE_FRAME],
       }}
     >
       <Tabs.Screen
