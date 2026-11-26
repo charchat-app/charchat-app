@@ -857,8 +857,14 @@ export function StoryEditorScreen({
         }
         // 자동 임시 저장이 끝난 뒤 바뀐 입력 없이 누른 「저장」도 그 키로 마무리한다. 키는 마무리가 성공하거나
         // 거절·대체될 때 버린다(사전 조회가 실패하면 다시 누른 저장이 같은 키로 마무리한다).
+        // CREATE-US-12: 기본 정보 임시본은 공개 범위 탭에서 반영한다. 단, 이미 시작한 마무리의
+        // 사전 조회가 실패했다면 같은 토큰으로 다시 시도한다.
         const autoToken = autoFinalize.current;
-        if (presetState.pendingKind === null && canFinalizeAuto(autoToken)) {
+        if (
+          presetState.pendingKind === null &&
+          (!autoToken?.basic || pendingAuto === autoToken) &&
+          canFinalizeAuto(autoToken)
+        ) {
           void withWriteLock(() => flow.saveAll(() => finalizeAuto(autoToken), saveImagesStep));
           return;
         }
