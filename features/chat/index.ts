@@ -2,3 +2,5 @@
 export { StoryDetailScreen } from '@/features/chat/components/StoryDetailScreen';
 export { ChatSessionScreen } from '@/features/chat/components/ChatSessionScreen';
 export { ChatListScreen } from '@/features/chat/components/ChatListScreen';
+// BASE-03 로그아웃 시 그 계정의 기기 보관분 정리
+export { clearChatDeviceData } from '@/features/chat/deviceDataCleanup';

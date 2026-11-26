@@ -34,14 +34,15 @@ features/
   discover/           홈·검색·추천 (EXTRA-US-01, 02)
   billing/            요금·사용 내역 (EXTRA-US-03, 04)
   profile/            마이페이지: 이용자 개인 프로필 (CREATE-US-05 개인 원본).
-                      계정·로그인·설정은 계정 설계 전까지 만들지 않음
+                      계정 설정은 BASE-03 설계 검토 후 정한다
+  auth/               로그인·온보딩·로그인 세션 (BASE-03, PM 검토 중)
 shared/
   story-types/        스토리·캐릭터·인트로·말풍선 타입. 여기서만 정의
   media/              이미지 업로드 API·형식·5MB 검사 (story-setup 소유)
   rating/             콘텐츠 등급 상수·표시
 constants/theme.ts    색상·간격·라운드·폰트 토큰
 hooks/                앱 전역 훅
-lib/                  api-client.ts, storage.ts
+lib/                  api-client.ts, storage.ts, authSession.ts·authStorage(.web).ts (BASE-03 로그인 세션)
 mocks/seed/           백엔드 전 개발용 시드 데이터
 ```
 
@@ -91,7 +92,7 @@ mocks/seed/           백엔드 전 개발용 시드 데이터
 
 - `main` 브랜치에 직접 커밋
 - 비밀키를 클라이언트 코드에 넣기
-- 계정·인증 구조를 임의로 만들기 (계정 모델 설계 전)
+- 계정·인증 구조를 승인된 설계 밖에서 임의로 만들기. BASE-03 로그인 설계는 PR(feat/BASE-03-auth-session)에서 PM 검토 중이며, 검토 결과에 따라 이 항목을 다시 정한다.
 - 다른 담당자 폴더를 허락 없이 수정하기 (CODEOWNERS 참고)
 
 ## 8. 미결 사항 등록
