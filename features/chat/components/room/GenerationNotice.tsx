@@ -1,8 +1,10 @@
 // CHAT-US-02 생성 실패 안내: 실패(재시도 가능)·중간 끊김·저장 실패를 구분한다. 자동 재시도는 없다.
+// CHAT-US-13 실패한 생성의 모델을 보이고, 재시도가 다른 모델로 요청되면 미리 알린다(몰래 바꾸지 않음).
 import { View } from 'react-native';
 
 import { Button, Notice, Text } from '@/components/ui';
 import type { RetryAttempt } from '@/features/chat/hooks/useRetryGeneration';
+import { withParticle } from '@/features/chat/koreanParticle';
 import type { ChatGeneration } from '@/shared/story-types';
 
 const FAILURE_MESSAGES = {
@@ -23,10 +25,13 @@ const ERROR_DETAILS: Record<string, string> = {
 export function GenerationNotice({
   generation,
   retryAttempt,
+  currentModel,
   onRetry,
 }: {
   generation: ChatGeneration;
   retryAttempt: RetryAttempt | null | undefined;
+  /** 지금 세션에 선택된 모델. 재시도는 이 모델로 요청된다. */
+  currentModel: string | null;
   onRetry: () => void;
 }) {
   if (generation.status !== 'failed' && generation.status !== 'failed_partial' && generation.status !== 'save_failed') {
@@ -34,9 +39,14 @@ export function GenerationNotice({
   }
   const attempt = retryAttempt?.generationId === generation.id ? retryAttempt : null;
   const canRetry = generation.status === 'failed' && generation.retryable;
+  // 실패한 생성이 요청한 모델 이름을 앞에 붙인다(CHAT-US-13-AC03).
+  const message = generation.model
+    ? `${generation.model} ${FAILURE_MESSAGES[generation.status]}`
+    : FAILURE_MESSAGES[generation.status];
+  const retryModel = canRetry && currentModel && currentModel !== generation.model ? currentModel : null;
   return (
     <View testID="generation-notice">
-      <Notice tone="alert" message={FAILURE_MESSAGES[generation.status]} />
+      <Notice tone="alert" message={message} />
       {generation.error_code && ERROR_DETAILS[generation.error_code] ? (
         <Text variant="caption">{ERROR_DETAILS[generation.error_code]}</Text>
       ) : null}
@@ -53,6 +63,7 @@ export function GenerationNotice({
           onPress={onRetry}
         />
       ) : null}
+      {retryModel ? <Text variant="caption">다시 시도하면 {withParticle(retryModel, '으로')} 요청해요.</Text> : null}
     </View>
   );
 }

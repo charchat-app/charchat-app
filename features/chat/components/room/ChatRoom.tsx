@@ -1,5 +1,7 @@
 // CHAT-US-02 대화방: 이력·스트리밍 응답·생성 진행 표시·입력창을 묶는다 · CHAT-US-03 작성 중 입력 기기 보관
+// CHAT-US-13 대화 중 모델 변경: 다음 응답부터 적용, 진행 중 생성은 기존 모델 유지
 import { useQueryClient } from '@tanstack/react-query';
+import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
 import { Badge, Button, Notice, Section, Text } from '@/components/ui';
@@ -9,14 +11,17 @@ import { ConversationFrame } from '@/features/chat/components/ConversationFrame'
 import { ChatComposer } from '@/features/chat/components/room/ChatComposer';
 import { ChatHistory } from '@/features/chat/components/room/ChatHistory';
 import { GenerationNotice } from '@/features/chat/components/room/GenerationNotice';
+import { ModelPicker } from '@/features/chat/components/room/ModelPicker';
 import { useSpeakers } from '@/features/chat/hooks/useSpeakers';
 import { streamKey } from '@/features/chat/hooks/chatCache';
+import { useChangeSessionModel } from '@/features/chat/hooks/useChatModel';
 import { useChatDraft, useChatTurns } from '@/features/chat/hooks/useChatTurns';
 import { type GenerationStream, useGenerationStream } from '@/features/chat/hooks/useGenerationStream';
 import { useRetryGeneration } from '@/features/chat/hooks/useRetryGeneration';
 import { type SendAttempt, useSendMessage } from '@/features/chat/hooks/useSendMessage';
+import { withParticle } from '@/features/chat/koreanParticle';
 import { emptyDraft } from '@/features/chat/messageDraft';
-import type { ChatMessage, ConversationMessage, ConversationSession } from '@/shared/story-types';
+import type { ChatMessage, ConversationMessage, ConversationSession, SessionModelChange } from '@/shared/story-types';
 
 const PENDING_NOTES: Record<SendAttempt['status'], string | null> = {
   posting: '보내는 중…',
@@ -24,6 +29,14 @@ const PENDING_NOTES: Record<SendAttempt['status'], string | null> = {
   accepted: null,
   rejected: '보내지 못함',
 };
+
+/** 모델을 바꾼 뒤 남기는 안내. 진행 중 생성은 기존 모델로 끝까지 만든다(CHAT-US-13-AC02). */
+function modelChangeNotice({ model, active_generation }: SessionModelChange) {
+  const next = `다음 답변부터 ${withParticle(model, '을')} 써요.`;
+  return active_generation
+    ? `지금 만드는 답변은 ${withParticle(active_generation.model, '으로')} 끝까지 만들고, ${next}`
+    : next;
+}
 
 function showPending(attempt: SendAttempt | null | undefined, messages: ChatMessage[]) {
   if (!attempt) return false;
@@ -69,6 +82,17 @@ export function ChatRoom({ session, onBack }: { session: ConversationSession; on
   const generating = !!active || attempt?.status === 'posting' || retrier.attempt?.status === 'posting';
   // turns.model은 이 세션에 적용될 모델(서버가 항상 줌). 이력을 읽기 전이거나 빈 값이면 세션 값을 쓴다.
   const model = turns.data?.model || session.model;
+  const modelChange = useChangeSessionModel(sessionId);
+  const [pickingModel, setPickingModel] = useState(false);
+  const selectModel = (picked: { id: number; name: string }) => {
+    const currentId = turns.data?.model_id;
+    if (currentId !== undefined ? picked.id === currentId : picked.name === model) {
+      setPickingModel(false);
+      return;
+    }
+    // 응답 생성 중에도 바꿀 수 있다. 진행 중 생성은 서버가 기존 모델로 끝까지 만든다(CHAT-US-13-AC02).
+    modelChange.mutate(picked.id, { onSuccess: () => setPickingModel(false) });
+  };
 
   const blockedReason = !turns.isSuccess
     ? '대화 이력을 불러온 뒤 보낼 수 있습니다.'
@@ -89,6 +113,8 @@ export function ChatRoom({ session, onBack }: { session: ConversationSession; on
     if (!secured) return false;
     // 보낸 내용만 비우고 다음 발화자는 유저 캐릭터로 되돌린다(CHAT-US-02-AC01·AC05).
     clearSent(secured, emptyDraft());
+    // 모델 변경 안내는 바꾼 뒤 첫 전송까지만 보인다. 이후에는 진행 표시의 모델 이름이 대신한다.
+    modelChange.reset();
     return true;
   };
 
@@ -98,8 +124,12 @@ export function ChatRoom({ session, onBack }: { session: ConversationSession; on
       onBack={onBack}
       top={
         generating ? (
-          <View style={styles.progress} accessibilityRole="progressbar" accessibilityLabel="응답 생성 중">
-            <Text variant="subheading">...</Text>
+          <View style={styles.progress}>
+            <View accessibilityRole="progressbar" accessibilityLabel="응답 생성 중">
+              <Text variant="subheading">...</Text>
+            </View>
+            {/* 진행 중 생성이 요청한 모델. 도중에 모델을 바꿔도 이 이름은 그대로다(CHAT-US-13-AC02). */}
+            {active?.model ? <Text variant="caption">{active.model} 답변 중</Text> : null}
           </View>
         ) : null
       }
@@ -120,7 +150,30 @@ export function ChatRoom({ session, onBack }: { session: ConversationSession; on
         {session.story_title}
       </Text>
       {session.read_only ? <Badge label="읽기 전용" /> : null}
-      {model ? <Text variant="caption">적용 모델: {model}</Text> : null}
+      {model ? (
+        <View style={styles.modelRow}>
+          <Text variant="caption">모델: {model}</Text>
+          {session.read_only ? null : (
+            <Button
+              label="모델 변경"
+              accessibilityLabel="대화 모델 변경"
+              accessibilityState={{ expanded: pickingModel }}
+              variant="secondary"
+              onPress={() => setPickingModel((open) => !open)}
+            />
+          )}
+        </View>
+      ) : null}
+      {pickingModel && !session.read_only ? (
+        <ModelPicker
+          currentId={turns.data?.model_id}
+          currentName={model}
+          busy={modelChange.isPending}
+          onSelect={selectModel}
+        />
+      ) : null}
+      {modelChange.isError ? <Notice tone="alert" message="모델을 바꾸지 못했어요. 다시 시도해 주세요." /> : null}
+      {modelChange.data ? <Notice message={modelChangeNotice(modelChange.data)} /> : null}
       {session.characters.length ? (
         <Section title="등장 캐릭터" first>
           {session.characters.map(({ id, name }) => (
@@ -180,6 +233,7 @@ export function ChatRoom({ session, onBack }: { session: ConversationSession; on
         <GenerationNotice
           generation={lastFailed}
           retryAttempt={retryAttempt}
+          currentModel={model}
           onRetry={() => retrier.retry(lastFailed)}
         />
       ) : null}
@@ -203,4 +257,5 @@ export function ChatRoom({ session, onBack }: { session: ConversationSession; on
 
 const styles = StyleSheet.create({
   progress: { alignItems: 'center', paddingVertical: Spacing.one },
+  modelRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: Spacing.two },
 });
