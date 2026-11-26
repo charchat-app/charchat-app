@@ -151,7 +151,7 @@ describe('CREATE-US-01-AC02: 서버 누락 안내를 지금 입력값과 맞춘�
     // 새 캐릭터의 빈 이름·상세는 서버 판정 전이므로 앱이 따로 안내를 만들지 않는다
     expect(screen.queryByText(MSG.name)).toBeNull();
 
-    await fireEvent.press(screen.getByText('삭제'));
+    await fireEvent.press(screen.getByRole('button', { name: '캐릭터 1 삭제' }));
     expect(screen.getByText(MSG.count)).toBeOnTheScreen();
   });
 
@@ -280,7 +280,7 @@ async function openTab(name: string) {
 }
 
 async function addPreset(name: string, detail = '') {
-  await fireEvent.press(screen.getByRole('button', { name: '+ 프로필 추가' }));
+  await fireEvent.press(screen.getByRole('button', { name: '+ 추천 프로필 추가' }));
   const count = screen.getAllByLabelText(/^프로필 \d+ 이름$/).length;
   await fireEvent.changeText(screen.getByLabelText(`프로필 ${count} 이름`), name);
   if (detail) await fireEvent.changeText(screen.getByLabelText(`프로필 ${count} 상세`), detail);
@@ -296,11 +296,11 @@ describe('CREATE-US-05-AC08: 유저 프로필 탭 연결', () => {
 
   it('유저 프로필 탭을 열면 프리셋 편집기와 기본 정보와 함께 저장된다는 안내를 보여 준다', async () => {
     await render(<StoryEditorScreen storyId="1" onBack={jest.fn()} onDeleted={jest.fn()} />);
-    expect(screen.queryByRole('button', { name: '+ 프로필 추가' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '+ 추천 프로필 추가' })).toBeNull();
 
     await openTab('유저 프로필');
 
-    expect(screen.getByRole('button', { name: '+ 프로필 추가' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '+ 추천 프로필 추가' })).toBeTruthy();
     expect(screen.getByText('아직 추천 프로필이 없어요.')).toBeTruthy();
     expect(screen.getByText(SAVED_WITH_BASIC)).toBeTruthy();
     expect(screen.queryByText(NOT_PERSISTED)).toBeNull();
@@ -322,12 +322,16 @@ describe('CREATE-US-05-AC08: 유저 프로필 탭 연결', () => {
       screen.getAllByTestId(/^preset-item-/).map((card) => within(card).queryAllByText(IMAGE_PROMPT).length);
     expect(imagePromptPerCard()).toEqual([1, 1]);
 
-    await fireEvent.press(screen.getByRole('button', { name: '프로필 1 아래로 이동' }));
+    // CREATE-US-12: 화면에 보이는 위·아래 버튼은 없고, 손잡이의 접근성 동작으로 옮긴다
+    expect(screen.queryAllByRole('button', { name: /(위로|아래로) 이동$/ })).toHaveLength(0);
+    await fireEvent(screen.getByLabelText('프로필 1 순서 손잡이(길게 눌러 끌기)'), 'accessibilityAction', {
+      nativeEvent: { actionName: 'increment' },
+    });
     expect(presetNames()).toEqual(['기사', '여행자']);
     expect(imagePromptPerCard()).toEqual([1, 1]);
 
     await openTab('기본 설정');
-    expect(screen.queryByRole('button', { name: '+ 프로필 추가' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '+ 추천 프로필 추가' })).toBeNull();
     await openTab('인트로');
     await openTab('유저 프로필');
 

@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
-import { Button, Card, ChipGroup, Notice, Text, TextArea } from '@/components/ui';
+import { Avatar, Button, Card, Notice, Text, TextArea } from '@/components/ui';
 import { countRawText } from '@/lib/rawText';
-import { Spacing } from '@/constants/theme';
+import { Radius, Spacing } from '@/constants/theme';
 import {
   dateIssue,
   formatSceneDate,
@@ -18,15 +18,26 @@ import {
   type SceneCharacterState,
   type TimeFormat,
 } from '@/shared/story-types';
+import { Eyebrow, FieldLabel, Hint } from '../SceneParts';
 import { LimitedField } from './fields';
+import { SceneDropdown, type SceneDropdownOption } from './SceneDropdown';
 
-const MODE_LABELS: Record<'none' | DateMode, string> = {
-  none: '미지정',
-  calendar: '일반 날짜',
-  world: '세계관 날짜',
-  elapsed: '경과일',
-};
-const FORMAT_LABELS: Record<TimeFormat, string> = { '24h': '24시간제', '12h': '12시간제' };
+// 목업 select 순서. 실제 모델은 날짜 미지정(null)을 허용하므로 「미지정」을 맨 앞에 둔다.
+const MODE_OPTIONS: SceneDropdownOption<'none' | DateMode>[] = [
+  { key: 'none', label: '미지정' },
+  { key: 'calendar', label: '일반 날짜' },
+  { key: 'world', label: '세계관 날짜' },
+  { key: 'elapsed', label: '경과일' },
+];
+const FORMAT_OPTIONS: SceneDropdownOption<TimeFormat>[] = [
+  { key: '24h', label: '24시간제' },
+  { key: '12h', label: '12시간제' },
+];
+const MERIDIEM_OPTIONS: SceneDropdownOption<'none' | 'am' | 'pm'>[] = [
+  { key: 'none', label: '선택 안 함' },
+  { key: 'am', label: '오전' },
+  { key: 'pm', label: '오후' },
+];
 type Pending = { kind: 'date'; mode: DateMode | null } | { kind: 'time'; format: TimeFormat } | null;
 
 /** 착장·속마음이 모두 비면 미지정이므로 항목을 빼고, 캐릭터 순서대로 유지한다(서버 조회 순서와 같음). */
@@ -78,8 +89,12 @@ export function SceneEditor({
   return (
     <View style={styles.wrap}>
       {/* CREATE-US-04-AC18: 공통 장면(날짜·시간·장소)과 캐릭터별 착장·속마음을 다른 영역으로 나눈다. */}
-      <Card tone="state" accessibilityLabel="공통 장면 입력" style={styles.wrap}>
-        <Text variant="subheading">🌿 공통 장면</Text>
+      {/* CREATE-US-12 목업 state(): SCENE / 배경 → 「이야기의 무대」 카드(장소·날짜·시간) */}
+      <Eyebrow>SCENE / 배경</Eyebrow>
+      <Card tone="state" accessibilityLabel="공통 장면 입력" style={styles.card}>
+        <Text variant="subheading" accessibilityRole="header" style={styles.cardTitle}>
+          🌿 이야기의 무대
+        </Text>
         <LimitedField
           label="📍 장소 · 선택"
           accessibilityLabel="장소"
@@ -88,15 +103,12 @@ export function SceneEditor({
           onChange={(place) => set({ place })}
         />
 
-        <Text variant="subheading">📅 날짜 방식</Text>
-        <ChipGroup
-          accessibilityLabel="날짜 방식"
-          options={Object.values(MODE_LABELS)}
-          value={[MODE_LABELS[scene.dateMode ?? 'none']]}
-          onChange={(next) => {
-            const key = (Object.keys(MODE_LABELS) as ('none' | DateMode)[]).find((k) => MODE_LABELS[k] === next[0]);
-            if (key) chooseMode(key === 'none' ? null : key);
-          }}
+        <FieldLabel>📅 날짜 방식</FieldLabel>
+        <SceneDropdown
+          label="날짜 방식"
+          options={MODE_OPTIONS}
+          value={scene.dateMode ?? 'none'}
+          onChange={(key) => chooseMode(key === 'none' ? null : key)}
         />
         {pending?.kind === 'date' ? (
           <View style={styles.wrap}>
@@ -115,17 +127,20 @@ export function SceneEditor({
             </View>
           </View>
         ) : null}
-        {scene.dateMode === 'world' ? (
-          <LimitedField
-            label="연호"
-            accessibilityLabel="연호"
-            value={scene.era}
-            limit={SCENE_LIMITS.era}
-            onChange={(era) => set({ era })}
-          />
-        ) : null}
         {scene.dateMode === 'calendar' || scene.dateMode === 'world' ? (
+          // 목업: 세계관 날짜는 연호·연·월·일, 일반 날짜는 연·월·일을 한 줄에 둔다. 연·월·일은 숫자 글자 입력이다.
           <View style={styles.row}>
+            {scene.dateMode === 'world' ? (
+              <View style={styles.cell}>
+                <LimitedField
+                  label="연호"
+                  accessibilityLabel="연호"
+                  value={scene.era}
+                  limit={SCENE_LIMITS.era}
+                  onChange={(era) => set({ era })}
+                />
+              </View>
+            ) : null}
             {(
               [
                 ['year', '연'],
@@ -175,16 +190,8 @@ export function SceneEditor({
           </Text>
         ) : null}
 
-        <Text variant="subheading">⏰ 시간</Text>
-        <ChipGroup
-          accessibilityLabel="시간제"
-          options={Object.values(FORMAT_LABELS)}
-          value={[FORMAT_LABELS[scene.timeFormat]]}
-          onChange={(next) => {
-            const format = (Object.keys(FORMAT_LABELS) as TimeFormat[]).find((k) => FORMAT_LABELS[k] === next[0]);
-            if (format) chooseFormat(format);
-          }}
-        />
+        <FieldLabel>⏰ 시간제</FieldLabel>
+        <SceneDropdown label="시간제" options={FORMAT_OPTIONS} value={scene.timeFormat} onChange={chooseFormat} />
         {pending?.kind === 'time' ? (
           <View style={styles.wrap}>
             <Notice tone="alert" message="시간제를 바꾸면 지금 입력한 시각이 지워져요." />
@@ -203,12 +210,15 @@ export function SceneEditor({
           </View>
         ) : null}
         {scene.timeFormat === '12h' ? (
-          <ChipGroup
-            accessibilityLabel="오전 오후"
-            options={['오전', '오후']}
-            value={scene.meridiem === 'am' ? ['오전'] : scene.meridiem === 'pm' ? ['오후'] : []}
-            onChange={(next) => set({ meridiem: next[0] === '오전' ? 'am' : next[0] === '오후' ? 'pm' : null })}
-          />
+          <>
+            <FieldLabel>오전/오후</FieldLabel>
+            <SceneDropdown
+              label="오전/오후"
+              options={MERIDIEM_OPTIONS}
+              value={scene.meridiem ?? 'none'}
+              onChange={(key) => set({ meridiem: key === 'none' ? null : key })}
+            />
+          </>
         ) : null}
         <View style={styles.row}>
           <View style={styles.cell}>
@@ -230,21 +240,30 @@ export function SceneEditor({
             />
           </View>
         </View>
-        <Text variant="caption" color={time ? 'danger' : 'textSecondary'} accessibilityLiveRegion="polite">
-          {time ?? '시간은 비워 둘 수 있어요. 시·분을 숫자로 입력해요.'}
-        </Text>
+        {time ? (
+          <Text variant="caption" color="danger" accessibilityLiveRegion="polite">
+            {time}
+          </Text>
+        ) : null}
       </Card>
 
-      <Card tone="state" accessibilityLabel="캐릭터별 상태 입력" style={styles.wrap}>
-        <Text variant="subheading">👥 캐릭터별 상태</Text>
+      {/* CREATE-US-12 목업: CHARACTERS / 캐릭터별 상태 → 캐릭터마다 한 장의 카드(아바타 + 이름 머리글) */}
+      <Eyebrow>CHARACTERS / 캐릭터별 상태</Eyebrow>
+      <View accessibilityLabel="캐릭터별 상태 입력" style={styles.wrap}>
         {characters.length === 0 ? <Text variant="caption">등록된 등장 캐릭터가 없어요.</Text> : null}
         {characters.map((person, index) => {
           const name = person.name || `캐릭터 ${index + 1}`;
           const state = scene.characters.find((c) => c.characterId === person.id);
           return (
-            <Card key={person.id} accessibilityLabel={`${name} 상태 입력`} style={styles.wrap}>
-              <Text>👤 {name}</Text>
-              <Text variant="caption">👔 착장 · 선택</Text>
+            <Card key={person.id} tone="state" accessibilityLabel={`${name} 상태 입력`} style={styles.card}>
+              <View style={styles.person}>
+                <Avatar name={name} />
+                <Text variant="subheading" accessibilityRole="header" style={styles.personName}>
+                  {name}
+                </Text>
+              </View>
+              <Text variant="caption">이 인트로에서 시작할 모습과 마음이에요.</Text>
+              <FieldLabel>{`👔 착장 · 선택 · 최대 ${SCENE_LIMITS.clothing}자`}</FieldLabel>
               {/* AC11·12: 초과해도 입력을 막거나 자르지 않고 글자 수와 초과만 표시한다. */}
               <TextArea
                 accessibilityLabel={`${name} 착장`}
@@ -254,7 +273,7 @@ export function SceneEditor({
                 }
               />
               <LengthNote value={state?.clothing ?? ''} limit={SCENE_LIMITS.clothing} />
-              <Text variant="caption">💭 속마음 · 선택</Text>
+              <FieldLabel>{`💭 속마음 · 선택 · 최대 ${SCENE_LIMITS.innerThought}자`}</FieldLabel>
               <TextArea
                 accessibilityLabel={`${name} 속마음`}
                 value={state?.innerThought ?? ''}
@@ -266,8 +285,8 @@ export function SceneEditor({
             </Card>
           );
         })}
-        <Text variant="caption">유저 캐릭터의 착장·속마음은 이용자가 정하므로 여기서 입력하지 않아요.</Text>
-      </Card>
+        <Hint>유저 캐릭터의 착장·속마음은 이용자가 정하므로 여기서 입력하지 않아요.</Hint>
+      </View>
     </View>
   );
 }
@@ -284,6 +303,12 @@ function LengthNote({ value, limit }: { value: string; limit: number }) {
 }
 const styles = StyleSheet.create({
   wrap: { gap: Spacing.two },
+  // 목업 .state-card: radius 14, padding 16. 카드 사이 간격은 묶음(wrap)의 gap이 맡는다
+  card: { gap: Spacing.two, marginVertical: 0, borderRadius: Radius.state, padding: Spacing.three },
+  // .state-card h3: 16px, 아래 12px
+  cardTitle: { fontSize: 16 },
+  person: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
+  personName: { flex: 1, minWidth: 0, fontSize: 16 },
   row: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.two },
   cell: { flexGrow: 1, flexBasis: 80 },
 });

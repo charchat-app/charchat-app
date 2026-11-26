@@ -355,7 +355,7 @@ describe('CREATE-US-05/07 저장: 기본 정보와 같은 저장 의도로 한 �
     await render(screenEl);
     await openProfile();
     await fireEvent.changeText(screen.getByLabelText('프로필 2 상세'), '왕국 기사');
-    await fireEvent.press(screen.getByRole('button', { name: '+ 프로필 추가' }));
+    await fireEvent.press(screen.getByRole('button', { name: '+ 추천 프로필 추가' }));
     await fireEvent.changeText(screen.getByLabelText('프로필 3 이름'), '새 손님');
 
     await pressSave();
@@ -502,12 +502,12 @@ describe('CREATE-US-05/07 저장: 기본 정보와 같은 저장 의도로 한 �
     );
     await render(screenEl);
     await openProfile();
-    await fireEvent.press(screen.getByRole('button', { name: '+ 프로필 추가' }));
+    await fireEvent.press(screen.getByRole('button', { name: '+ 추천 프로필 추가' }));
     await fireEvent.changeText(screen.getByLabelText('프로필 3 이름'), '새 손님');
 
     await pressSave();
     expect(screen.getByText(/저장 성공 여부를 확인하지 못했어요/)).toBeTruthy();
-    expect(screen.getByRole('button', { name: '+ 프로필 추가' }).props.accessibilityState).toMatchObject({
+    expect(screen.getByRole('button', { name: '+ 추천 프로필 추가' }).props.accessibilityState).toMatchObject({
       disabled: true,
     });
 
@@ -718,7 +718,7 @@ describe('동시 쓰기', () => {
       void fireEvent.press(button);
       void fireEvent.press(button);
     });
-    expect(screen.getByRole('button', { name: '+ 프로필 추가' }).props.accessibilityState).toMatchObject({
+    expect(screen.getByRole('button', { name: '+ 추천 프로필 추가' }).props.accessibilityState).toMatchObject({
       disabled: true,
     });
     await act(async () => finish(undefined));

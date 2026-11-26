@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react-native';
+import { fireEvent, render, screen, within } from '@testing-library/react-native';
 import { useState } from 'react';
 import { Text } from '@/components/ui';
 import { defaultExpression } from '@/shared/story-types';
@@ -13,6 +13,34 @@ function Harness() {
     </>
   );
 }
+it('CREATE-US-12: 목업 v15처럼 필수 항목은 「표현 설정」 카드, 문체는 선택 표시가 있는 「문체 스타일」 구역에 둔다', async () => {
+  await render(<Harness />);
+  const card = screen.getByLabelText('표현 설정');
+  expect(within(card).getByRole('header', { name: '표현 설정' })).toBeTruthy();
+  expect(within(card).getByText('대화의 기본 톤')).toBeTruthy();
+  for (const name of ['1인칭', '과거형', '대사 중심', '짧게'])
+    expect(within(card).getByRole('radio', { name })).toBeTruthy();
+  for (const label of ['시점', '시제', '대화 구성', '응답 길이']) expect(within(card).getByText(label)).toBeTruthy();
+  // 응답 길이는 목표 분량 보조 글자를 칸마다 보여 주고, 이름은 그대로 「짧게·보통·길게」다.
+  expect(within(card).getByText('목표 분량')).toBeTruthy();
+  for (const sub of ['300–500자', '500–1000자', '1000–2000자']) expect(within(card).getByText(sub)).toBeTruthy();
+  expect(screen.getByRole('radio', { name: '보통' })).toBeTruthy();
+
+  const style = screen.getByLabelText('문체 스타일');
+  expect(within(style).getByText('선택')).toBeTruthy();
+  // 미선택(문체 없음으로 되돌리기)은 그대로 둔다.
+  expect(within(style).getByRole('radio', { name: '미선택' })).toBeTruthy();
+  await fireEvent.press(screen.getByRole('radio', { name: '기본 문체' }));
+  expect(within(style).getByText('0 / 2개')).toBeTruthy();
+  await fireEvent.press(screen.getByRole('checkbox', { name: '설레는' }));
+  expect(within(style).getByText('1 / 2개')).toBeTruthy();
+  expect(screen.getByRole('checkbox', { name: '설레는' })).toBeChecked();
+  expect(within(style).getByText('✓ 설레는')).toBeTruthy();
+  expect(within(style).getByText('+ 포근한')).toBeTruthy();
+  // 다시 누르면 해제된다.
+  await fireEvent.press(screen.getByRole('checkbox', { name: '설레는' }));
+  expect(screen.getByRole('checkbox', { name: '설레는' })).not.toBeChecked();
+});
 it('필수 단일 선택은 다시 눌러도 해제되지 않는다', async () => {
   await render(<Harness />);
   await fireEvent.press(screen.getByRole('radio', { name: '3인칭' }));

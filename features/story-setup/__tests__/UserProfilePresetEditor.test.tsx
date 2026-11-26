@@ -1,5 +1,5 @@
 // CREATE-US-05 프리셋 편집기 (제어 컴포넌트)
-import { act, fireEvent, render, screen } from '@testing-library/react-native';
+import { act, fireEvent, render, screen, within } from '@testing-library/react-native';
 import { useState } from 'react';
 import {
   Animated,
@@ -144,7 +144,7 @@ describe('CREATE-US-05 프리셋 편집기', () => {
     await render(<Harness initial={[]} />);
     expect(screen.getByText('아직 추천 프로필이 없어요.')).toBeTruthy();
     expect(screen.getByText('0/5개')).toBeTruthy();
-    await fireEvent.press(screen.getByLabelText('+ 프로필 추가'));
+    await fireEvent.press(screen.getByLabelText('+ 추천 프로필 추가'));
     expect(screen.getByLabelText('프로필 1 이름')).toBeTruthy();
     expect(screen.getByText('1/5개')).toBeTruthy();
   });
@@ -152,7 +152,7 @@ describe('CREATE-US-05 프리셋 편집기', () => {
   it('AC02: 5개가 되면 추가 버튼이 막힌다', async () => {
     const five = ['a', 'b', 'c', 'd', 'e'].map((k) => p(k, k));
     await render(<Harness initial={five} />);
-    expect(screen.getByLabelText('프로필은 최대 5개예요').props.accessibilityState.disabled).toBe(true);
+    expect(screen.getByLabelText('추천 프로필은 최대 5개예요').props.accessibilityState.disabled).toBe(true);
   });
 
   it('AC01: 이름·상세 입력은 원문 그대로 반영되고 {{user}}도 치환하지 않는다', async () => {
@@ -241,12 +241,22 @@ describe('CREATE-US-05 프리셋 편집기', () => {
     expect(screen.getByDisplayValue('나')).toBeTruthy();
   });
 
-  it('AC08: 위·아래 버튼으로 순서를 바꾸고 가장자리 버튼은 막힌다', async () => {
+  it('AC08: 위·아래 버튼 없이 손잡이 접근성 동작으로 순서를 바꾸고 가장자리는 그대로다', async () => {
     const seen: PresetValues[][] = [];
     await render(<Harness initial={[p('a', '가'), p('b', '나')]} spy={(v) => seen.push(v)} />);
-    expect(screen.getByLabelText('프로필 1 위로 이동').props.accessibilityState.disabled).toBe(true);
-    expect(screen.getByLabelText('프로필 2 아래로 이동').props.accessibilityState.disabled).toBe(true);
-    await fireEvent.press(screen.getByLabelText('프로필 1 아래로 이동'));
+    expect(screen.queryAllByRole('button', { name: /(위로|아래로) 이동$/ })).toHaveLength(0);
+    expect(screen.queryAllByText(/[↑↓]/)).toHaveLength(0);
+    // 가장자리: 첫 카드는 위로, 마지막 카드는 아래로 옮기지 않는다
+    await fireEvent(screen.getByTestId('preset-drag-handle-a'), 'accessibilityAction', {
+      nativeEvent: { actionName: 'decrement' },
+    });
+    await fireEvent(screen.getByTestId('preset-drag-handle-b'), 'accessibilityAction', {
+      nativeEvent: { actionName: 'increment' },
+    });
+    expect(seen[seen.length - 1].map((x) => x.key)).toEqual(['a', 'b']);
+    await fireEvent(screen.getByTestId('preset-drag-handle-a'), 'accessibilityAction', {
+      nativeEvent: { actionName: 'increment' },
+    });
     expect(seen[seen.length - 1].map((x) => x.key)).toEqual(['b', 'a']);
     expect(screen.getByLabelText('프로필 1 이름').props.value).toBe('나');
   });
@@ -273,8 +283,42 @@ describe('CREATE-US-05 프리셋 편집기', () => {
       await fireEvent.press(screen.getByLabelText('프로필 1 이미지 선택'));
     });
     expect(seen[seen.length - 1][0]).toMatchObject({ imageId: 42, photoUrl: 'https://img/42.png' });
-    await fireEvent.press(screen.getByLabelText('프로필 1 이미지 해제'));
-    expect(seen[seen.length - 1][0]).toMatchObject({ imageId: null, photoUrl: null });
+  });
+
+  it('CREATE-US-12: 사진 칸이 추가·교체를 맡고 별도 해제 버튼은 없다', async () => {
+    const seen: PresetValues[][] = [];
+    const onSelectImage = jest.fn().mockResolvedValue({ imageId: 7, photoUrl: 'https://img/7.png' });
+    await render(
+      <Harness
+        initial={[p('a', '가', '', { imageId: 3, photoUrl: 'https://img/3.png' })]}
+        onSelectImage={onSelectImage}
+        spy={(v) => seen.push(v)}
+      />,
+    );
+    expect(screen.queryByLabelText('프로필 1 이미지 해제')).toBeNull();
+    expect(screen.queryByText('사진 해제')).toBeNull();
+    // 사진이 있는 칸은 미리보기를 그대로 보여 주고, 누르면 새 사진으로 바꾼다
+    expect(screen.getByTestId('preset-photo-a')).toBeTruthy();
+    expect(screen.getByLabelText('프로필 1 이미지 선택').props.accessibilityHint).toBe('누르면 새 사진으로 바꿔요');
+    await act(async () => {
+      await fireEvent.press(screen.getByLabelText('프로필 1 이미지 선택'));
+    });
+    expect(onSelectImage).toHaveBeenCalledWith('a');
+    expect(seen[seen.length - 1][0]).toMatchObject({ imageId: 7, photoUrl: 'https://img/7.png' });
+  });
+
+  it('CREATE-US-12: 프로필 삭제는 휴지통 아이콘 버튼이고 저장 안내 문구는 없다', async () => {
+    const seen: PresetValues[][] = [];
+    await render(<Harness initial={[p('a', '가'), p('b', '나')]} spy={(v) => seen.push(v)} />);
+    expect(screen.queryByText('프로필 없이 저장해도 괜찮아요.')).toBeNull();
+    expect(screen.queryByText('✕')).toBeNull();
+    // 아이콘은 장식용이라 접근성 트리에서 숨긴다. 각 삭제 버튼 안에서 숨김 요소까지 포함해 찾는다.
+    for (const n of [1, 2]) {
+      const del = screen.getByRole('button', { name: `프로필 ${n} 삭제` });
+      expect(within(del).getByTestId('icon-trash', { includeHiddenElements: true })).toBeTruthy();
+    }
+    await fireEvent.press(screen.getByLabelText('프로필 1 삭제'));
+    expect(seen[seen.length - 1].map((x) => x.key)).toEqual(['b']);
   });
 
   it('유저 이름 토글은 그려진 시점이 아니라 최신 값 기준으로 계산한다', async () => {
@@ -310,31 +354,6 @@ describe('CREATE-US-05 프리셋 편집기', () => {
       resolvers[0]({ imageId: 1, photoUrl: 'https://img/1.png' });
     });
     expect(seen[seen.length - 1][0]).toMatchObject({ imageId: 2, photoUrl: 'https://img/2.png' });
-  });
-
-  it('이미지 선택 중에 해제하면 늦게 끝난 선택이 해제를 되돌리지 않는다', async () => {
-    const seen: PresetValues[][] = [];
-    let resolvePick: (v: PresetImageChoice | undefined) => void = () => undefined;
-    const onSelectImage = jest.fn(
-      () =>
-        new Promise<PresetImageChoice | undefined>((resolve) => {
-          resolvePick = resolve;
-        }),
-    );
-    await render(
-      <Harness
-        initial={[p('a', '가', '', { imageId: 3, photoUrl: 'https://img/3.png' })]}
-        onSelectImage={onSelectImage}
-        spy={(v) => seen.push(v)}
-      />,
-    );
-    await pressPending('프로필 1 이미지 선택');
-    await pressPending('프로필 1 이미지 해제');
-    expect(seen[seen.length - 1][0]).toMatchObject({ imageId: null, photoUrl: null });
-    await act(async () => {
-      resolvePick({ imageId: 9, photoUrl: 'https://img/9.png' });
-    });
-    expect(seen[seen.length - 1][0]).toMatchObject({ imageId: null, photoUrl: null });
   });
 
   it('지난 선택의 실패는 더 나중 선택의 결과를 가리지 않는다', async () => {
@@ -393,10 +412,9 @@ describe('CREATE-US-05 프리셋 편집기', () => {
     );
     expect(screen.getByLabelText('프로필 1 이름').props.editable).toBe(false);
     for (const label of [
-      '+ 프로필 추가',
+      '+ 추천 프로필 추가',
       '프로필 1 삭제',
       '프로필 1 이미지 선택',
-      '프로필 1 이미지 해제',
       '프로필 1 플레이하는 유저 이름 사용하기',
     ]) {
       expect(screen.getByLabelText(label).props.accessibilityState.disabled).toBe(true);
@@ -595,6 +613,22 @@ describe('CREATE-US-05-AC08 프리셋 끌어서 순서 바꾸기', () => {
     expect(handle.props.onResponderGrant).toEqual(expect.any(Function));
     expect(handle.props.accessibilityLabel).toBe('프로필 1 순서 손잡이(길게 눌러 끌기)');
     expect(screen.getByTestId('preset-item-a').props.onResponderGrant).toBeUndefined();
+    // CREATE-US-12: 손잡이는 ≡ 글자가 아니라 점 6개(2열 × 3행) 모양이다
+    expect(screen.queryAllByText('≡')).toHaveLength(0);
+    const grip = screen.getByTestId('preset-drag-grip-a', { includeHiddenElements: true });
+    expect(grip.children).toHaveLength(3);
+    for (const row of grip.children) {
+      expect(typeof row === 'string' ? [] : row.children).toHaveLength(2);
+    }
+    // 제목·사진 칸·입력칸은 끌기 제스처를 받지 않는다(눌러도 끌기가 시작되지 않는다)
+    expect(screen.getByText('프로필 1').props.onResponderGrant).toBeUndefined();
+    expect(screen.getByLabelText('프로필 1 이름').props.onResponderGrant).toBeUndefined();
+  });
+
+  it('CREATE-US-12: 프로필이 하나뿐이면 순서를 바꿀 수 없어 손잡이를 그리지 않는다', async () => {
+    await render(<Harness initial={[p('a', '가')]} />);
+    expect(screen.queryByTestId('preset-drag-handle-a')).toBeNull();
+    expect(screen.getByLabelText('프로필 1 삭제')).toBeTruthy();
   });
 
   it('손잡이를 길게 누른 뒤 세로로 끌어 놓으면 그 자리로 옮기고 호스트에 드래그 시작·끝을 알린다', async () => {
@@ -619,6 +653,26 @@ describe('CREATE-US-05-AC08 프리셋 끌어서 순서 바꾸기', () => {
     await moveTo(config.c, dy);
     await release(config.c, dy);
     expect(order()).toEqual(['a', 'c', 'b']);
+  });
+
+  it('CREATE-US-12: 키 큰 카드는 화면 이동이 목록 안에 머물면서도 실제 끈 거리로 마지막 자리까지 옮겨진다', async () => {
+    const { config, order } = await setup();
+    const setValue = recordSetValue();
+    // b(300)를 아래로 끌 수 있는 화면 범위는 c 높이 + 간격까지다.
+    const maxShown = HEIGHTS.c + GAP;
+    const dy = centerC - centerB + 60; // 실제로는 c 중심을 지나 끈다
+    // 제한된 값(maxShown)으로 자리를 찾으면 b 자신이 c보다 가까워 옮길 수 없었다.
+    expect(Math.abs(centerB + maxShown - centerB)).toBeLessThan(Math.abs(centerB + maxShown - centerC));
+    await longPress(config.b);
+    await moveTo(config.b, dy);
+    const shown = setValue.mock.calls.map(([value]) => value as number);
+    expect(shown).toContain(maxShown);
+    expect(shown).not.toContain(dy);
+    setValue.mockClear();
+    await release(config.b, dy);
+    expect(order()).toEqual(['a', 'c', 'b']);
+    // 놓은 카드는 화면에 보이던 제한된 위치에서 새 자리로 미끄러진다(c 높이 + 간격만큼 이동한 자리).
+    expect(setValue.mock.calls).toContainEqual([maxShown - (HEIGHTS.c + GAP)]);
   });
 
   it('끄는 중에 제스처가 취소되면 순서를 바꾸지 않고 드래그 끝을 알린다', async () => {
@@ -674,15 +728,22 @@ describe('CREATE-US-05-AC08 프리셋 끌어서 순서 바꾸기', () => {
     await release(config.a, 0);
   });
 
-  it('편집 불가 상태에서는 손잡이 제스처를 받지 않고 순서 버튼·접근성 동작도 막힌다', async () => {
+  it('편집 불가 상태에서는 손잡이 제스처를 받지 않고 접근성 동작도 막힌다', async () => {
     const { config, order, onDragActiveChange } = await setup({ editable: false });
     const start = required(config.a.onStartShouldSetPanResponder, 'onStartShouldSetPanResponder');
     expect(start(noEvent, gesture(0))).toBe(false);
-    expect(screen.getByLabelText('프로필 1 아래로 이동').props.accessibilityState.disabled).toBe(true);
-    expect(screen.getByLabelText('프로필 2 위로 이동').props.accessibilityState.disabled).toBe(true);
-    await fireEvent(screen.getByTestId('preset-drag-handle-a'), 'accessibilityAction', {
-      nativeEvent: { actionName: 'increment' },
-    });
+    const handle = screen.getByTestId('preset-drag-handle-a', { includeHiddenElements: true });
+    expect(handle.props.accessibilityState.disabled).toBe(true);
+    // CREATE-US-12: 순서를 바꿀 수 없는 동안 손잡이는 자리만 두고 감추며 화면 읽기에서도 숨긴다
+    expect(handle).toHaveStyle({ opacity: 0 });
+    expect(handle.props.accessibilityElementsHidden).toBe(true);
+    await fireEvent(
+      screen.getByTestId('preset-drag-handle-a', { includeHiddenElements: true }),
+      'accessibilityAction',
+      {
+        nativeEvent: { actionName: 'increment' },
+      },
+    );
     expect(order()).toEqual(['a', 'b', 'c']);
     expect(onDragActiveChange).not.toHaveBeenCalled();
   });
@@ -700,8 +761,10 @@ describe('CREATE-US-05-AC08 프리셋 끌어서 순서 바꾸기', () => {
       nativeEvent: { actionName: 'decrement' },
     });
     expect(order()).toEqual(['a', 'b', 'c']);
-    // 위·아래 버튼도 그대로 남아 있다
-    await fireEvent.press(screen.getByLabelText('프로필 3 위로 이동'));
+    // 마지막 카드도 접근성 동작으로 위로 옮길 수 있다
+    await fireEvent(screen.getByTestId('preset-drag-handle-c'), 'accessibilityAction', {
+      nativeEvent: { actionName: 'decrement' },
+    });
     expect(order()).toEqual(['a', 'c', 'b']);
   });
 });

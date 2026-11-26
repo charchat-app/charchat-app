@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { DefaultTheme, Stack, ThemeProvider, type Theme } from 'expo-router';
+import { DarkTheme, Stack, ThemeProvider, type Theme } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
+import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
 
 import { Colors } from '@/constants/theme';
@@ -9,19 +10,20 @@ import { AuthLoadingScreen, useAuthBootstrap, useAuthGate, useSessionQueryClient
 SplashScreen.preventAutoHideAsync();
 
 /**
- * 네비게이션 테마는 라이트로 고정한다. 디자인 시스템에 다크 모드가 아직 없고(constants/theme.ts),
- * 웹 서버 렌더링은 기기의 다크 모드를 알 수 없어 기기 설정을 따르면 hydration 불일치가 난다.
- * 다크 모드를 설계하면 이 고정을 풀고 서버·클라이언트가 같은 값을 쓰도록 바꾼다.
+ * CREATE-US-12: 네비게이션 테마는 앱 공통 다크 전용 팔레트로 고정한다(constants/theme.ts).
+ * 기기 설정을 따르지 않으므로 웹 서버 렌더링과 클라이언트가 같은 값을 쓴다(hydration 불일치 없음).
  */
 const NAV_THEME: Theme = {
-  ...DefaultTheme,
+  ...DarkTheme,
+  dark: true,
   colors: {
-    ...DefaultTheme.colors,
-    primary: Colors.light.accent,
-    background: Colors.light.background,
-    card: Colors.light.background,
-    text: Colors.light.text,
-    border: Colors.light.border,
+    ...DarkTheme.colors,
+    primary: Colors.dark.accent,
+    background: Colors.dark.background,
+    card: Colors.dark.background,
+    text: Colors.dark.text,
+    border: Colors.dark.border,
+    notification: Colors.dark.danger,
   },
 };
 
@@ -44,11 +46,12 @@ export default function RootLayout() {
   return (
     <QueryClientProvider client={queryClient}>
       <ThemeProvider value={NAV_THEME}>
+        <StatusBar style="light" />
         {gate === 'loading' ? (
           // 보관된 세션 확인 중. 기기에서는 스플래시가 덮고 있고, 확인이 끝나면 요청한 주소의 화면을 연다.
           <AuthLoadingScreen />
         ) : (
-          <Stack screenOptions={{ headerShown: false }}>
+          <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: Colors.dark.background } }}>
             {/* 새 최상위 라우트를 추가하면 아래 보호 묶음 중 하나에 넣는다. 넣지 않으면 로그인 없이 열린다. */}
             <Stack.Protected guard={gate === 'active'}>
               <Stack.Screen name="(tabs)" />

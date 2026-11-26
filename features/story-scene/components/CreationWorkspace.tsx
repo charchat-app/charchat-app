@@ -3,7 +3,7 @@ import { StyleSheet, View } from 'react-native';
 import { ScreenHeader, Surface, TopTabs } from '@/components/ui';
 import { ExpressionScreen } from './ExpressionScreen';
 import { FewshotScreen } from './FewshotScreen';
-import { createCommonSaveRepository } from '@/features/story-publish';
+import { createCommonSaveRepository, type EditorSection, type SceneSection } from '@/features/story-publish';
 import { CommonCreationWorkspace } from './CommonCreationWorkspace';
 
 const apiUrl = process.env.EXPO_PUBLIC_API_URL;
@@ -20,7 +20,23 @@ export function CreationWorkspace({
   storyId = process.env.EXPO_PUBLIC_STORY_ID,
   guardDraftLeave = false,
   onBack,
-}: { storyId?: string; guardDraftLeave?: boolean; onBack?: () => void } = {}) {
+  initialSection,
+  onOpenEditor,
+  onDeleted,
+  isRouteFocused,
+}: {
+  storyId?: string;
+  guardDraftLeave?: boolean;
+  onBack?: () => void;
+  /** CREATE-US-12 처음 보일 구역 */
+  initialSection?: SceneSection;
+  /** CREATE-US-12 기본 설정·유저 프로필 탭 넘기기 */
+  onOpenEditor?: (section: EditorSection) => void;
+  /** CREATE-US-12 공개 범위 탭에서 삭제 성공 뒤 이동 */
+  onDeleted?: () => void;
+  /** 삭제 응답이 늦게 왔을 때 이동할지 판단할 라우트 포커스. 라우트가 내비게이션으로 판단해 넘긴다. */
+  isRouteFocused?: () => boolean;
+} = {}) {
   return commonRepository && storyId ? (
     <CommonCreationWorkspace
       key={storyId}
@@ -28,6 +44,10 @@ export function CreationWorkspace({
       storyId={storyId}
       guardDraftLeave={guardDraftLeave}
       onBack={onBack}
+      initialSection={initialSection}
+      onOpenEditor={onOpenEditor}
+      onDeleted={onDeleted}
+      isRouteFocused={isRouteFocused}
     />
   ) : (
     <FixtureWorkspace onBack={onBack} />

@@ -100,7 +100,7 @@ export function TagInput({ tags, input, onChange, error, editable = true }: TagI
                 accessibilityLabel={`${tag} 태그 삭제`}
                 disabled={!editable}
                 onPress={() => onChange((v) => removeTag(v, tag))}
-                style={[styles.chip, { borderColor: bad ? c.danger : c.chipBorder, backgroundColor: c.surface }]}
+                style={[styles.chip, { borderColor: bad ? c.danger : c.chipBorder, backgroundColor: c.chipSurface }]}
               >
                 <Text variant="body" color={bad ? 'danger' : 'text'} style={styles.chipText}>
                   #{tag} ✕

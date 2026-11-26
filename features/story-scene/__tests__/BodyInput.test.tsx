@@ -1,6 +1,6 @@
-import { useState } from 'react';
-import { fireEvent, render, screen, within } from '@testing-library/react-native';
-import { BodyInput, MessageBody, parseFormatted } from '../components/BodyInput';
+import { createRef, useState } from 'react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react-native';
+import { BodyInput, MessageBody, parseFormatted, type BodyInputHandle } from '../components/BodyInput';
 import { Colors } from '@/constants/theme';
 
 it('신규·기존 입력의 원문과 공백을 유지하며 치환 표기를 보라색으로 표시한다', async () => {
@@ -11,7 +11,7 @@ it('신규·기존 입력의 원문과 공백을 유지하며 치환 표기를 �
   expect(input.props.value).toBe(original);
   const mirror = screen.getByTestId('본문 원문 표시', { includeHiddenElements: true });
   expect(within(mirror).getByText('{{user}}', { includeHiddenElements: true })).toHaveStyle({
-    color: Colors.light.userToken,
+    color: Colors.dark.userToken,
   });
   expect(input.props.scrollEnabled).toBe(false);
   expect(onChange).not.toHaveBeenCalled();
@@ -52,6 +52,28 @@ it('선택 영역에 원문 도구를 삽입하고 다음 삽입은 새 커서 �
   await fireEvent.changeText(screen.getByLabelText('본문'), '한글 조합 중');
   expect(screen.getByLabelText('본문').props.selection).toBeUndefined();
   expect(screen.getByLabelText('본문').props.value).toBe('한글 조합 중');
+});
+
+it('말풍선 제자리 수정은 발화자 모양 안에 입력만 두고, 밖의 도구가 handle로 커서 위치에 삽입한다 (CREATE-US-12)', async () => {
+  const handle = createRef<BodyInputHandle>();
+  function Editor() {
+    const [value, setValue] = useState('앞끝');
+    return (
+      <BodyInput variant="bubble-edit" tone="narrator" handle={handle} value={value} label="본문" onChange={setValue} />
+    );
+  }
+  await render(<Editor />);
+  const shape = screen.getByTestId('bubble-edit-narrator');
+  expect(shape).toHaveStyle({ borderStyle: 'dashed' });
+  expect(within(shape).getByLabelText('본문')).toBeTruthy();
+  // 삽입 버튼은 말풍선 안에 그리지 않는다(하단 수정 도구가 맡는다).
+  expect(screen.queryByRole('button', { name: '{{user}} 삽입' })).toBeNull();
+  await fireEvent(screen.getByLabelText('본문'), 'selectionChange', {
+    nativeEvent: { selection: { start: 1, end: 1 } },
+  });
+  await act(() => handle.current?.insert('{{user}}'));
+  expect(screen.getByLabelText('본문').props.value).toBe('앞{{user}}끝');
+  expect(screen.getByLabelText('본문').props.selection).toEqual({ start: 9, end: 9 });
 });
 
 describe('parseFormatted', () => {
@@ -104,7 +126,7 @@ it('겹친 서식을 화면에서 굵은 기울임으로 보여주고 별표를 
 
 it('읽기용 굵게·기울임 안의 치환 표기도 원문으로 구분한다', async () => {
   await render(<MessageBody body={'**{{user}}**와 *서술*'} />);
-  expect(screen.getByText('{{user}}')).toHaveStyle({ color: Colors.light.userToken });
+  expect(screen.getByText('{{user}}')).toHaveStyle({ color: Colors.dark.userToken });
   expect(screen.queryByText('**{{user}}**')).toBeNull();
   expect(screen.getByText('서술')).toBeTruthy();
 });

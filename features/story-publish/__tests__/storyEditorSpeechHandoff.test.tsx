@@ -124,7 +124,7 @@ describe('CREATE-US-07: 말투·서술 탭은 2~4번 작업 화면으로 넘긴�
     await pressSpeechTab();
 
     expect(onOpenSpeech).not.toHaveBeenCalled();
-    expect(screen.getByText(DIRTY_MESSAGE)).toBeOnTheScreen();
+    expect(screen.getByText(`${DIRTY_MESSAGE} 아래 「임시 저장」을 누른 뒤 다시 시도해 주세요.`)).toBeOnTheScreen();
     expect(screen.getByDisplayValue('새 손님')).toBeOnTheScreen();
   });
 

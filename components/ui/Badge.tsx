@@ -9,16 +9,16 @@ export type BadgeProps = {
   tone?: 'neutral' | 'alert';
 };
 
-/** 목업 .badge: 작은 둥근 라벨 */
+/** 목업 .badge: 작은 둥근 라벨. 다크 테마는 파랑 채움 + 테두리(Palette 06). */
 export function Badge({ label, tone = 'neutral' }: BadgeProps) {
   const c = useTheme();
   const colors =
     tone === 'alert'
-      ? { backgroundColor: c.alertBackground, color: c.alertText }
-      : { backgroundColor: c.badgeBackground, color: c.badgeText };
+      ? { backgroundColor: c.alertBackground, borderColor: c.alertBorder, color: c.alertText }
+      : { backgroundColor: c.badgeBackground, borderColor: c.badgeBorder, color: c.badgeText };
 
   return (
-    <View style={[styles.badge, { backgroundColor: colors.backgroundColor }]}>
+    <View style={[styles.badge, { backgroundColor: colors.backgroundColor, borderColor: colors.borderColor }]}>
       <Text variant="caption" style={[styles.label, { color: colors.color }]}>
         {label}
       </Text>
@@ -30,8 +30,9 @@ const styles = StyleSheet.create({
   badge: {
     alignSelf: 'flex-start',
     borderRadius: 5,
+    borderWidth: 1,
     paddingVertical: 2,
-    paddingHorizontal: 7,
+    paddingHorizontal: 8,
   },
   label: { fontSize: 10, lineHeight: 14, fontWeight: '600' },
 });
