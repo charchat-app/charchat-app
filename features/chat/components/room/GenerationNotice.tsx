@@ -26,12 +26,15 @@ export function GenerationNotice({
   generation,
   retryAttempt,
   currentModel,
+  retryBlocked = false,
   onRetry,
 }: {
   generation: ChatGeneration;
   retryAttempt: RetryAttempt | null | undefined;
   /** 지금 세션에 선택된 모델. 재시도는 이 모델로 요청된다. */
   currentModel: string | null;
+  /** 모델을 바꾸는 중에는 재시도를 막는다. 바뀐 모델이 확정된 뒤 요청한다(CHAT-US-13). */
+  retryBlocked?: boolean;
   onRetry: () => void;
 }) {
   if (generation.status !== 'failed' && generation.status !== 'failed_partial' && generation.status !== 'save_failed') {
@@ -59,7 +62,7 @@ export function GenerationNotice({
           label={attempt?.status === 'posting' ? '다시 시도하는 중…' : '다시 시도'}
           accessibilityLabel="응답 생성 다시 시도"
           variant="secondary"
-          disabled={attempt?.status === 'posting'}
+          disabled={attempt?.status === 'posting' || retryBlocked}
           onPress={onRetry}
         />
       ) : null}

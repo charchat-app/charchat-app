@@ -290,6 +290,69 @@ it('CHAT-US-13-AC02: 응답 생성 중에도 바꿀 수 있고, 진행 중 답�
   expect(screen.getByText('루나 답변 중')).toBeOnTheScreen();
   expect(screen.queryByText('테라 답변 중')).not.toBeOnTheScreen();
   expect(server.puts()).toHaveLength(1);
+
+  // 그 답변이 끝나면 "지금 만드는 답변은…" 부분은 빼고 다음 답변 안내만 남긴다.
+  const done = generation({ status: 'completed', model: '루나' });
+  server.state.turns = { ...server.state.turns, active_generation: null };
+  await server.answerPoll(done);
+  expect(await screen.findByText('다음 답변부터 테라를 써요.')).toBeOnTheScreen();
+  expect(screen.queryByText(/지금 만드는 답변은/)).not.toBeOnTheScreen();
+});
+
+it('CHAT-US-13-AC02: 모델을 바꾸는 요청 중에는 전송·재시도를 막고, 끝나면 바뀐 모델로 보낸다', async () => {
+  const server = fakeServer();
+  server.state.turns = {
+    ...emptyTurns,
+    messages: [userMessage],
+    last_failed_generation: generation({ status: 'failed', retryable: true, error_code: 'PROVIDER_ERROR' }),
+  };
+  let releasePut: (() => void) | undefined;
+  server.onPut.mockImplementationOnce(({ body }) => {
+    const modelId = (body as { model_id: number }).model_id;
+    return new Promise<Response>((resolve) => {
+      releasePut = () => {
+        server.state.turns = { ...server.state.turns, model: NAME_OF[modelId], model_id: modelId };
+        resolve(json({ model_id: modelId, model: NAME_OF[modelId], active_generation: null }));
+      };
+    });
+  });
+  await show();
+  await ready();
+  // 지금 선택된 모델을 이름과 값으로 함께 알린다.
+  expect(changeButton()).toHaveAccessibilityValue({ text: '루나' });
+  await fireEvent.changeText(input(), '바꾼 모델로 보낼 메시지');
+  await openModels();
+  await fireEvent.press(option('테라'));
+
+  await waitFor(() => expect(sendButton()).toBeDisabled());
+  expect(screen.getByText('모델을 바꾸는 중입니다.')).toBeOnTheScreen();
+  expect(screen.getByRole('button', { name: '응답 생성 다시 시도' })).toBeDisabled();
+  await fireEvent.press(sendButton());
+  expect(server.onPost).not.toHaveBeenCalled();
+
+  await act(async () => releasePut?.());
+  expect(await screen.findByText('다음 답변부터 테라를 써요.')).toBeOnTheScreen();
+  expect(changeButton()).toHaveAccessibilityValue({ text: '테라' });
+  await waitFor(() => expect(sendButton()).toBeEnabled());
+  expect(screen.getByRole('button', { name: '응답 생성 다시 시도' })).toBeEnabled();
+  await fireEvent.press(sendButton());
+  await waitFor(() => expect(server.onPost).toHaveBeenCalledTimes(1));
+});
+
+it('CHAT-US-13-AC01: 바꾸는 사이 스토리가 삭제돼 409가 오면 대화방을 다시 읽어 읽기 전용으로 보인다', async () => {
+  const server = fakeServer();
+  server.onPut.mockImplementationOnce(() => {
+    server.state.sessionBody = { ...session, read_only: true };
+    return problem(409, 'CONVERSATION_READ_ONLY');
+  });
+  await show();
+  await ready();
+  await openModels();
+  await fireEvent.press(option('테라'));
+
+  expect(await screen.findByText('읽기 전용')).toBeOnTheScreen();
+  await waitFor(() => expect(screen.queryByRole('button', { name: '대화 모델 변경' })).not.toBeOnTheScreen());
+  expect(screen.getByText('모델: 루나')).toBeOnTheScreen();
 });
 
 it('CHAT-US-13-AC02: 모델을 바꾸지 못하면 오류를 알리고 기존 모델 표시를 그대로 둔다', async () => {

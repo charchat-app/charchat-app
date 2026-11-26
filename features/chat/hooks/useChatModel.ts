@@ -3,11 +3,14 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { changeSessionModel, listChatModels } from '@/features/chat/api';
 import { refreshTurns, turnsKey } from '@/features/chat/hooks/chatCache';
-import type { ChatTurns } from '@/shared/story-types';
+import { ApiError } from '@/lib/api-client';
+import type { ChatTurns, ConversationSession } from '@/shared/story-types';
 
 export const chatModelsKey = ['conversation', 'models'] as const;
 /** 내 대화 목록(모든 계정·페이지). 목록에 세션 모델 이름이 보인다. */
 const sessionListPrefix = ['conversation', 'sessions'] as const;
+/** 대화방 세션 상세(useConversationSession과 같은 키). */
+const sessionKey = (sessionId: string) => ['conversation', 'session', sessionId] as const;
 
 /** 목록을 펼칠 때만 읽는다. 자동 재시도는 하지 않고 이용자가 다시 불러온다. */
 export function useChatModels(enabled: boolean) {
@@ -32,9 +35,20 @@ export function useChangeSessionModel(sessionId: string) {
       client.setQueryData<ChatTurns>(turnsKey(sessionId), (old) =>
         old ? { ...old, model: change.model, model_id: change.model_id } : old,
       );
+      // 대화방을 다시 열 때 옛 모델 이름이 잠깐 보이지 않게 세션 상세도 맞춘다.
+      client.setQueryData<ConversationSession>(sessionKey(sessionId), (old) =>
+        old ? { ...old, model: change.model } : old,
+      );
       // 변경 전에 시작한 이력 조회가 옛 모델을 덮어써도 서버 값으로 다시 맞춘다.
       void refreshTurns(client, sessionId);
       void client.invalidateQueries({ queryKey: sessionListPrefix });
+    },
+    onError: (error) => {
+      // 404(접근 불가)·409(읽기 전용이 됨)는 다시 눌러도 안 되므로 대화방 상태를 새로 읽어 보여 준다.
+      if (error instanceof ApiError && (error.status === 404 || error.status === 409)) {
+        void client.invalidateQueries({ queryKey: sessionKey(sessionId) });
+        void refreshTurns(client, sessionId);
+      }
     },
   });
 }

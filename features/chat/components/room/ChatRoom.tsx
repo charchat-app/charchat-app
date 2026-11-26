@@ -32,9 +32,10 @@ const PENDING_NOTES: Record<SendAttempt['status'], string | null> = {
 };
 
 /** 모델을 바꾼 뒤 남기는 안내. 진행 중 생성은 기존 모델로 끝까지 만든다(CHAT-US-13-AC02). */
-function modelChangeNotice({ model, active_generation }: SessionModelChange) {
+function modelChangeNotice({ model, active_generation }: SessionModelChange, activeId: number | null) {
   const next = `다음 답변부터 ${withParticle(model, '을')} 써요.`;
-  return active_generation
+  // 그 답변이 끝나면 "지금 만드는 답변은…" 부분은 맞지 않으므로 다음 답변 안내만 남긴다.
+  return active_generation && active_generation.id === activeId
     ? `지금 만드는 답변은 ${withParticle(active_generation.model, '으로')} 끝까지 만들고, ${next}`
     : next;
 }
@@ -106,9 +107,11 @@ export function ChatRoom({ session, onBack }: { session: ConversationSession; on
           ? '이전 메시지의 접수 여부를 먼저 확인하세요.'
           : retrier.isBusy
             ? '재시도 요청을 처리하는 중입니다.'
-            : active
-              ? 'AI 응답이 끝나면 보낼 수 있습니다.'
-              : null;
+            : modelChange.isPending
+              ? '모델을 바꾸는 중입니다.'
+              : active
+                ? 'AI 응답이 끝나면 보낼 수 있습니다.'
+                : null;
 
   const send = (parts: Parameters<typeof sender.send>[0]) => {
     const secured = sender.send(parts);
@@ -116,7 +119,8 @@ export function ChatRoom({ session, onBack }: { session: ConversationSession; on
     // 보낸 내용만 비우고 다음 발화자는 유저 캐릭터로 되돌린다(CHAT-US-02-AC01·AC05).
     clearSent(secured, emptyDraft());
     // 모델 변경 안내는 바꾼 뒤 첫 전송까지만 보인다. 이후에는 진행 표시의 모델 이름이 대신한다.
-    modelChange.reset();
+    // 변경 요청이 진행 중일 때 reset하면 결과(성공·실패 안내)를 잃으므로 그때는 두지 않는다.
+    if (!modelChange.isPending) modelChange.reset();
     return true;
   };
 
@@ -161,6 +165,7 @@ export function ChatRoom({ session, onBack }: { session: ConversationSession; on
             accessibilityRole="button"
             accessibilityLabel="대화 모델 변경"
             accessibilityHint={`지금 모델은 ${model}입니다`}
+            accessibilityValue={{ text: model }}
             accessibilityState={{ expanded: pickingModel }}
             aria-expanded={pickingModel}
             onPress={() => setPickingModel((open) => !open)}
@@ -180,7 +185,12 @@ export function ChatRoom({ session, onBack }: { session: ConversationSession; on
         />
       ) : null}
       {modelChange.isError ? <Notice tone="alert" message="모델을 바꾸지 못했어요. 다시 시도해 주세요." /> : null}
-      {modelChange.data ? <Notice message={modelChangeNotice(modelChange.data)} /> : null}
+      {modelChange.data ? (
+        // 목록이 닫히며 초점이 사라져도 바뀐 결과를 화면 읽기 프로그램이 읽도록 알린다.
+        <View accessibilityLiveRegion="polite" aria-live="polite">
+          <Notice message={modelChangeNotice(modelChange.data, active?.id ?? null)} />
+        </View>
+      ) : null}
       {session.characters.length ? (
         <Section title="등장 캐릭터" first>
           {session.characters.map(({ id, name }) => (
@@ -241,6 +251,7 @@ export function ChatRoom({ session, onBack }: { session: ConversationSession; on
           generation={lastFailed}
           retryAttempt={retryAttempt}
           currentModel={model}
+          retryBlocked={modelChange.isPending}
           onRetry={() => retrier.retry(lastFailed)}
         />
       ) : null}
