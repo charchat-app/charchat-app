@@ -2,10 +2,10 @@
 // CHAT-US-13 대화 중 모델 변경: 다음 응답부터 적용, 진행 중 생성은 기존 모델 유지
 import { useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 
 import { Badge, Button, Notice, Section, Text } from '@/components/ui';
-import { Spacing } from '@/constants/theme';
+import { MinTouchSize, Radius, Spacing } from '@/constants/theme';
 import { parseAssistantText } from '@/features/chat/assistantParser';
 import { ConversationFrame } from '@/features/chat/components/ConversationFrame';
 import { ChatComposer } from '@/features/chat/components/room/ChatComposer';
@@ -21,6 +21,7 @@ import { useRetryGeneration } from '@/features/chat/hooks/useRetryGeneration';
 import { type SendAttempt, useSendMessage } from '@/features/chat/hooks/useSendMessage';
 import { withParticle } from '@/features/chat/koreanParticle';
 import { emptyDraft } from '@/features/chat/messageDraft';
+import { useTheme } from '@/hooks/use-theme';
 import type { ChatMessage, ConversationMessage, ConversationSession, SessionModelChange } from '@/shared/story-types';
 
 const PENDING_NOTES: Record<SendAttempt['status'], string | null> = {
@@ -46,6 +47,7 @@ function showPending(attempt: SendAttempt | null | undefined, messages: ChatMess
 
 export function ChatRoom({ session, onBack }: { session: ConversationSession; onBack?: () => void }) {
   const sessionId = String(session.id);
+  const colors = useTheme();
   const client = useQueryClient();
   const turns = useChatTurns(sessionId, true);
   const { draft, update, clearSent, deviceUnavailable } = useChatDraft(sessionId, !session.read_only);
@@ -151,18 +153,23 @@ export function ChatRoom({ session, onBack }: { session: ConversationSession; on
       </Text>
       {session.read_only ? <Badge label="읽기 전용" /> : null}
       {model ? (
-        <View style={styles.modelRow}>
+        session.read_only ? (
           <Text variant="caption">모델: {model}</Text>
-          {session.read_only ? null : (
-            <Button
-              label="모델 변경"
-              accessibilityLabel="대화 모델 변경"
-              accessibilityState={{ expanded: pickingModel }}
-              variant="secondary"
-              onPress={() => setPickingModel((open) => !open)}
-            />
-          )}
-        </View>
+        ) : (
+          // 현재 모델 표시를 눌러 바로 바꾼다(PR #23 리뷰). ▾/▴로 목록이 펼쳐졌는지 보인다.
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="대화 모델 변경"
+            accessibilityHint={`지금 모델은 ${model}입니다`}
+            accessibilityState={{ expanded: pickingModel }}
+            aria-expanded={pickingModel}
+            onPress={() => setPickingModel((open) => !open)}
+            style={[styles.modelToggle, { borderColor: colors.chipBorder }]}
+          >
+            <Text variant="caption">모델: {model}</Text>
+            <Text variant="caption">{pickingModel ? '▴' : '▾'}</Text>
+          </Pressable>
+        )
       ) : null}
       {pickingModel && !session.read_only ? (
         <ModelPicker
@@ -257,5 +264,14 @@ export function ChatRoom({ session, onBack }: { session: ConversationSession; on
 
 const styles = StyleSheet.create({
   progress: { alignItems: 'center', paddingVertical: Spacing.one },
-  modelRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: Spacing.two },
+  modelToggle: {
+    alignSelf: 'flex-start',
+    minHeight: MinTouchSize,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.one,
+    paddingHorizontal: Spacing.three,
+    borderWidth: 1,
+    borderRadius: Radius.lg,
+  },
 });

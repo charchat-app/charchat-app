@@ -184,9 +184,14 @@ it('CHAT-US-13-AC01: 모델 목록을 펼치면 지원 모델을 보이고 현�
   await show();
   await ready();
   expect(await screen.findByText('모델: 테라')).toBeOnTheScreen();
+  // 현재 모델 표시 자체가 변경 버튼이다(별도 버튼 없음). ▾는 닫힘, ▴는 펼침.
+  expect(changeButton()).toHaveTextContent('모델: 테라▾');
+  expect(changeButton()).not.toBeExpanded();
   // 목록은 펼칠 때만 읽는다.
   expect(server.onModels).not.toHaveBeenCalled();
   await openModels();
+  expect(changeButton()).toHaveTextContent('모델: 테라▴');
+  expect(changeButton()).toBeExpanded();
   const list = screen.getByLabelText('대화 모델 목록');
   expect(
     within(list)
