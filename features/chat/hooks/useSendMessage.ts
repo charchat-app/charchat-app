@@ -1,5 +1,6 @@
 // CHAT-US-02 메시지 전송: 전송 시도마다 요청 ID 하나, 결과를 모르면 같은 ID로만 다시 확인한다
 // CHAT-US-03 결과를 모르는 요청 ID는 기기에 남겨, 다시 열면 서버에 조회만 해서 이어 간다(AC09)
+// BASE-03 전송을 시작한 계정·로그인 세션을 기록해, 응답이 왔을 때 바뀌었으면 기기 보관과 화면 상태를 건드리지 않는다
 import { skipToken, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 
@@ -23,9 +24,24 @@ import {
   markSendAttemptRejected,
   saveSendAttempt,
 } from '@/features/chat/sendAttemptStorage';
+import { getAuthSnapshot } from '@/lib/authSession';
 import type { ChatGeneration, ChatMessagePartInput } from '@/shared/story-types';
 
 type AttemptBase = { requestId: string; parts: ChatMessagePartInput[] };
+
+/** 전송을 시작할 때의 대화 계정(기기 보관 키의 계정 번호)과 로그인 세션 번호 */
+type SendOwner = { ownerId: string | null; sessionKey: number };
+type SendVariables = AttemptBase & { owner: SendOwner };
+
+function currentOwner(): SendOwner {
+  return { ownerId: getConversationOwnerId(), sessionKey: getAuthSnapshot().sessionKey };
+}
+
+/** 지금도 전송을 시작한 계정·로그인 세션 그대로인지. 로그아웃·계정 전환 뒤면 false. */
+function isSameOwner(owner: SendOwner) {
+  const now = currentOwner();
+  return now.ownerId === owner.ownerId && now.sessionKey === owner.sessionKey;
+}
 
 export type SendAttempt =
   | (AttemptBase & { status: 'posting' | 'uncertain' })
@@ -48,13 +64,15 @@ const settle = (requestId: string, accepted: boolean) => {
   settlements.delete(requestId);
 };
 
-/** 거절된 원문을 방이 닫혀 있어도 기기의 작성 중 입력으로 바로 되돌린다. */
-async function restoreDraftOnDevice(sessionId: string, draft: MessageDraft) {
-  const ownerId = getConversationOwnerId();
-  const key = chatDraftKey(ownerId, sessionId);
+/**
+ * 거절된 원문을 방이 닫혀 있어도 기기의 작성 중 입력으로 바로 되돌린다.
+ * 키는 응답 시점이 아니라 전송을 시작한 계정으로 만들고, 쓰기 직전에도 같은 계정·세션인지 확인한다.
+ */
+async function restoreDraftOnDevice(sessionId: string, draft: MessageDraft, owner: SendOwner) {
+  const key = chatDraftKey(owner.ownerId, sessionId);
   const storage = key ? getDraftStorage() : null;
-  if (!key || !storage) return false;
-  return writeDraftNow(storage, key, encodeDraft(draft), () => getConversationOwnerId() === ownerId);
+  if (!key || !storage || !isSameOwner(owner)) return false;
+  return writeDraftNow(storage, key, encodeDraft(draft), () => isSameOwner(owner));
 }
 
 export function useSendMessage(sessionId: string) {
@@ -67,17 +85,22 @@ export function useSendMessage(sessionId: string) {
   const checked = useRef<string | null>(null);
 
   const mutation = useMutation({
-    mutationFn: ({ requestId, parts }: AttemptBase) => sendChatMessage(sessionId, { request_id: requestId, parts }),
+    mutationFn: ({ requestId, parts }: SendVariables) => sendChatMessage(sessionId, { request_id: requestId, parts }),
     retry: false,
-    onSuccess: (generation, sent) => {
+    onSuccess: (generation, { owner, ...sent }) => {
       settle(sent.requestId, true);
+      // 보내는 사이 로그아웃·계정 전환이 있었으면 이전 계정의 화면 상태·전송 기록을 건드리지 않는다.
+      // 남은 전송 기록은 그 계정으로 다시 들어왔을 때 같은 요청 ID로 조회해 이어 간다.
+      if (!isSameOwner(owner)) return;
       setAttempt({ ...sent, status: 'accepted', generation });
       acceptGeneration(client, sessionId, generation);
-      void clearSendAttempt(sessionId, sent.requestId);
+      void clearSendAttempt(sessionId, sent.requestId, owner.ownerId);
     },
-    onError: (error, sent) => {
+    onError: (error, { owner, ...sent }) => {
+      if (isDefiniteRejection(error)) settle(sent.requestId, false);
+      // 계정·세션이 바뀌었으면 초안 복구(메모리·기기)와 전송 기록 정리를 하지 않는다. 새 계정 키에 쓰지 않는다.
+      if (!isSameOwner(owner)) return;
       if (isDefiniteRejection(error)) {
-        settle(sent.requestId, false);
         // 거절된 내용은 잃지 않는다. 입력창이 비어 있을 때만 되돌려 새로 쓴 내용을 덮어쓰지 않는다(AC05).
         const current = client.getQueryData<MessageDraft>(draftKey(sessionId));
         const restored = !current || isDraftEmpty(current);
@@ -87,10 +110,10 @@ export function useSendMessage(sessionId: string) {
         // 방이 닫혀 있어도 원문을 기기에서 되찾을 수 있게 한 뒤에만 전송 기록을 정리한다(CHAT-US-03-AC05).
         // 입력창으로 되돌렸으면 기기의 작성 중 입력에, 새로 쓴 내용이 있으면 거절 표시를 단 전송 기록에 남긴다.
         void (async () => {
-          if (restored && (await restoreDraftOnDevice(sessionId, fromMessageParts(sent.parts)))) {
-            await clearSendAttempt(sessionId, sent.requestId);
+          if (restored && (await restoreDraftOnDevice(sessionId, fromMessageParts(sent.parts), owner))) {
+            await clearSendAttempt(sessionId, sent.requestId, owner.ownerId);
           } else {
-            await markSendAttemptRejected(sessionId, sent.requestId, message);
+            await markSendAttemptRejected(sessionId, sent.requestId, message, owner.ownerId);
           }
         })();
       } else {
@@ -177,7 +200,7 @@ export function useSendMessage(sessionId: string) {
       const accepted = new Promise<boolean>((resolve) => settlements.set(next.requestId, resolve));
       setAttempt({ ...next, status: 'posting' });
       const secured = saveSendAttempt(sessionId, next).then((saved) => saved || accepted);
-      mutation.mutate(next);
+      mutation.mutate({ ...next, owner: currentOwner() });
       return secured;
     },
     /** 결과를 모르는 전송을 같은 요청 ID·내용으로 다시 확인한다. 서버는 기존 생성을 돌려준다. */
@@ -186,7 +209,7 @@ export function useSendMessage(sessionId: string) {
       if (previous?.status !== 'uncertain') return;
       const { requestId, parts } = previous;
       setAttempt({ requestId, parts, status: 'posting' });
-      mutation.mutate({ requestId, parts });
+      mutation.mutate({ requestId, parts, owner: currentOwner() });
     },
     /** 안내를 닫는다. 거절된 전송이면 기기에 남긴 기록도 그때 정리한다. */
     dismiss: () => {

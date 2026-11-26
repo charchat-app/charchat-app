@@ -14,10 +14,16 @@ export function sendAttemptKey(ownerId: string | null, sessionId: string) {
     : null;
 }
 
-function target(sessionId: string) {
+/**
+ * 기록할 키와 저장소. `ownerId`를 넘기면 그 계정이 지금 계정일 때만 돌려준다(BASE-03: 보내는 사이 계정이 바뀐 경우).
+ * `owned()`는 대기열에서 실제로 쓰기 직전에 다시 확인할 때 쓴다.
+ */
+function target(sessionId: string, ownerId?: string | null) {
+  const owned = () => ownerId === undefined || getConversationOwnerId() === ownerId;
+  if (!owned()) return null;
   const key = sendAttemptKey(getConversationOwnerId(), sessionId);
   const storage = key ? getDraftStorage() : null;
-  return key && storage ? { key, storage } : null;
+  return key && storage ? { key, storage, owned } : null;
 }
 
 // 같은 키의 기록·삭제를 시작한 순서대로 실행해 늦게 끝난 기록이 삭제를 되살리지 않게 한다.
@@ -74,14 +80,22 @@ export async function saveSendAttempt(sessionId: string, attempt: StoredSendAtte
   }
 }
 
-/** 거절이 확정된 전송을 거절 표시로 바꿔 남긴다. 그 사이 다른 요청의 기록이 들어왔으면 건드리지 않는다. */
-export async function markSendAttemptRejected(sessionId: string, requestId: string, message: string) {
-  const place = target(sessionId);
+/**
+ * 거절이 확정된 전송을 거절 표시로 바꿔 남긴다. 그 사이 다른 요청의 기록이 들어왔으면 건드리지 않는다.
+ * `ownerId`(전송을 시작한 계정)를 넘기면 계정이 바뀐 뒤에는 쓰지 않는다.
+ */
+export async function markSendAttemptRejected(
+  sessionId: string,
+  requestId: string,
+  message: string,
+  ownerId?: string | null,
+) {
+  const place = target(sessionId, ownerId);
   if (!place) return false;
   try {
     return await enqueue(place.key, async () => {
       const stored = decode(await place.storage.getItem(place.key));
-      if (stored?.requestId !== requestId) return false;
+      if (stored?.requestId !== requestId || !place.owned()) return false;
       await place.storage.setItem(place.key, JSON.stringify({ ...stored, rejected: message }));
       return true;
     });
@@ -101,13 +115,16 @@ export async function loadSendAttempt(sessionId: string): Promise<StoredSendAtte
   }
 }
 
-/** 접수·거절이 확정된 요청만 지운다. 그 사이 시작한 다른 요청의 기록은 남긴다. */
-export async function clearSendAttempt(sessionId: string, requestId: string) {
-  const place = target(sessionId);
+/**
+ * 접수·거절이 확정된 요청만 지운다. 그 사이 시작한 다른 요청의 기록은 남긴다.
+ * `ownerId`(전송을 시작한 계정)를 넘기면 계정이 바뀐 뒤에는 지우지 않는다.
+ */
+export async function clearSendAttempt(sessionId: string, requestId: string, ownerId?: string | null) {
+  const place = target(sessionId, ownerId);
   if (!place) return;
   try {
     await enqueue(place.key, async () => {
-      if (decode(await place.storage.getItem(place.key))?.requestId === requestId) {
+      if (decode(await place.storage.getItem(place.key))?.requestId === requestId && place.owned()) {
         await place.storage.removeItem(place.key);
       }
     });

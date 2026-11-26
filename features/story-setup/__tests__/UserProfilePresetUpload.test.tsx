@@ -27,6 +27,15 @@ const apiMock = apiRequest as jest.Mock;
 const UPLOAD_FLOW_TIMEOUT_MS = 20000;
 
 const SERVER = 'http://api.test/api/v1/creation/image-files';
+// 인증 헤더는 API 기준 주소(EXPO_PUBLIC_API_URL)와 origin·경로가 같은 이미지에만 붙는다(BASE-03 리뷰).
+const ORIGINAL_API_URL = process.env.EXPO_PUBLIC_API_URL;
+beforeAll(() => {
+  process.env.EXPO_PUBLIC_API_URL = 'http://api.test/api/v1';
+});
+afterAll(() => {
+  if (ORIGINAL_API_URL === undefined) delete process.env.EXPO_PUBLIC_API_URL;
+  else process.env.EXPO_PUBLIC_API_URL = ORIGINAL_API_URL;
+});
 
 const p = (key: string, name: string, extra: Partial<PresetValues> = {}): PresetValues => ({
   key,

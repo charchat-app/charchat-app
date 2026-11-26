@@ -9,7 +9,10 @@
  *
  * 요청 취소(signal)와 시간 제한을 지원한다. 시간 제한은 기본 15초이고, 이미지 업로드처럼 오래 걸리는 호출은
  * `timeoutMs`로 호출별로 바꾼다. 실패해도 자동으로 다시 호출하지 않는다.
- * 예외(BASE-03): 401 AUTH_TOKEN_EXPIRED는 리프레시를 한 번(동시 요청은 하나를 공유) 한 뒤 원 요청을 1회만 다시 보낸다.
+ * 예외(BASE-03): 401 AUTH_TOKEN_EXPIRED는 리프레시를 한 번(같은 로그인 세션의 동시 요청은 하나를 공유) 한 뒤
+ * 원 요청을 1회만 다시 보낸다. 다시 보내기 직전에 로그인 세션(sessionKey)이 처음 보낼 때와 같은지 확인하고,
+ * 로그아웃·계정 전환으로 바뀌었으면 다시 보내지 않고 원래 오류로 끝낸다(이전 계정 요청이 새 토큰으로 나가지 않게).
+ * 401 AUTH_TOKEN_INVALID는 다시 보내지 않고 로그아웃 처리한다(서버 계약: 회전은 이전 JWT를 무효화하지 않는다).
  * 인증 실패는 서버 핸들러 실행 전에 나므로 메시지 전송 같은 POST도 다시 보내도 부작용이 없다.
  */
 
@@ -128,14 +131,21 @@ async function toApiError(response: Response): Promise<ApiError> {
 
 type SendResult<T> = { data: T; bearer: string | null };
 
-const sentTokens = new WeakMap<ApiError, string>();
+/** 실패한 요청을 보낼 때의 세션 액세스 토큰과 로그인 세션 번호 */
+type SentAuth = { bearer: string; sessionKey: number };
 
-/** 한 번 보낸다. `bearer`는 실제로 붙인 세션 액세스 토큰(호출 측이 Authorization을 바꿨으면 null). */
+const sentAuth = new WeakMap<ApiError, SentAuth>();
+
+/**
+ * 한 번 보낸다. `bearer`는 실제로 붙인 세션 액세스 토큰(호출 측이 Authorization을 바꿨으면 null).
+ * `expectedSessionKey`를 넘기면 헤더를 만들기 직전에 현재 로그인 세션이 같은지 확인하고, 다르면 보내지 않는다.
+ */
 async function send<T>(
   path: string,
   options: ApiRequestInit,
   baseUrl: string,
   withAuth = true,
+  expectedSessionKey?: number,
 ): Promise<SendResult<T>> {
   if (!baseUrl) {
     throw new ApiError(0, 'API_URL_MISSING', 'EXPO_PUBLIC_API_URL이 설정되지 않았습니다.');
@@ -144,7 +154,8 @@ async function send<T>(
   const { timeoutMs, ...init } = options;
   const limit =
     typeof timeoutMs === 'number' && Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : DEFAULT_TIMEOUT_MS;
-  const { accessToken } = getAuthSnapshot();
+  const { accessToken, sessionKey } = getAuthSnapshot();
+  if (expectedSessionKey !== undefined && sessionKey !== expectedSessionKey) throw new SessionChangedError();
   const headers = mergeHeaders(
     init.headers,
     !(typeof FormData !== 'undefined' && init.body instanceof FormData),
@@ -167,7 +178,7 @@ async function send<T>(
 
     if (!response.ok) {
       const error = await toApiError(response);
-      if (bearer) sentTokens.set(error, bearer);
+      if (bearer) sentAuth.set(error, { bearer, sessionKey });
       throw error;
     }
     if (response.status === 204) {
@@ -180,20 +191,26 @@ async function send<T>(
   }
 }
 
-/** 실패 응답이 어느 세션 토큰으로 보낸 요청인지. 토큰이 에러 객체·로그에 드러나지 않게 따로 둔다. */
-function sentBearer(error: ApiError): string | null {
-  return sentTokens.get(error) ?? null;
+/** 다시 보내기 직전에 로그인 세션이 바뀐 것을 알린다. apiRequest 밖으로 나가지 않는다. */
+class SessionChangedError extends Error {}
+
+/** 실패 응답이 어느 세션 토큰·로그인 세션으로 보낸 요청인지. 토큰이 에러 객체·로그에 드러나지 않게 따로 둔다. */
+function sentWith(error: ApiError): SentAuth | null {
+  return sentAuth.get(error) ?? null;
 }
 
-/** 리프레시 결과. unavailable(네트워크·서버 오류)이면 세션을 유지하고 원 요청의 실패만 알린다. */
-export type RefreshResult = 'refreshed' | 'invalid' | 'unavailable';
+/**
+ * 리프레시 결과. unavailable(네트워크·서버 오류)이면 세션을 유지하고 원 요청의 실패만 알린다.
+ * session-changed: 기다리는 사이 로그아웃·다른 계정 로그인으로 세션이 바뀌었다(새 세션은 건드리지 않는다).
+ */
+export type RefreshResult = 'refreshed' | 'invalid' | 'unavailable' | 'session-changed';
 
-let refreshing: Promise<RefreshResult> | null = null;
+/** 로그인 세션(sessionKey)별 진행 중 리프레시. 다른 세션의 리프레시 결과는 공유하지 않는다. */
+const refreshing = new Map<number, Promise<RefreshResult>>();
 
-async function runRefresh(): Promise<RefreshResult> {
+async function runRefresh(sessionKey: number): Promise<RefreshResult> {
   const token = getRefreshToken();
   if (!token) return 'invalid';
-  const { sessionKey } = getAuthSnapshot();
   try {
     const { data } = await send<unknown>(
       '/auth/tokens',
@@ -202,7 +219,9 @@ async function runRefresh(): Promise<RefreshResult> {
       false,
     );
     // 기다리는 사이 로그아웃·다른 로그인이 있었으면 결과를 버린다.
-    if (getAuthSnapshot().sessionKey !== sessionKey || getAuthSnapshot().status === 'signing-out') return 'invalid';
+    if (getAuthSnapshot().sessionKey !== sessionKey || getAuthSnapshot().status === 'signing-out') {
+      return 'session-changed';
+    }
     const grant = grantFromTokenResponse(data);
     if (grant) {
       applyGrant(grant);
@@ -214,31 +233,40 @@ async function runRefresh(): Promise<RefreshResult> {
   } catch (error) {
     if (error instanceof ApiError && (error.status === 0 || error.status >= 500)) return 'unavailable';
     // 401 AUTH_REFRESH_INVALID, 409 AUTH_REFRESH_CONFLICT 등: 이 리프레시 토큰으로는 더 이어갈 수 없다.
-    if (getAuthSnapshot().sessionKey === sessionKey) expireSession();
+    if (getAuthSnapshot().sessionKey !== sessionKey) return 'session-changed';
+    expireSession();
     return 'invalid';
   }
 }
 
 /**
- * 단일 비행 리프레시. 동시에 들어온 호출은 진행 중인 하나의 Promise를 공유한다.
- * `staleToken`을 넘기면, 그 토큰이 이미 다른 리프레시로 바뀐 뒤에는 다시 리프레시하지 않는다.
+ * 로그인 세션별 단일 비행 리프레시. 같은 세션(sessionKey)의 동시 호출만 진행 중인 하나의 Promise를 공유한다.
+ * `sessionKey`는 원 요청을 보낼 때의 세션 번호다(기본: 현재 세션). 지금 세션과 다르면 리프레시하지 않는다.
+ * `staleToken`을 넘기면, 같은 세션 안에서 그 토큰이 이미 다른 리프레시로 바뀐 뒤에는 다시 리프레시하지 않는다.
  * 실패(invalid)하면 세션을 만료 처리해 로그인 화면으로 보낸다.
+ * 이미지 미리보기처럼 apiRequest를 거치지 않는 요청도 이 함수로 연장할 수 있다(BASE-03 리뷰: 공통 갱신 함수).
  */
-export function refreshAccessToken(staleToken?: string): Promise<RefreshResult> {
-  if (refreshing) return refreshing;
-  const current = getAuthSnapshot().accessToken;
-  if (staleToken && current && current !== staleToken) return Promise.resolve('refreshed');
-  const run = runRefresh().finally(() => {
-    if (refreshing === run) refreshing = null;
+export function refreshAccessToken(
+  staleToken?: string,
+  sessionKey: number = getAuthSnapshot().sessionKey,
+): Promise<RefreshResult> {
+  const current = getAuthSnapshot();
+  if (current.sessionKey !== sessionKey) return Promise.resolve('session-changed');
+  const inFlight = refreshing.get(sessionKey);
+  if (inFlight) return inFlight;
+  if (staleToken && current.accessToken && current.accessToken !== staleToken) return Promise.resolve('refreshed');
+  const run = runRefresh(sessionKey).finally(() => {
+    if (refreshing.get(sessionKey) === run) refreshing.delete(sessionKey);
   });
-  refreshing = run;
+  refreshing.set(sessionKey, run);
   return run;
 }
 
 /** 인증 실패가 아직 같은 세션에서 난 것이면 로그인·온보딩 화면으로 보낸다. */
 function handleAuthFailure(error: ApiError) {
-  const bearer = sentBearer(error);
-  if (!bearer || getAuthSnapshot().accessToken !== bearer) return;
+  const sent = sentWith(error);
+  const now = getAuthSnapshot();
+  if (!sent || now.sessionKey !== sent.sessionKey || now.accessToken !== sent.bearer) return;
   if (getAuthSnapshot().status === 'signing-out') return;
   if (error.status === 401) {
     if (['AUTH_TOKEN_EXPIRED', 'AUTH_TOKEN_INVALID', 'UNAUTHENTICATED'].includes(error.code)) expireSession();
@@ -253,15 +281,18 @@ export async function apiRequest<T>(path: string, options: ApiRequestInit = {}, 
     return (await send<T>(path, options, baseUrl)).data;
   } catch (error) {
     if (!(error instanceof ApiError)) throw error;
-    const bearer = sentBearer(error);
+    const sent = sentWith(error);
     // 로그아웃 정리 중(서버 세션 폐기 요청 등)에는 리프레시하지 않는다.
-    const recoverable = bearer && getAuthSnapshot().status !== 'signing-out' && !options.signal?.aborted;
+    const recoverable = sent && getAuthSnapshot().status !== 'signing-out' && !options.signal?.aborted;
+    // 만료(AUTH_TOKEN_EXPIRED)만 연장한다. AUTH_TOKEN_INVALID 등은 다시 보내지 않는다.
     if (recoverable && error.status === 401 && error.code === 'AUTH_TOKEN_EXPIRED') {
-      const result = await refreshAccessToken(bearer);
+      const result = await refreshAccessToken(sent.bearer, sent.sessionKey);
       if (result !== 'refreshed' || options.signal?.aborted) throw error;
       try {
-        return (await send<T>(path, options, baseUrl)).data;
+        // 토큰 값이 바뀐 것만으로 판단하지 않는다. 처음 보낸 로그인 세션 그대로일 때만 다시 보낸다.
+        return (await send<T>(path, options, baseUrl, true, sent.sessionKey)).data;
       } catch (retryError) {
+        if (retryError instanceof SessionChangedError) throw error;
         // 다시 보낸 요청은 더 재시도하지 않는다. 또 만료면 세션을 끝낸다.
         if (retryError instanceof ApiError) handleAuthFailure(retryError);
         throw retryError;

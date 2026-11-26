@@ -55,7 +55,7 @@
 ## 5. 데이터와 상태
 
 - 화면에서 `fetch`를 직접 호출하지 않는다. `api.ts`의 함수를 거친다. 공통 HTTP 처리는 `lib/api-client.ts`에 둔다.
-- 서버 데이터 타입은 `shared/story-types`에서만 정의한다.
+- 서버 데이터 타입은 `shared/story-types`에서만 정의한다. 단 인증처럼 한 기능 안에서만 쓰는 타입은 그 기능의 `types.ts`에 둔다(예: `features/auth/types.ts`).
 - 서버 연결 전에는 `mocks/seed/`로 개발한다. API가 준비되면 `api.ts`만 바꾼다.
 - 환경변수는 `EXPO_PUBLIC_` 접두사만 클라이언트에서 읽는다. 비밀값은 앱에 넣지 않는다.
 - 모든 화면은 로딩, 빈 상태, 에러 상태를 처리한다.

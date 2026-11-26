@@ -42,6 +42,9 @@ function ConsentCheck({ label, checked, onToggle }: { label: string; checked: bo
   );
 }
 
+/** 기본 플레이 이름 최대 글자 수(임시 규칙, 서버 PATCH /me와 같음). 넘으면 서버가 PLAY_NAME_INVALID로 거절한다. */
+const PLAY_NAME_MAX_LENGTH = 20;
+
 type Checks = { age: boolean; terms: boolean; privacy: boolean };
 const UNCHECKED: Checks = { age: false, terms: false, privacy: false };
 
@@ -104,11 +107,16 @@ function OnboardingForm({ me, onReloadMe }: { me: MeResponse; onReloadMe: () => 
           onToggle={() => toggle('privacy')}
         />
       </View>
-      <FormField label="기본 플레이 이름 *" hint="대화에서 내 캐릭터를 부를 이름입니다." error={nameError}>
+      <FormField
+        label="기본 플레이 이름 *"
+        hint={`대화에서 내 캐릭터를 부를 이름입니다. ${PLAY_NAME_MAX_LENGTH}자 이하로 입력하세요.`}
+        error={nameError}
+      >
         <TextField
           accessibilityLabel="기본 플레이 이름"
           value={playName}
           onChangeText={setPlayName}
+          maxLength={PLAY_NAME_MAX_LENGTH}
           invalid={nameError !== undefined}
         />
       </FormField>

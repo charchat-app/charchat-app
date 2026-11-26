@@ -178,7 +178,9 @@ describe('BASE-03 가입 온보딩', () => {
     jest
       .spyOn(globalThis, 'fetch')
       .mockImplementation(async (_input, init) =>
-        init?.method === 'PATCH' ? problem(422, 'PLAY_NAME_INVALID', '이름은 20자까지 쓸 수 있어요.') : json(pendingMe),
+        init?.method === 'PATCH'
+          ? problem(422, 'PLAY_NAME_INVALID', '플레이 이름은 20자 이하로 입력하세요.')
+          : json(pendingMe),
       );
     await show(<OnboardingScreen />);
     for (const name of ['(필수) 만 14세 이상입니다', '(필수) 이용약관 동의', '(필수) 개인정보 수집·이용 동의']) {
@@ -186,8 +188,17 @@ describe('BASE-03 가입 온보딩', () => {
     }
     await fireEvent.changeText(screen.getByLabelText('기본 플레이 이름'), '아주아주긴이름');
     await fireEvent.press(screen.getByRole('button', { name: '시작하기' }));
-    expect(await screen.findByText('이름은 20자까지 쓸 수 있어요.')).toBeOnTheScreen();
+    expect(await screen.findByText('플레이 이름은 20자 이하로 입력하세요.')).toBeOnTheScreen();
     expect(getAuthSnapshot().status).toBe('pending');
+  });
+
+  it('BASE-03 기본 플레이 이름은 20자까지만 입력받고 "20자 이하" 안내를 보인다', async () => {
+    signInPending();
+    jest.spyOn(globalThis, 'fetch').mockImplementation(async () => json(pendingMe));
+    await show(<OnboardingScreen />);
+    const name = await screen.findByLabelText('기본 플레이 이름');
+    expect(name).toHaveProp('maxLength', 20);
+    expect(screen.getByText('대화에서 내 캐릭터를 부를 이름입니다. 20자 이하로 입력하세요.')).toBeOnTheScreen();
   });
 
   it("BASE-03 '만 14세 미만이에요'를 고르면 가입할 수 없다는 안내와 함께 로그아웃한다(DELETE /me 없음)", async () => {

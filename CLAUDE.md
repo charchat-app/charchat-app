@@ -53,7 +53,7 @@ mocks/seed/           백엔드 전 개발용 시드 데이터
 1. **도메인 간 연결은 `index.ts`로만.** 다른 도메인의 내부 파일을 직접 import하지 않는다.
 2. **`components/ui`는 `features`를 import하지 않는다.** 표시만 하는 부품을 두고, 동작이 있는 부품은 도메인 `components/`에 둔다.
 3. **story-setup과 story-scene은 저장 조각을 내보낸다.** `toDraftPatch()`, `fromDraft()`, 화면 컴포넌트만 `index.ts`에서 노출한다. 저장 로직은 story-publish에만 둔다.
-4. **공유 타입은 `shared/story-types`에서만 정의.** 이 파일을 바꾸면 두 담당자가 모두 리뷰한다.
+4. **공유 타입은 `shared/story-types`에서만 정의.** 이 파일을 바꾸면 두 담당자가 모두 리뷰한다. 단 인증처럼 한 기능 안에서만 쓰는 서버 타입은 그 기능의 `types.ts`에 둔다(예: `features/auth/types.ts`).
 5. **`mocks/seed/`로 백엔드 없이 개발.** API가 준비되면 `api.ts`만 교체한다.
 6. **목업에 없는 화면은 임의로 만들지 않는다.** 홈 콘텐츠, 대화 화면, 이용 현황은 설계 후 구현한다.
 

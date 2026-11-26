@@ -90,7 +90,7 @@ describe('BASE-03 인증 헤더', () => {
 });
 
 describe('BASE-03 단일 비행 리프레시', () => {
-  it('BASE-03 동시에 두 요청이 401 AUTH_TOKEN_EXPIRED를 받으면 리프레시는 한 번만 하고 두 요청을 각각 한 번씩 다시 보낸다', async () => {
+  it('BASE-03 같은 세션의 동시 요청 세 개가 401 AUTH_TOKEN_EXPIRED를 받으면 리프레시는 한 번만 하고 각 요청을 한 번씩 다시 보낸다', async () => {
     const { api, session } = load({ EXPO_PUBLIC_DEV_AUTH: 'token' });
     signIn(session);
     const refresh = deferred<Response>();
@@ -110,12 +110,18 @@ describe('BASE-03 단일 비행 리프레시', () => {
 
     const first = api.apiRequest<{ path: string }>('/a');
     const second = api.apiRequest<{ path: string }>('/b', { method: 'POST', body: '{}' });
+    const third = api.apiRequest<{ path: string }>('/c');
     await new Promise((resolve) => setTimeout(resolve, 0));
     refresh.resolve(json(tokenBody('cca_new', 'ccr_new'), 201));
 
     await expect(first).resolves.toEqual({ path: '/a' });
     await expect(second).resolves.toEqual({ path: '/b' });
+    await expect(third).resolves.toEqual({ path: '/c' });
     expect(refreshCalls).toBe(1);
+    expect(calls.filter((call) => call.path === '/c')).toEqual([
+      { path: '/c', auth: 'Bearer cca_old' },
+      { path: '/c', auth: 'Bearer cca_new' },
+    ]);
     expect(calls.filter((call) => call.path === '/a')).toEqual([
       { path: '/a', auth: 'Bearer cca_old' },
       { path: '/a', auth: 'Bearer cca_new' },
@@ -250,5 +256,143 @@ describe('BASE-03 세션 스냅샷', () => {
     expect(session.grantFromTokenResponse({ access_token: 'cca_x', refresh_token: 'ccr_x', user: {} })).toBeNull();
     expect(session.grantFromTokenResponse({ ...tokenBody('', 'ccr_x'), access_token: '' })).toBeNull();
     expect(session.grantFromTokenResponse(null)).toBeNull();
+  });
+});
+
+describe('BASE-03 리뷰: 토큰 연장 중 계정 전환', () => {
+  const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  /** 경로별로 실제 보낸 Authorization을 모은다. 리프레시는 응답을 직접 정한다. */
+  function server(onRefresh: (refreshToken: string) => Response | Promise<Response>) {
+    const calls: { path: string; auth: string | null }[] = [];
+    const refreshTokens: string[] = [];
+    jest.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const path = String(input).replace(API, '');
+      if (path === '/auth/tokens') {
+        const { refresh_token: token } = JSON.parse(String(init?.body)) as { refresh_token: string };
+        refreshTokens.push(token);
+        return onRefresh(token);
+      }
+      const auth = authorization(init);
+      calls.push({ path, auth });
+      // 만료된 토큰(cca_a, cca_b)은 만료, 새로 받은 토큰은 성공으로 답한다.
+      return auth === 'Bearer cca_a' || auth === 'Bearer cca_b'
+        ? problem(401, 'AUTH_TOKEN_EXPIRED')
+        : json({ path, auth });
+    });
+    return {
+      calls,
+      refreshTokens,
+      authsFor: (path: string) => calls.filter((c) => c.path === path).map((c) => c.auth),
+    };
+  }
+
+  async function switchToB(session: Modules['session']) {
+    await session.finishSignOut();
+    signIn(session, 'cca_b_live', 'ccr_b', '2');
+  }
+
+  it('BASE-03 리프레시를 기다리는 사이 다른 계정으로 바뀌면 이전 요청을 새 토큰으로 다시 보내지 않는다', async () => {
+    const { api, session } = load({ EXPO_PUBLIC_DEV_AUTH: 'token' });
+    signIn(session, 'cca_a', 'ccr_a', '1');
+    const refresh = deferred<Response>();
+    const fake = server(() => refresh.promise);
+
+    const pending = api.apiRequest('/a').catch((error: unknown) => error);
+    await tick();
+    expect(fake.refreshTokens).toEqual(['ccr_a']);
+    await switchToB(session);
+    refresh.resolve(json(tokenBody('cca_a_new', 'ccr_a_new', 1), 201));
+
+    await expect(pending).resolves.toMatchObject({ status: 401, code: 'AUTH_TOKEN_EXPIRED' });
+    expect(fake.authsFor('/a')).toEqual(['Bearer cca_a']);
+    // 계정 B 세션은 그대로다. 이전 계정의 리프레시 결과를 받아들이지 않는다.
+    expect(session.getAuthSnapshot()).toMatchObject({ status: 'active', userId: '2', accessToken: 'cca_b_live' });
+    expect(session.getRefreshToken()).toBe('ccr_b');
+  });
+
+  it('BASE-03 리프레시가 끝난 직후 다시 보내기 전에 계정이 바뀌면 다시 보내지 않고 오류로 끝낸다', async () => {
+    const { api, session } = load({ EXPO_PUBLIC_DEV_AUTH: 'token' });
+    signIn(session, 'cca_a', 'ccr_a', '1');
+    const fake = server(() => json(tokenBody('cca_a_new', 'ccr_a_new', 1), 201));
+    // 새 토큰이 반영되는 순간 같은 틱 안에서(다시 보내기 전) 다른 계정으로 로그인한다.
+    let switched = false;
+    const unsubscribe = session.subscribeAuth(() => {
+      if (switched || session.getAuthSnapshot().accessToken !== 'cca_a_new') return;
+      switched = true;
+      queueMicrotask(() => void switchToB(session));
+    });
+
+    await expect(api.apiRequest('/a')).rejects.toMatchObject({ status: 401, code: 'AUTH_TOKEN_EXPIRED' });
+    unsubscribe();
+    expect(switched).toBe(true);
+    expect(fake.refreshTokens).toEqual(['ccr_a']);
+    expect(fake.authsFor('/a')).toEqual(['Bearer cca_a']);
+    expect(session.getAuthSnapshot()).toMatchObject({ status: 'active', userId: '2', accessToken: 'cca_b_live' });
+  });
+
+  it('BASE-03 계정이 바뀐 뒤 늦게 온 이전 요청의 만료 응답은 리프레시도 재시도도 하지 않는다', async () => {
+    const { api, session } = load({ EXPO_PUBLIC_DEV_AUTH: 'token' });
+    signIn(session, 'cca_a', 'ccr_a', '1');
+    const late = deferred<Response>();
+    const calls: (string | null)[] = [];
+    let refreshCalls = 0;
+    jest.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      if (String(input).endsWith('/auth/tokens')) {
+        refreshCalls += 1;
+        return json(tokenBody('cca_x', 'ccr_x', 2), 201);
+      }
+      calls.push(authorization(init));
+      return calls.length === 1 ? late.promise : json({ ok: true });
+    });
+
+    const pending = api.apiRequest('/a').catch((error: unknown) => error);
+    await tick();
+    await switchToB(session);
+    late.resolve(problem(401, 'AUTH_TOKEN_EXPIRED'));
+
+    await expect(pending).resolves.toMatchObject({ code: 'AUTH_TOKEN_EXPIRED' });
+    expect(calls).toEqual(['Bearer cca_a']);
+    expect(refreshCalls).toBe(0);
+    expect(session.getAuthSnapshot()).toMatchObject({ status: 'active', userId: '2', accessToken: 'cca_b_live' });
+  });
+
+  it('BASE-03 다른 세션의 리프레시는 공유하지 않는다: 계정 B의 만료 요청은 B의 리프레시 토큰으로 따로 연장한다', async () => {
+    const { api, session } = load({ EXPO_PUBLIC_DEV_AUTH: 'token' });
+    signIn(session, 'cca_a', 'ccr_a', '1');
+    const refreshA = deferred<Response>();
+    const fake = server((token) =>
+      token === 'ccr_a' ? refreshA.promise : json(tokenBody('cca_b_new', 'ccr_b2', 2), 201),
+    );
+
+    const requestA = api.apiRequest('/a').catch((error: unknown) => error);
+    await tick();
+    await session.finishSignOut();
+    signIn(session, 'cca_b', 'ccr_b', '2');
+    const requestB = api.apiRequest<{ auth: string }>('/b');
+
+    await expect(requestB).resolves.toMatchObject({ auth: 'Bearer cca_b_new' });
+    refreshA.resolve(json(tokenBody('cca_a_new', 'ccr_a_new', 1), 201));
+    await expect(requestA).resolves.toMatchObject({ code: 'AUTH_TOKEN_EXPIRED' });
+
+    expect(fake.refreshTokens).toEqual(['ccr_a', 'ccr_b']);
+    expect(fake.authsFor('/a')).toEqual(['Bearer cca_a']);
+    expect(fake.authsFor('/b')).toEqual(['Bearer cca_b', 'Bearer cca_b_new']);
+    expect(session.getAuthSnapshot()).toMatchObject({ status: 'active', userId: '2', accessToken: 'cca_b_new' });
+    expect(session.getRefreshToken()).toBe('ccr_b2');
+  });
+
+  it('BASE-03 다시 보낸 요청이 AUTH_TOKEN_INVALID면 더 보내지 않고 로그아웃 처리한다', async () => {
+    const { api, session } = load({ EXPO_PUBLIC_DEV_AUTH: 'token' });
+    signIn(session, 'cca_a', 'ccr_a', '1');
+    const auths: (string | null)[] = [];
+    jest.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      if (String(input).endsWith('/auth/tokens')) return json(tokenBody('cca_a_new', 'ccr_a_new', 1), 201);
+      auths.push(authorization(init));
+      return auths.length === 1 ? problem(401, 'AUTH_TOKEN_EXPIRED') : problem(401, 'AUTH_TOKEN_INVALID');
+    });
+    await expect(api.apiRequest('/a')).rejects.toMatchObject({ code: 'AUTH_TOKEN_INVALID' });
+    expect(auths).toEqual(['Bearer cca_a', 'Bearer cca_a_new']);
+    expect(session.getAuthSnapshot()).toMatchObject({ status: 'signed-out', notice: '다시 로그인해 주세요' });
   });
 });
