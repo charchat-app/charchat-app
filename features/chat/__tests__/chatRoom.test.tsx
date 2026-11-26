@@ -39,6 +39,7 @@ const emptyTurns: ChatTurns = {
   active_generation: null,
   last_failed_generation: null,
   model: 'fake-echo',
+  model_id: 1,
 };
 const userMessage: ChatMessage = {
   id: 5,
@@ -56,6 +57,7 @@ const generation = (overrides: Partial<ChatGeneration> = {}): ChatGeneration => 
   next_offset: 0,
   error_code: null,
   retryable: false,
+  model: 'fake-echo',
   ...overrides,
 });
 
@@ -307,7 +309,7 @@ it('CHAT-US-02-AC05·AC06·AC08·AC09·AC12: 생성 중 진행 표시와 스트�
   expect(screen.queryByTestId('chat-streaming-bubble')).not.toBeOnTheScreen();
   await waitFor(() => expect(screen.getAllByTestId('chat-message-bubble')).toHaveLength(3));
   expect(screen.getAllByTestId('chat-message-bubble')[2]).toHaveTextContent('나레이터바람이 분다.');
-  expect(await screen.findByText('적용 모델: model-after-reply')).toBeOnTheScreen();
+  expect(await screen.findByText('모델: model-after-reply')).toBeOnTheScreen();
   // AC05·AC06: 완료돼도 새로 쓴 내용은 그대로이고 이제 보낼 수 있다.
   expect(input()).toHaveDisplayValue('다음 메시지');
   expect(sendButton()).toBeEnabled();
@@ -365,7 +367,9 @@ it('CHAT-US-02-AC15·AC16·AC05: 실패하면 안내와 재시도 버튼만 보�
   server.state.turns = { ...emptyTurns, messages: [userMessage], last_failed_generation: failed };
   await server.answerPoll(failed);
 
-  expect(await screen.findByText('응답을 생성하지 못했습니다. 보낸 메시지는 그대로 남아 있습니다.')).toBeOnTheScreen();
+  expect(
+    await screen.findByText('fake-echo 응답을 생성하지 못했습니다. 보낸 메시지는 그대로 남아 있습니다.'),
+  ).toBeOnTheScreen();
   expect(screen.getByTestId('chat-message-bubble')).toHaveTextContent('여행자첫 메시지');
   const retry = screen.getByRole('button', { name: '응답 생성 다시 시도' });
   expect(retry).toHaveTextContent('다시 시도');
@@ -486,8 +490,8 @@ it('CHAT-US-02-AC10·AC15: 실패 안내가 사라져도 결과를 모르는 재
 });
 
 it.each([
-  ['failed_partial', '응답이 중간에 끊겼습니다.'],
-  ['save_failed', '응답을 저장하지 못했습니다.'],
+  ['failed_partial', 'fake-echo 응답이 중간에 끊겼습니다.'],
+  ['save_failed', 'fake-echo 응답을 저장하지 못했습니다.'],
 ] as const)(
   'CHAT-US-02-AC17: 일부 표시 뒤 %s는 구분해 안내하고 재시도·자동 재생성을 제공하지 않는다',
   async (status, message) => {
@@ -631,7 +635,9 @@ it('CHAT-US-02-AC15: 다시 들어와도 마지막 실패를 안내하고 재시
     last_failed_generation: generation({ status: 'failed', retryable: true, error_code: 'GENERATION_STALE' }),
   };
   await show();
-  expect(await screen.findByText('응답을 생성하지 못했습니다. 보낸 메시지는 그대로 남아 있습니다.')).toBeOnTheScreen();
+  expect(
+    await screen.findByText('fake-echo 응답을 생성하지 못했습니다. 보낸 메시지는 그대로 남아 있습니다.'),
+  ).toBeOnTheScreen();
   expect(screen.getByText('응답 생성이 오래 멈춰 중단되었습니다.')).toBeOnTheScreen();
   expect(screen.getByRole('button', { name: '응답 생성 다시 시도' })).toBeEnabled();
   expect(server.onRetry).not.toHaveBeenCalled();

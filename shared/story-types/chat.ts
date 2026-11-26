@@ -86,6 +86,8 @@ export type ChatGeneration = {
   next_offset: number;
   error_code: string | null;
   retryable: boolean;
+  /** CHAT-US-13: 이 생성이 요청한 모델 이름. 세션 모델을 나중에 바꿔도 그대로다. */
+  model: string;
 };
 
 export type ChatTurns = {
@@ -95,6 +97,8 @@ export type ChatTurns = {
   last_failed_generation: ChatGeneration | null;
   /** 이 세션의 응답 모델. 서버가 항상 문자열로 준다. */
   model: string;
+  /** CHAT-US-13: 세션에 지금 선택된 모델 id. 다음 전송·재시도가 이 모델로 요청한다. */
+  model_id: number;
 };
 
 export type SendChatMessageInput = { request_id: string; parts: ChatMessagePartInput[] };
@@ -125,3 +129,22 @@ export type ConversationSessionPage = {
 
 /** 기존 request_id로 찾은 생성. 같은 세션의 request_id는 하나뿐이라 0개 또는 1개다. */
 export type ChatGenerationLookup = { generations: ChatGeneration[] };
+
+// CHAT-US-13 대화 중 모델 변경 (KAN-23). 아래 타입은 추가분이다.
+
+/** 고를 수 있는 응답 모델. 공급자·공급자 모델 ID는 앱에 주지 않는다. */
+export type ChatModel = { id: number; name: string };
+
+export type ChatModelList = {
+  /** id 오름차순 */
+  models: ChatModel[];
+  /** 서버 기본 모델 id. 정할 수 없으면 null */
+  default_model_id: number | null;
+};
+
+/** 세션 모델 변경 결과. 진행 중이던 생성은 기존 모델로 끝까지 만든다(CHAT-US-13-AC02). */
+export type SessionModelChange = {
+  model_id: number;
+  model: string;
+  active_generation: { id: number; model: string } | null;
+};
