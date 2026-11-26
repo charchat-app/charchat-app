@@ -31,6 +31,8 @@ jest.mock('expo-router', () => ({
 }));
 jest.mock('@/features/story-scene', () => jest.requireActual('../../story-scene/hooks/useUnsavedCreationGuard'));
 jest.mock('@/features/story-publish', () => ({
+  // CREATE-US-12 라우트가 section 파라미터를 parseEditorSection으로 읽는다. 구역 정의는 실제 코드를 쓴다.
+  ...jest.requireActual('../creationSections'),
   StoryEditorScreen: (props: EditorProps) => {
     mockEditorProps = props;
     return null;

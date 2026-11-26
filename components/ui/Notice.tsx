@@ -10,7 +10,7 @@ export type NoticeProps = {
   tone?: 'info' | 'alert';
 };
 
-/** 목업 .notice(info)와 .alert(alert) */
+/** 목업 .notice(info)와 .alert(alert). 다크 테마는 테두리로 카드 위에서도 구분한다. */
 export function Notice({ message, tone = 'info' }: NoticeProps) {
   const c = useTheme();
   const isAlert = tone === 'alert';
@@ -21,7 +21,9 @@ export function Notice({ message, tone = 'info' }: NoticeProps) {
       style={[
         styles.base,
         isAlert ? styles.alert : styles.info,
-        { backgroundColor: isAlert ? c.alertBackground : c.noticeBackground },
+        isAlert
+          ? { backgroundColor: c.alertBackground, borderColor: c.alertBorder }
+          : { backgroundColor: c.noticeBackground, borderColor: c.noticeBorder },
       ]}
     >
       <Text variant={isAlert ? 'error' : 'caption'} style={{ color: isAlert ? c.alertText : c.noticeText }}>
@@ -32,7 +34,7 @@ export function Notice({ message, tone = 'info' }: NoticeProps) {
 }
 
 const styles = StyleSheet.create({
-  base: { borderRadius: Radius.md },
+  base: { borderRadius: Radius.control, borderWidth: 1 },
   info: { paddingVertical: Spacing.half * 2, paddingHorizontal: Spacing.four },
   alert: { padding: Spacing.three - 4, marginVertical: Spacing.three - 4 },
 });

@@ -25,7 +25,7 @@ export function TextArea({ value = '', maxLength, showCount = true, invalid = fa
         multiline
         textAlignVertical="top"
         value={value}
-        placeholderTextColor={c.textSecondary}
+        placeholderTextColor={c.placeholderText}
         style={[
           styles.input,
           {

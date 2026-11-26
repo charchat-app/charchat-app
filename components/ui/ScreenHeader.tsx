@@ -31,7 +31,7 @@ export function ScreenHeader({ eyebrow, title, onBack, backLabel = '뒤로', rig
             hitSlop={8}
             style={styles.back}
           >
-            <Text variant="body" color="accent" style={styles.backText}>
+            <Text variant="body" color="headerIcon" style={styles.backText}>
               ‹
             </Text>
           </Pressable>

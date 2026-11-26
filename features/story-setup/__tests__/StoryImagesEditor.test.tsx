@@ -1,11 +1,19 @@
 import { act, fireEvent, render, screen } from '@testing-library/react-native';
 import { useState } from 'react';
+import {
+  PanResponder,
+  type GestureResponderEvent,
+  type PanResponderCallbacks,
+  type PanResponderGestureState,
+} from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { manipulateAsync } from 'expo-image-manipulator';
 
+import { Spacing } from '@/constants/theme';
 import type { MediaImage } from '@/shared/media';
 
 import { StoryImagesEditor } from '../components/StoryImagesEditor';
+import { PHOTO_LONG_PRESS_MS } from '../components/usePhotoReorder';
 import type { StoryImagesValues } from '../images';
 
 jest.mock('expo-image-picker', () => ({ launchImageLibraryAsync: jest.fn() }));
@@ -57,6 +65,44 @@ async function select(element: ReturnType<typeof screen.getByLabelText>) {
   await fireEvent(element, 'accessibilityAction', { nativeEvent: { actionName: 'activate' } });
 }
 
+// ---- 손잡이 끌기: 실제 PanResponder 설정의 콜백을 그대로 부른다 ----
+
+/** 사진 칸 너비(78) + 간격(Spacing.two). 한 칸 옮기는 거리 */
+const SLOT = 78 + Spacing.two;
+const noEvent = null as unknown as GestureResponderEvent;
+const gesture = (dx: number): PanResponderGestureState => ({
+  stateID: 1,
+  moveX: dx,
+  moveY: 0,
+  x0: 0,
+  y0: 0,
+  dx,
+  dy: 0,
+  vx: 0,
+  vy: 0,
+  numberActiveTouches: 1,
+});
+
+function required<T>(fn: T | undefined, name: string): T {
+  if (fn === undefined) throw new Error(`PanResponder 콜백 ${name}이(가) 없다`);
+  return fn;
+}
+
+/** PanResponder.create에 넘어간 설정을 만들어진 순서대로 모은다. */
+function capturePanResponders() {
+  const configs: PanResponderCallbacks[] = [];
+  const create = PanResponder.create;
+  jest.spyOn(PanResponder, 'create').mockImplementation((config) => {
+    configs.push(config);
+    return create(config);
+  });
+  return configs;
+}
+
+afterEach(() => {
+  jest.restoreAllMocks();
+});
+
 const values: StoryImagesValues = {
   story: [],
   characters: [
@@ -81,7 +127,7 @@ describe('StoryImagesEditor (CREATE-US-06)', () => {
     await render(<StoryImagesEditor values={values} onChange={jest.fn()} />);
     expect(screen.getByText(/하린의 첫 사진을 표지로 써요/)).toBeOnTheScreen();
     expect(screen.getByText(/이미지가 없는 캐릭터: 도윤/)).toBeOnTheScreen();
-    expect(screen.getByText('2 / 5장')).toBeOnTheScreen();
+    expect(screen.getByText('캐릭터 사진 · 2 / 5장')).toBeOnTheScreen();
   });
 
   it('사진을 골라 앞으로 옮기거나 삭제한다 (AC06·AC08)', async () => {
@@ -101,6 +147,74 @@ describe('StoryImagesEditor (CREATE-US-06)', () => {
     });
     expect(latest().characters[0].images.map((i) => i.imageId)).toEqual([12, 11]);
     expect(screen.getByLabelText('하린 이미지 1번째(대표)')).toBeOnTheScreen();
+  });
+
+  it('CREATE-US-12: 사진을 누르면 선택만 하고, 순서 끌기는 점 6개 손잡이에만 붙는다', async () => {
+    const configs = capturePanResponders();
+    const { latest } = await setup(values);
+    // 사진 2장 → 손잡이 2개. 끌기 응답기도 손잡이 수만큼만 만들어진다(사진 자체에는 없다).
+    expect(screen.getByTestId('photo-drag-handle-11', { includeHiddenElements: true }).props.onResponderGrant).toEqual(
+      expect.any(Function),
+    );
+    expect(screen.getByTestId('photo-drag-handle-12', { includeHiddenElements: true }).props.onResponderGrant).toEqual(
+      expect.any(Function),
+    );
+    expect(configs).toHaveLength(2);
+    expect(screen.getByTestId('photo-11').props.onResponderGrant).toBeUndefined();
+    const grip = screen.getByTestId('photo-drag-grip-11', { includeHiddenElements: true });
+    expect(grip.children).toHaveLength(3);
+    for (const row of grip.children) {
+      expect(typeof row === 'string' ? [] : row.children).toHaveLength(2);
+    }
+    // 손잡이는 화면 읽기에서 숨긴다(사진의 접근성 동작과 중복되지 않게)
+    expect(
+      screen.getByTestId('photo-drag-handle-11', { includeHiddenElements: true }).props.accessibilityElementsHidden,
+    ).toBe(true);
+
+    // 사진을 누르면 고르기만 하고 순서는 그대로다. 글자 버튼(앞으로·뒤로)으로 옮길 수 있다.
+    await fireEvent.press(screen.getByLabelText('하린 이미지 2번째'));
+    expect(screen.getByLabelText('하린 이미지 2번째 앞으로')).toBeOnTheScreen();
+    expect(latest().characters[0].images.map((i) => i.imageId)).toEqual([11, 12]);
+    // 화면에 보이는 이동 화살표는 없다
+    expect(screen.queryAllByText(/[←→↑↓]/)).toHaveLength(0);
+  });
+
+  it('CREATE-US-12: 손잡이를 길게 누른 뒤 가로로 끌어 놓으면 사진 순서가 바뀐다', async () => {
+    jest.useFakeTimers();
+    try {
+      const configs = capturePanResponders();
+      const { latest } = await setup(values);
+      const first = configs[0]; // 사진 11의 손잡이
+      expect(required(first.onStartShouldSetPanResponder, 'start')(noEvent, gesture(0))).toBe(true);
+      await act(async () => {
+        required(first.onPanResponderGrant, 'grant')(noEvent, gesture(0));
+      });
+      await act(async () => {
+        jest.advanceTimersByTime(PHOTO_LONG_PRESS_MS);
+      });
+      await act(async () => {
+        required(first.onPanResponderMove, 'move')(noEvent, gesture(SLOT));
+      });
+      await act(async () => {
+        required(first.onPanResponderRelease, 'release')(noEvent, gesture(SLOT));
+      });
+      expect(latest().characters[0].images.map((i) => i.imageId)).toEqual([12, 11]);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('CREATE-US-12: 사진이 한 장뿐이면 순서를 바꿀 수 없어 손잡이를 그리지 않는다', async () => {
+    await setup({ story: [], characters: [{ characterId: '1', name: '하린', images: [img(11)] }] });
+    expect(screen.getByTestId('photo-11')).toBeOnTheScreen();
+    expect(screen.queryByTestId('photo-drag-handle-11')).toBeNull();
+  });
+
+  it('CREATE-US-12: 편집 불가 동안 사진 손잡이를 감추고 누름도 사진으로 넘긴다', async () => {
+    await render(<StoryImagesEditor values={values} onChange={jest.fn()} disabled />);
+    const handle = screen.getByTestId('photo-drag-handle-11', { includeHiddenElements: true });
+    expect(handle).toHaveStyle({ opacity: 0 });
+    expect(handle.props.pointerEvents).toBe('none');
   });
 
   it(

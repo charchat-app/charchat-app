@@ -464,7 +464,7 @@ describe('CREATE-US-07-AC08 원자적으로 담을 수 없거나 실패하면 �
     await render(screenEl);
     await addCharacter('세라');
     await addPhoto('세라');
-    await fireEvent.press(screen.getAllByRole('button', { name: '삭제' })[0]); // 저장된 캐릭터 루나
+    await fireEvent.press(screen.getByRole('button', { name: '캐릭터 1 삭제' })); // 저장된 캐릭터 루나
     await pressSave();
     expect(callsTo(SAVE)).toBe(0);
     expect(callsTo(BASIC)).toBe(0);
@@ -567,7 +567,7 @@ describe('CREATE-US-07-AC08 원자적으로 담을 수 없거나 실패하면 �
     expect(callsTo(SAVE)).toBe(1);
     expect(screen.getByText('저장 중…')).toBeTruthy();
     // 진행 중에 실제 폼으로 캐릭터 목록을 바꾸려 한다: 보낸 새 캐릭터(세라)를 지우고 다른 새 캐릭터를 더한다
-    await fireEvent.press(screen.getAllByRole('button', { name: '삭제' })[1]);
+    await fireEvent.press(screen.getByRole('button', { name: '캐릭터 2 삭제' }));
     await fireEvent.press(screen.getByText('+ 캐릭터 추가'));
     expect(names()).toEqual(['루나', '세라']);
 

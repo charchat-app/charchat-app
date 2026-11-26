@@ -43,6 +43,33 @@ export function dropTargetKey(
 }
 
 /**
+ * source 항목을 끌 수 있는 세로 범위(CREATE-US-12). 목록 첫 자리 위·마지막 자리 아래로 나가지 않는다.
+ * dropTargetKey와 같이 현재 순서·실제 높이·간격으로 계산한다. 높이를 모르는 항목이 있으면 null.
+ */
+export function dragBounds(
+  heights: Map<string, number>,
+  keys: string[],
+  source: string,
+  gap: number,
+): { min: number; max: number } | null {
+  let top = 0;
+  let sourceTop: number | null = null;
+  let sourceHeight = 0;
+  for (const key of keys) {
+    const height = heights.get(key);
+    if (height === undefined) return null;
+    if (key === source) {
+      sourceTop = top;
+      sourceHeight = height;
+    }
+    top += height + gap;
+  }
+  if (sourceTop === null) return null;
+  const total = keys.length > 0 ? top - gap : 0;
+  return { min: -sourceTop, max: total - sourceTop - sourceHeight };
+}
+
+/**
  * fromKey 캐릭터를 toKey 캐릭터 자리로 옮긴다. 각 캐릭터의 id·이름·상세는 그대로 따라간다.
  * 순서만 바뀌며 메인/서브 같은 역할은 부여하지 않는다.
  */

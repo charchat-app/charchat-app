@@ -206,7 +206,8 @@ async function pressMain() {
 }
 const screenEl = <StoryEditorScreen storyId="1" onBack={jest.fn()} onDeleted={jest.fn()} />;
 const addDisabled = () =>
-  (screen.getByRole('button', { name: '+ 프로필 추가' }).props.accessibilityState as { disabled?: boolean }).disabled;
+  (screen.getByRole('button', { name: '+ 추천 프로필 추가' }).props.accessibilityState as { disabled?: boolean })
+    .disabled;
 
 describe('CREATE-US-07-AC09 60초 자동 임시 저장: 바뀐 프리셋만', () => {
   it.each(['draft', 'private', 'public'] as const)(

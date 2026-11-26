@@ -14,7 +14,7 @@ export function TextField({ invalid = false, style, placeholderTextColor, ...res
 
   return (
     <TextInput
-      placeholderTextColor={placeholderTextColor ?? c.textSecondary}
+      placeholderTextColor={placeholderTextColor ?? c.placeholderText}
       style={[
         styles.input,
         {

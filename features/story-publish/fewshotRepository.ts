@@ -50,11 +50,23 @@ function parseCharacters(value: unknown): FewshotCharacter[] {
     return { id: characterId, name: c.name as string | null, position: c.position as number };
   });
 }
-export { object as readObject, id as readId, key as readKey, sameId as isSameId };
+/**
+ * 아직 반영하지 않은 새 항목의 id. 서버 계약(Intro·FewshotGroup·FewshotMessage의 id: DbId | None)대로
+ * 비공개·공개 스토리의 임시 저장본에서는 새 인트로·말풍선·퓨샷 묶음이 id 없이(null) client_key로만 온다.
+ * 명시적인 null만 받고, 누락·잘못된 값은 id()와 같이 거절한다.
+ */
+function provisionalId(value: unknown): string | null {
+  return value === null ? null : id(value);
+}
+export { object as readObject, id as readId, provisionalId as readProvisionalId, key as readKey, sameId as isSameId };
 function unique(set: Set<string>, value: string) {
   if (set.has(value)) throw new Error('중복된 응답 항목입니다.');
   set.add(value);
   return value;
+}
+/** id가 있을 때만 중복을 검사한다. 새 항목(null)끼리는 client_key로 구분한다. */
+export function uniqueProvisional(set: Set<string>, value: string | null) {
+  return value === null ? null : unique(set, value);
 }
 /** 퓨샷·인트로 공통 말풍선 응답 검사. 발화자는 같은 스토리 인물만 허용한다. */
 export function readMessage(
@@ -74,7 +86,7 @@ export function readMessage(
   if (characterId !== null && !characters.some((c) => c.id === characterId))
     throw new Error('발화자 연결을 확인할 수 없습니다.');
   return {
-    id: unique(messageIds, id(message.id)),
+    id: uniqueProvisional(messageIds, provisionalId(message.id)),
     clientKey: unique(keys, key(message.client_key)),
     speakerKind: message.speaker_kind as FewshotMessage['speakerKind'],
     characterId,
@@ -102,7 +114,7 @@ export function readFewshotsSnapshot(value: unknown, storyId: string, requestId?
     const group = object(value);
     if (!Array.isArray(group.messages)) throw new Error('예시 응답을 확인할 수 없습니다.');
     return {
-      id: unique(groupIds, id(group.id)),
+      id: uniqueProvisional(groupIds, provisionalId(group.id)),
       clientKey: unique(keys, key(group.client_key)),
       messages: group.messages.map((value) => readMessage(value, characters, keys, messageIds)),
     };

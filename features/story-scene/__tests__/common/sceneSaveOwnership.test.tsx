@@ -9,6 +9,7 @@ import {
   createCommonSaveRepository,
   type CommonSaveDocument,
   type CommonSaveRepository,
+  type EditorStory,
 } from '@/features/story-publish';
 import { CommonCreationWorkspace } from '../../components/CommonCreationWorkspace';
 
@@ -20,12 +21,27 @@ const wrapper = ({ children }: { children: ReactNode }) => (
   <QueryClientProvider client={client}>{children}</QueryClientProvider>
 );
 const render = (element: ReactElement) => baseRender(element, { wrapper });
-beforeEach(() => client.clear());
+beforeEach(() => {
+  client.clear();
+  // CREATE-US-12 머리글 제목·배지가 스토리 조회 캐시(storyKeys.detail)를 함께 본다. 이 검증은 공통 저장 요청만 세므로
+  // 머리글용 상세 조회가 fetch를 더 부르지 않게 캐시를 미리 채운다(다른 작업 화면 테스트와 같은 방식).
+  client.setQueryData<EditorStory>(['stories', 'detail', '1'], {
+    id: '1',
+    title: '가상',
+    subtitle: '',
+    world: '',
+    tags: [],
+    characters: [],
+    saveState: '임시 저장',
+    updatedAt: '2026-11-17T00:00:00Z',
+    issues: [],
+  });
+});
 
 const speech = (text: string): ExpressionSettings => ({ ...defaultExpression(), style: { mode: 'custom', text } });
 const FOREIGN = ['basic', 'presets', 'images'] as const;
 
-/** 저장·공개 탭에서 말투(숨은 탭의 입력)를 바꾼 뒤 버튼을 누른다. */
+/** 공개 범위 탭에서 말투(숨은 탭의 입력)를 바꾼 뒤 버튼을 누른다. */
 async function editThenPress(text: string, button: '임시 저장' | '저장') {
   await fireEvent.changeText(screen.getByLabelText('커스텀 문체', { includeHiddenElements: true }), text);
   await fireEvent.press(screen.getByRole('button', { name: button }));
@@ -61,9 +77,9 @@ describe('실제 저장소 직렬화', () => {
       return { ok: true, json: async () => response(body, key) } as Response;
     });
     await render(<CommonCreationWorkspace repository={createCommonSaveRepository(BASE)} storyId="1" />);
-    await waitFor(() => expect(screen.getByRole('tab', { name: '저장·공개' })).toBeTruthy());
+    await waitFor(() => expect(screen.getByRole('tab', { name: '공개 범위' })).toBeTruthy());
     await waitFor(() => expect(screen.getByLabelText('커스텀 문체', { includeHiddenElements: true })).toBeTruthy());
-    await fireEvent.press(screen.getByRole('tab', { name: '저장·공개' }));
+    await fireEvent.press(screen.getByRole('tab', { name: '공개 범위' }));
 
     await editThenPress('임시 원문', '임시 저장');
     await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2));
@@ -111,7 +127,7 @@ describe('저장 문서 경계', () => {
     const repository: CommonSaveRepository = { load: jest.fn(async () => structuredClone(loaded)), save };
     await render(<CommonCreationWorkspace repository={repository} storyId="1" />);
     await waitFor(() => expect(screen.getByLabelText('커스텀 문체', { includeHiddenElements: true })).toBeTruthy());
-    await fireEvent.press(screen.getByRole('tab', { name: '저장·공개' }));
+    await fireEvent.press(screen.getByRole('tab', { name: '공개 범위' }));
 
     await editThenPress('임시 원문', '임시 저장');
     await waitFor(() => expect(save).toHaveBeenCalledTimes(1));

@@ -68,14 +68,15 @@ export function ChipGroup({
             onPress={() => toggle(option)}
             style={({ pressed }) => [
               styles.chip,
+              // 다크 목업 .chips button / .chips button.on (Palette 06)
               {
-                borderColor: selected ? c.accent : c.chipBorder,
-                backgroundColor: selected ? c.accent : c.surface,
+                borderColor: selected ? c.actionBorder : c.chipBorder,
+                backgroundColor: selected ? c.actionFill : c.chipSurface,
               },
               pressed && styles.pressed,
             ]}
           >
-            <Text variant="caption" style={[styles.label, { color: selected ? c.onAccent : c.text }]}>
+            <Text variant="caption" style={[styles.label, { color: selected ? c.selectedText : c.chipText }]}>
               {option}
             </Text>
           </Pressable>

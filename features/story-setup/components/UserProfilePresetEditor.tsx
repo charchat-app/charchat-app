@@ -1,8 +1,8 @@
 // CREATE-US-05 제작자 추천 유저 프로필 프리셋 편집기
 import { useEffect, useRef, useState } from 'react';
-import { Animated, StyleSheet, View } from 'react-native';
+import { Animated, Pressable, StyleSheet, View } from 'react-native';
 
-import { Button, FormField, PhotoSlot, Text, TextArea, TextField } from '@/components/ui';
+import { Button, CreationIcon, FormField, Text, TextArea, TextField } from '@/components/ui';
 import { MinTouchSize, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { ImageCropper, ServerImage, useImageUpload, type MediaImage } from '@/shared/media';
@@ -26,12 +26,18 @@ import {
   validatePresets,
   type PresetValues,
 } from '../userProfilePresetRules';
+import { DragGripDots, webDragHandle } from './DragGrip';
 import { useDragList, type DragList } from './useDragList';
 
 /** 카드 사이 간격. 끌어 놓을 자리 계산에도 같은 값을 쓴다. */
 const ITEM_GAP = Spacing.three;
 /** 유저 프로필 이미지 미리보기(1:1) 한 변. PhotoSlot 기본 너비(목업 78px)와 같다. */
 const PHOTO_SIZE = 78;
+/** 목업 v15 .item padding 15px, label.check 체크 상자 18px */
+const ITEM_PADDING = 15;
+const CHECK_SIZE = 18;
+/** 목업 v15 .item-header svg 21px */
+const ICON_SIZE = 21;
 
 /** fromKey 프리셋을 toKey 프리셋 자리로 옮긴다. 최신 값 기준으로 계산하며, 둘 중 하나가 없으면 그대로 둔다. */
 function movePresetTo(presets: PresetValues[], fromKey: string, toKey: string): PresetValues[] {
@@ -80,11 +86,12 @@ export type UserProfilePresetEditorProps = {
  * 문제가 있어도 임시 저장 조각은 presetsToDraftPatch로 만들 수 있고, 완료 여부는 validatePresets가 알려 준다.
  *
  * 순서 변경(AC08):
- * - 카드 머리의 전용 손잡이(≡)를 길게 누른 뒤 위아래로 끌어 놓는다. 이름·상세 입력칸에서는 시작되지 않는다.
+ * - 카드 머리의 전용 손잡이(점 6개)를 길게 누른 뒤 위아래로 끌어 놓는다. 제목·이름·상세·사진에서는 시작되지 않는다.
+ * - 손잡이는 순서를 바꿀 수 있을 때(2개 이상·편집 가능)만 보인다.
  * - 카드 높이가 서로 달라도 실제 높이로 놓을 자리를 계산한다(useDragList).
  * - 끄는 중에 제스처가 취소되거나 제자리에 놓으면 순서는 그대로다.
- * - 끌기가 어려운 경우를 위해 위·아래 버튼과 손잡이의 접근성 동작(위로/아래로)을 함께 둔다.
- * - 편집 불가 상태에서는 끌기·버튼·접근성 동작 모두 순서를 바꾸지 않는다.
+ * - 끌기가 어려운 경우를 위해 손잡이에 접근성 동작(위로/아래로)을 둔다. 화면에 보이는 이동 버튼은 두지 않는다(CREATE-US-12 목업).
+ * - 편집 불가 상태에서는 끌기·접근성 동작 모두 순서를 바꾸지 않는다.
  */
 export function UserProfilePresetEditor({
   presets,
@@ -118,7 +125,6 @@ export function UserProfilePresetEditor({
         <PresetItem
           key={preset.key}
           index={index}
-          last={index === presets.length - 1}
           drag={drag}
           prevKey={keys[index - 1]}
           nextKey={keys[index + 1]}
@@ -133,7 +139,6 @@ export function UserProfilePresetEditor({
           onDetail={(detail) => onChange((v) => updatePreset(v, preset.key, { detail }))}
           onToggleUserName={() => onChange((v) => toggleUserNamePreset(v, preset.key))}
           onRemove={() => onChange((v) => removePreset(v, preset.key))}
-          onMove={(offset) => onChange((v) => movePreset(v, preset.key, offset))}
           onSelectImage={async () => onSelectImage?.(preset.key)}
           onApplyImage={(image) => onChange((v) => setPresetImage(v, preset.key, image))}
           onUploadActiveChange={
@@ -142,12 +147,44 @@ export function UserProfilePresetEditor({
         />
       ))}
       <Button
-        label={full ? `프로필은 최대 ${MAX_USER_PROFILE_PRESETS}개예요` : '+ 프로필 추가'}
+        label={full ? `추천 프로필은 최대 ${MAX_USER_PROFILE_PRESETS}개예요` : '+ 추천 프로필 추가'}
         variant="secondary"
+        fullWidth
         onPress={() => onChange(addPreset)}
         disabled={!editable || full}
       />
     </View>
+  );
+}
+
+/** 목업 v15 .item-header 아이콘 버튼(44px 원형). 목업 svg와 같은 모양의 휴지통 아이콘(CreationIcon)을 쓴다. */
+function IconButton({
+  icon,
+  label,
+  onPress,
+  disabled,
+}: {
+  icon: 'trash';
+  label: string;
+  onPress: () => void;
+  disabled: boolean;
+}) {
+  const c = useTheme();
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityState={{ disabled }}
+      disabled={disabled}
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.icon,
+        pressed && { backgroundColor: c.backgroundSelected },
+        disabled && styles.handleDisabled,
+      ]}
+    >
+      <CreationIcon testID="icon-trash" name={icon} size={ICON_SIZE} color={c.headerIcon} />
+    </Pressable>
   );
 }
 
@@ -156,7 +193,6 @@ type ImageMode = 'select' | 'upload' | 'none';
 
 type PresetItemProps = {
   index: number;
-  last: boolean;
   /** 이 목록 전용 끌기 상태 */
   drag: DragList;
   prevKey?: string;
@@ -173,7 +209,6 @@ type PresetItemProps = {
   onDetail: (detail: string) => void;
   onToggleUserName: () => void;
   onRemove: () => void;
-  onMove: (offset: number) => void;
   /** 호스트의 이미지 고르기. 결과 반영은 onApplyImage로 따로 한다. */
   onSelectImage: () => Promise<PresetImageChoice | null | undefined>;
   /** 이미지 지정(null이면 해제) */
@@ -184,7 +219,6 @@ type PresetItemProps = {
 
 function PresetItem({
   index,
-  last,
   drag,
   prevKey,
   nextKey,
@@ -199,7 +233,6 @@ function PresetItem({
   onDetail,
   onToggleUserName,
   onRemove,
-  onMove,
   onSelectImage,
   onApplyImage,
   onUploadActiveChange,
@@ -263,14 +296,9 @@ function PresetItem({
     void upload.confirmCrop(rect);
   };
 
-  const clearImage = () => {
-    pickSeq.current += 1;
-    setPickError(null);
-    upload.clearError();
-    onApplyImage(null);
-  };
-
   const lifted = drag.draggingKey === preset.key;
+  // 옆에 다른 카드가 있어야(목록 2개 이상) 순서를 바꿀 수 있다
+  const reorderable = prevKey !== undefined || nextKey !== undefined;
 
   return (
     <Animated.View
@@ -278,101 +306,82 @@ function PresetItem({
       onLayout={(e) => drag.setHeight(preset.key, e.nativeEvent.layout.height)}
       style={[
         styles.item,
-        { backgroundColor: c.surface, borderColor: c.border },
+        { backgroundColor: c.surface, borderColor: c.surfaceBorder },
         { transform: [{ translateY: drag.offsetOf(preset.key) }, { scale: lifted ? 1.02 : 1 }] },
         lifted && [styles.lifted, { borderColor: c.accent, shadowColor: c.text }],
       ]}
     >
+      {/* 목업 v15 .item-header: 왼쪽 「프로필 n」, 오른쪽 삭제 버튼. 손잡이는 실제 순서 변경(AC08)이라 남긴다. */}
       <View style={styles.itemHeader}>
         <View style={styles.titleRow}>
-          {/* 전용 손잡이: 길게 누른 뒤 위아래로 끈다. 제스처는 여기에만 붙는다. */}
-          <View
-            testID={`preset-drag-handle-${preset.key}`}
-            {...drag.responderOf(preset.key).panHandlers}
-            accessible
-            accessibilityRole="adjustable"
-            accessibilityLabel={`${label} 순서 손잡이(길게 눌러 끌기)`}
-            accessibilityState={{ disabled: !editable }}
-            accessibilityActions={[
-              { name: 'decrement', label: '위로 이동' },
-              { name: 'increment', label: '아래로 이동' },
-            ]}
-            onAccessibilityAction={(e) => {
-              const target = e.nativeEvent.actionName === 'decrement' ? prevKey : nextKey;
-              if (editable && target !== undefined) onMoveTo(preset.key, target);
-            }}
-            style={[styles.handle, !editable && styles.handleDisabled]}
-          >
-            <Text variant="subheading" color={lifted ? 'accent' : 'textSecondary'}>
-              ≡
-            </Text>
-          </View>
-          <Text variant="subheading" color={lifted ? 'accent' : 'text'}>
+          {/* 전용 손잡이(점 6개): 길게 누른 뒤 위아래로 끈다. 제스처는 여기에만 붙는다.
+              순서를 바꿀 수 있을 때(2개 이상)만 그리고, 편집 불가 동안은 자리만 두고 감춘다. */}
+          {reorderable ? (
+            <View
+              testID={`preset-drag-handle-${preset.key}`}
+              // 웹은 Pointer Events, 네이티브는 PanResponder. 한쪽만 붙인다.
+              ref={drag.pointerRefOf(preset.key)}
+              {...(drag.pointerRefOf(preset.key) ? null : drag.responderOf(preset.key).panHandlers)}
+              accessible={editable}
+              accessibilityElementsHidden={!editable}
+              importantForAccessibility={editable ? 'auto' : 'no-hide-descendants'}
+              accessibilityRole="adjustable"
+              accessibilityLabel={`${label} 순서 손잡이(길게 눌러 끌기)`}
+              accessibilityState={{ disabled: !editable }}
+              accessibilityActions={[
+                { name: 'decrement', label: '위로 이동' },
+                { name: 'increment', label: '아래로 이동' },
+              ]}
+              onAccessibilityAction={(e) => {
+                const target = e.nativeEvent.actionName === 'decrement' ? prevKey : nextKey;
+                if (editable && target !== undefined) onMoveTo(preset.key, target);
+              }}
+              style={[styles.handle, webDragHandle, !editable && styles.handleHidden]}
+            >
+              <DragGripDots testID={`preset-drag-grip-${preset.key}`} color={lifted ? c.accent : c.headerIcon} />
+            </View>
+          ) : null}
+          <Text variant="subheading" color={lifted ? 'accent' : 'text'} style={styles.title}>
             {label}
           </Text>
-        </View>
-        <View style={styles.actions}>
-          <Button
-            label={`${label} 위로 이동`}
-            variant="secondary"
-            onPress={() => onMove(-1)}
-            disabled={!editable || index === 0}
-          />
-          <Button
-            label={`${label} 아래로 이동`}
-            variant="secondary"
-            onPress={() => onMove(1)}
-            disabled={!editable || last}
-          />
-          <Button label={`${label} 삭제`} variant="danger" onPress={onRemove} disabled={!editable} />
+          <IconButton icon="trash" label={`${label} 삭제`} onPress={onRemove} disabled={!editable} />
         </View>
       </View>
-      {imageMode === 'select' ? (
-        <View style={styles.photoRow}>
-          <PhotoSlot uri={preset.photoUrl} accessibilityLabel={`${label} 이미지 미리보기`} />
-          <View style={styles.actions}>
-            <Button label={`${label} 이미지 선택`} variant="secondary" onPress={pickImage} disabled={!editable} />
-            <Button
-              label={`${label} 이미지 해제`}
-              variant="secondary"
-              onPress={clearImage}
-              disabled={!editable || preset.imageId === null}
-            />
-          </View>
-        </View>
-      ) : null}
-      {imageMode === 'upload' ? (
-        <View style={styles.photoRow}>
-          {/* 서버 이미지는 소유자만 볼 수 있어 인증을 붙여 불러오는 ServerImage로 보여 준다 */}
-          <View
-            accessible
-            accessibilityLabel={`${label} 이미지 미리보기`}
-            style={[styles.photo, { backgroundColor: c.placeholderBackground, borderColor: c.placeholderBorder }]}
-          >
-            {preset.photoUrl ? (
-              <ServerImage
-                testID={`preset-photo-${preset.key}`}
-                uri={preset.photoUrl}
-                resizeMode="cover"
-                style={styles.photoImage}
-                accessibilityIgnoresInvertColors
-              />
-            ) : null}
-          </View>
-          <View style={styles.actions}>
-            <Button
-              label={`${label} 이미지 선택`}
-              variant="secondary"
-              onPress={uploadImage}
+      {imageMode !== 'none' ? (
+        // 목업 v15 photosUI(최대 1장): 78px 사진 칸(비었으면 +) → 「프로필 사진 · n/1장」.
+        // 칸 하나가 추가·교체를 모두 맡는다. 비었으면 고르고, 사진이 있으면 새로 고른 사진으로 바꾼다(별도 해제 버튼 없음).
+        <View style={styles.photoBlock}>
+          <View style={styles.photoRow}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`${label} 이미지 선택`}
+              accessibilityHint={preset.photoUrl ? '누르면 새 사진으로 바꿔요' : '누르면 사진을 골라요'}
+              accessibilityState={{ disabled: !editable || uploading }}
               disabled={!editable || uploading}
-            />
-            <Button
-              label={`${label} 이미지 해제`}
-              variant="secondary"
-              onPress={clearImage}
-              disabled={!editable || preset.imageId === null}
-            />
+              onPress={imageMode === 'select' ? pickImage : uploadImage}
+              style={[
+                styles.photo,
+                { backgroundColor: c.placeholderBackground, borderColor: c.placeholderBorder },
+                preset.photoUrl ? [styles.photoFilled, { borderColor: c.accentText }] : styles.photoEmpty,
+              ]}
+            >
+              {preset.photoUrl ? (
+                // 서버 이미지는 소유자만 볼 수 있어 인증을 붙여 불러오는 ServerImage로 보여 준다
+                <ServerImage
+                  testID={`preset-photo-${preset.key}`}
+                  uri={preset.photoUrl}
+                  resizeMode="cover"
+                  style={styles.photoImage}
+                  accessibilityIgnoresInvertColors
+                />
+              ) : (
+                <Text variant="subheading" color="avatarText">
+                  +
+                </Text>
+              )}
+            </Pressable>
           </View>
+          <Text variant="caption">{`프로필 사진 · ${preset.imageId === null ? 0 : 1}/1장`}</Text>
         </View>
       ) : null}
       {imageMode === 'upload' && upload.busy && upload.crop === null ? (
@@ -393,14 +402,31 @@ function PresetItem({
       ) : null}
       {pickError ? <Text variant="error">{pickError}</Text> : null}
       {imageError ? <Text variant="error">{imageError}</Text> : null}
+      {/* 목업 v15 label.check: 18px 체크 상자 + 「플레이하는 유저 이름 사용하기」 */}
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`${label} 플레이하는 유저 이름 사용하기`}
+        accessibilityState={{ selected: usesUserName, disabled: !editable }}
+        disabled={!editable}
+        onPress={onToggleUserName}
+        style={[styles.check, !editable && styles.handleDisabled]}
+      >
+        <View
+          style={[
+            styles.checkBox,
+            { borderColor: c.inputBorder, backgroundColor: c.inputSurface },
+            usesUserName && { backgroundColor: c.accent, borderColor: c.accent },
+          ]}
+        >
+          {usesUserName ? (
+            <Text variant="caption" color="onAccent">
+              ✓
+            </Text>
+          ) : null}
+        </View>
+        <Text variant="body">플레이하는 유저 이름 사용하기</Text>
+      </Pressable>
       <FormField label="이름 *" error={nameError}>
-        <Button
-          label={`${label} 플레이하는 유저 이름 사용하기`}
-          variant={usesUserName ? 'primary' : 'secondary'}
-          onPress={onToggleUserName}
-          disabled={!editable}
-          accessibilityState={{ selected: usesUserName, disabled: !editable }}
-        />
         <TextField
           value={preset.name}
           onChangeText={onName}
@@ -409,7 +435,7 @@ function PresetItem({
           accessibilityLabel={`${label} 이름`}
         />
       </FormField>
-      <FormField label="상세" error={textError} hint={`${USER_NAME_PLACEHOLDER}는 바꾸지 않고 그대로 저장돼요.`}>
+      <FormField label="상세 · 선택" error={textError} hint={`${USER_NAME_PLACEHOLDER}는 바꾸지 않고 그대로 저장돼요.`}>
         <TextArea
           value={preset.detail}
           onChangeText={onDetail}
@@ -428,10 +454,11 @@ function PresetItem({
 
 const styles = StyleSheet.create({
   list: { gap: ITEM_GAP },
+  // 목업 v15 .item: radius 12, padding 15
   item: {
     borderWidth: 1,
-    borderRadius: Radius.md,
-    padding: Spacing.three,
+    borderRadius: Radius.item,
+    padding: ITEM_PADDING,
     gap: Spacing.three,
   },
   // 들고 있는 카드는 다른 카드 위에 떠 보이게 한다(웹 zIndex, 안드로이드 elevation, iOS 그림자)
@@ -443,18 +470,42 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 4 },
   },
   itemHeader: { gap: Spacing.two },
-  titleRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
+  titleRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.one },
+  title: { flex: 1 },
   handle: { minWidth: MinTouchSize, minHeight: MinTouchSize, alignItems: 'center', justifyContent: 'center' },
   handleDisabled: { opacity: 0.3 },
-  actions: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.two },
+  // 순서를 바꿀 수 없는 동안(편집 불가)은 손잡이를 감춘다. 자리는 남겨 머리 줄이 움직이지 않는다.
+  handleHidden: { opacity: 0 },
+  icon: {
+    width: MinTouchSize,
+    height: MinTouchSize,
+    borderRadius: MinTouchSize / 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  photoBlock: { gap: Spacing.two },
   photoRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.three },
+  // 목업 v15 .upload: 78px, 둥근 10px, 비었으면 점선 테두리 / 사진은 첫 사진 강조 테두리 2px
   photo: {
     width: PHOTO_SIZE,
     height: PHOTO_SIZE,
     borderWidth: 1,
-    borderRadius: Radius.sm + 2,
+    borderRadius: Radius.control,
     overflow: 'hidden',
     flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  photoEmpty: { borderStyle: 'dashed' },
+  photoFilled: { borderWidth: 2 },
+  check: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two, minHeight: MinTouchSize },
+  checkBox: {
+    width: CHECK_SIZE,
+    height: CHECK_SIZE,
+    borderWidth: 1,
+    borderRadius: Spacing.one,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   photoImage: { width: '100%', height: '100%' },
 });

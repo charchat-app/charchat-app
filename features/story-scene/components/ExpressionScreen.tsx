@@ -51,7 +51,12 @@ function ExpressionEditor({
     <Surface style={styles.screen}>
       {!hideHeader ? <ScreenHeader eyebrow="CHAR / CHAT" title="표현 설정" /> : null}
       <SafeAreaView edges={['bottom']} style={styles.screen}>
-        <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
+        <ScrollView
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.content}
+        >
           {repository.mode === 'fixture' ? (
             <Notice message="로컬 예제 모드입니다. 저장한 설정은 로컬 개발 서버의 예제 파일에만 남으며 공유 DB에는 저장하지 않습니다." />
           ) : null}
