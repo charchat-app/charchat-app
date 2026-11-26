@@ -36,6 +36,7 @@ jest.mock('@/features/chat/api', () => ({
     last_failed_generation: null,
     // 이 파일은 세션 응답의 모델 표시만 검증한다. 빈 값이면 대화방은 세션 모델을 보인다.
     model: '',
+    model_id: 1,
   })),
 }));
 
@@ -698,12 +699,15 @@ it('KAN-16: 대화방에 서버의 말풍선, 등장 캐릭터, 적용된 모델
   await show(<SessionRoute />);
   expect(await screen.findByText('달빛 정원')).toBeOnTheScreen();
   expect(screen.getByText('윤슬')).toBeOnTheScreen();
-  expect(screen.getByText('적용 모델: applied-model')).toBeOnTheScreen();
+  expect(screen.getByText('모델: applied-model')).toBeOnTheScreen();
   expect(screen.getAllByTestId('conversation-bubble')).toHaveLength(3);
   expect(screen.getAllByTestId('conversation-bubble')[0]).toHaveTextContent('나레이터문이 열렸다.');
   expect(screen.getAllByTestId('conversation-bubble')[2]).toHaveTextContent('유저실례합니다.');
   expect(screen.queryByText('읽기 전용')).not.toBeOnTheScreen();
-  expect(screen.queryByRole('button', { name: /모델/ })).not.toBeOnTheScreen();
+  // CHAT-US-13: 열린 대화방에서 바꿀 수 있는 것은 대화 모델뿐이다.
+  expect(screen.getAllByRole('button', { name: /모델/ }).map((item) => item.props.accessibilityLabel)).toEqual([
+    '대화 모델 변경',
+  ]);
   // CHAT-US-02: 열린 대화방에는 입력창이 있다.
   expect(await screen.findByLabelText('메시지 입력')).toBeOnTheScreen();
   expect(fetchMock).toHaveBeenCalledWith(
