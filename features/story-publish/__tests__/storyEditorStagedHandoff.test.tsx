@@ -326,6 +326,69 @@ describe('CREATE-US-12 QA: 자동 임시 저장된 기본 정보·새 캐릭터 
     expect(screen.getByDisplayValue('세라')).toBeTruthy();
   }, 30000);
 
+  it('자동 저장 중 대기한 저장의 마무리 사전 조회가 실패하면, 다시 누른 저장이 같은 키로 한 번만 마무리한다', async () => {
+    seed();
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    on(SAVE, async (init) => {
+      await gate;
+      return stageAuto(init);
+    });
+    on(SAVE, () => creationDto({ save_state: 'private' }));
+    await render(<StoryEditorScreen storyId="1" onBack={jest.fn()} onDeleted={jest.fn()} onOpenScene={jest.fn()} />);
+    await flush();
+    await act(async () => {
+      await fireEvent.press(screen.getByText('+ 캐릭터 추가'));
+    });
+    const names = screen.getAllByLabelText(/^캐릭터 \d+ 이름$/);
+    await act(async () => {
+      await fireEvent.changeText(names[names.length - 1], '세라');
+    });
+    await act(async () => {
+      await fireEvent.press(screen.getByLabelText('세라 이미지 추가'));
+    });
+    await act(async () => {
+      await fireEvent.press(screen.getByLabelText('확인'));
+    });
+    await goTab('유저 프로필');
+    expect(sent(SAVE)).toHaveLength(1);
+    await goTab('기본 설정');
+    // 자동 저장이 끝나기 전에 누른 저장은 대기한다.
+    await pressMainSave();
+    expect(sent(SAVE)).toHaveLength(1);
+    const key = new Headers(sent(SAVE)[0].init.headers).get('Idempotency-Key');
+    // 대기한 저장의 마무리 사전 조회(GET creation)를 한 번 실패시킨다.
+    let failNext = true;
+    handlers[CREATION] = [
+      () => {
+        if (failNext) {
+          failNext = false;
+          throw new ApiError(503, 'UNAVAILABLE', '잠시 후 다시 시도해 주세요.');
+        }
+        return creationDto();
+      },
+    ];
+    await act(async () => {
+      release();
+    });
+    await flush();
+    expect(failNext).toBe(false);
+    expect(sent(SAVE)).toHaveLength(1);
+
+    await act(async () => {
+      await fireEvent.press(screen.getByRole('button', { name: '다시 저장' }));
+    });
+    await flush();
+    expect(sent(SAVE)).toHaveLength(2);
+    expect(bodyOf(SAVE, 1)).toMatchObject({ kind: 'save', mode: 'manual', finalize_auto_request_id: key });
+    expect(bodyOf(SAVE, 1).basic).toBeUndefined();
+    expect(sent(BASIC)).toHaveLength(0);
+    await flush();
+    expect(sent(SAVE)).toHaveLength(2);
+  }, 30000);
+
   it('삭제가 진행 중이면 넘기지 않는다', async () => {
     const onOpenScene = await stageNewCharacter();
     // 같은 트리의 잠금 도우미로 같은 스토리의 쓰기 잠금을 삭제로 쥔다(삭제 확인 화면이 하는 일과 같다).

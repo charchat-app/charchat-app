@@ -456,6 +456,24 @@ describe('CREATE-US-12: 공개 범위 선택만 바꾼 상태의 이탈 보호',
     },
   );
 
+  it('넘기기 뒤 다시 선택을 바꾸면 가드가 다시 켜지고, 다음 넘기기도 한 번만 부른다', async () => {
+    const { onOpenEditor } = await choosePublic();
+    await fireEvent.press(screen.getByRole('tab', { name: '기본 설정' }));
+    await press('나가기');
+    expect(onOpenEditor).toHaveBeenCalledTimes(1);
+    // 넘기면서 고른 선택은 저장된 값으로 돌아가고 가드도 꺼진 채 남는다.
+    expect(screen.getByRole('radio', { name: '미등록' })).toBeChecked();
+    expect(guardOn()).toBe(false);
+
+    await fireEvent.press(screen.getByRole('radio', { name: '공개' }));
+    expect(guardOn()).toBe(true);
+    await fireEvent.press(screen.getByRole('tab', { name: '기본 설정' }));
+    await press('나가기');
+    expect(onOpenEditor).toHaveBeenCalledTimes(2);
+    expect(onOpenEditor).toHaveBeenLastCalledWith('basic');
+    expect(guardOn()).toBe(false);
+  });
+
   it('최신 편집 내용 다시 불러오기: 확인을 먼저 보이고, 변경 유지를 누르면 선택을 남긴다', async () => {
     const { repository } = await choosePublic();
 

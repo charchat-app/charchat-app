@@ -1,13 +1,15 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Button, Card, EditorHeader, Notice, StickyFooter, Surface, Text } from '@/components/ui';
 import { useTheme } from '@/hooks/use-theme';
 import {
   CREATION_TAB_LABELS,
+  ContentRatingSection,
   SAVE_STATE_LABEL,
   StoryDeleteSection,
   completionIssues,
+  formatRatingReviewFeedback,
   saveStatusLine,
   sectionAt,
   sectionBusyMessage,
@@ -20,14 +22,17 @@ import {
   type SceneSection,
   type CommonSaveDocument,
   type CommonSaveRepository,
+  type ContentRatingSectionProps,
   type FewshotRepository,
 } from '@/features/story-publish';
+import { DEFAULT_CONTENT_RATING, type ContentRating } from '@/shared/rating';
 import { confirmUnsavedLeave, useUnsavedCreationGuard } from '../hooks/useUnsavedCreationGuard';
 import { ContentInset, MinTouchSize, Radius, Spacing } from '@/constants/theme';
 import {
   applyAllocatedIds,
   sameAffinities,
-  type CreationSaveDocument,
+  type CreationSaveKind,
+  type CreationSaveMode,
   type CreationSaveState,
   type ExpressionSettings as Expression,
   type FewshotsDocument,
@@ -66,6 +71,39 @@ function withoutForeignAreas(snapshot: FewshotsDocument): FewshotsDocument {
   return scene;
 }
 
+/**
+ * CREATE-US-08-AC13 등급만 담긴 임시 저장본(ratingOnlyWorkingCopy)을 직접 「저장」으로 반영할 때만
+ * finalizeRatingWorkingCopyAt(조회한 working_copy_saved_at)을 붙인다. 편집 화면(useStoryPresets)과 같은 계약이다.
+ * - 장면을 바꾸지 않아 preserveScene을 실은 저장이어야 한다(서버가 임시본의 오래된 장면 대신 정본 장면을 유지).
+ * - 완성된(비공개·공개) 스토리를 같은 공개 범위로 저장하거나 비공개→공개로 저장할 때만 쓴다. 미등록→공개 등
+ *   그 밖의 범위 변경은 서버 처리가 달라 토큰을 싣지 않는다.
+ * - 자동·직접 임시 저장(kind temporary)은 그대로 임시 저장으로 보낸다.
+ * 소유·시각 최종 확인은 서버가 잠금 아래에서 한다.
+ */
+function withRatingFinalize(
+  document: CommonSaveDocument,
+  state: CreationSaveState,
+  mode: CreationSaveMode,
+  kind: CreationSaveKind | undefined,
+): CommonSaveDocument {
+  const stagedAt = document.workingCopySavedAt;
+  const eligible =
+    kind === 'save' &&
+    mode === 'manual' &&
+    document.preserveScene === true &&
+    document.saveState !== 'draft' &&
+    (state === document.saveState || (document.saveState === 'private' && state === 'public')) &&
+    document.ratingOnlyWorkingCopy === true &&
+    !!stagedAt &&
+    !document.imagesWorkingCopySavedAt &&
+    !document.stagedBasic &&
+    !document.basic &&
+    !document.presets &&
+    !document.images &&
+    !document.finalizeAutoRequestId;
+  return eligible ? { ...document, finalizeRatingWorkingCopyAt: stagedAt } : document;
+}
+
 export function CommonCreationWorkspace({
   repository,
   storyId,
@@ -99,17 +137,35 @@ export function CommonCreationWorkspace({
 }) {
   const c = useTheme();
   const [section, setSection] = useState<SceneSection>(initialSection ?? 'speech'),
-    [loaded, setLoaded] = useState<CreationSaveDocument | null>(null);
+    [loaded, setLoaded] = useState<CommonSaveDocument | null>(null);
+  // CREATE-US-08-AC09 고른 등급과 그 비교 기준(조회·저장 응답의 requested, 없으면 SAFE). 다를 때만 requestedRating으로 싣는다.
+  const [rating, setRating] = useState<ContentRating | null>(null),
+    [savedRating, setSavedRating] = useState<ContentRating | null>(null);
+  const [refreshStatus, setRefreshStatus] = useState<ContentRatingSectionProps['refreshStatus']>('idle');
+  const refreshAbort = useRef<AbortController | null>(null);
+  useEffect(() => () => refreshAbort.current?.abort(), []);
   const [speech, setSpeech] = useState<Expression | null>(null),
     [target, setTarget] = useState<CreationSaveState>('draft');
   const [fewPending, setFewPending] = useState<PendingInput>(idle);
   const [introPending, setIntroPending] = useState<PendingInput>(idle);
-  const [intros, setIntros] = useState<IntroItem[]>([]),
-    [savedIntros, setSavedIntros] = useState<IntroItem[]>([]);
-  const [relations, setRelations] = useState<InitialRelation[]>([]),
-    [savedRelations, setSavedRelations] = useState<InitialRelation[]>([]);
-  const [affinities, setAffinities] = useState<InitialAffinity[]>([]),
-    [savedAffinities, setSavedAffinities] = useState<InitialAffinity[]>([]);
+  // 저장 응답이 올 때 "지금" 작성 중인 말풍선이 있는지 본다. 저장을 보낸 시점에 잡아 둔 상태가 아니라 최신 값을 읽도록 ref로 둔다.
+  const fewPendingRef = useRef<PendingInput>(idle),
+    introPendingRef = useRef<PendingInput>(idle);
+  const onFewPending = useCallback((value: PendingInput) => {
+    fewPendingRef.current = value;
+    setFewPending(value);
+  }, []);
+  const onIntroPending = useCallback((value: PendingInput) => {
+    introPendingRef.current = value;
+    setIntroPending(value);
+  }, []);
+  // raw*는 저장된 상태 값이다. 화면·저장·비교는 아래에서 최신 발화자 목록으로 거른 값(intros 등)만 쓴다.
+  const [rawIntros, setIntros] = useState<IntroItem[]>([]),
+    [rawSavedIntros, setSavedIntros] = useState<IntroItem[]>([]);
+  const [rawRelations, setRelations] = useState<InitialRelation[]>([]),
+    [rawSavedRelations, setSavedRelations] = useState<InitialRelation[]>([]);
+  const [rawAffinities, setAffinities] = useState<InitialAffinity[]>([]),
+    [rawSavedAffinities, setSavedAffinities] = useState<InitialAffinity[]>([]);
   // CREATE-US-04·12 초기 상태 탭에서 장면을 편집할 인트로(clientKey). 인트로 본문 편집의 「초기 상태 설정하기」가
   // 같은 갱신에서 탭과 함께 바꾸므로 이전 선택이 한 번 그려지지 않는다. null이면 첫 번째(기본) 인트로.
   const [stateIntroKey, setStateIntroKey] = useState<string | null>(null);
@@ -129,6 +185,9 @@ export function CommonCreationWorkspace({
           setAffinities(data.affinities);
           setSavedAffinities(data.affinities);
           setTarget(data.saveState);
+          const requested = data.rating?.requested ?? DEFAULT_CONTENT_RATING;
+          setRating(requested);
+          setSavedRating(requested);
           // 다시 불러오면 초기 상태 탭은 이전처럼 첫 번째(기본) 인트로부터 보인다.
           setStateIntroKey(null);
           setLoadCycle((cycle) => cycle + 1);
@@ -145,33 +204,86 @@ export function CommonCreationWorkspace({
   // 머리글 제목·상태는 불러오기 전에도 편집 화면과 같게 보이도록 스토리 조회 캐시를 함께 본다.
   const story = useStory(storyId);
   const characters = few.snapshot?.characters;
-  useEffect(() => {
+  // 발화자 목록이 바뀐 렌더에서 바로 정리한다(이펙트를 거치면 한 번 오래된 목록으로 그려진다).
+  const [prunedFor, setPrunedFor] = useState(characters);
+  if (prunedFor !== characters) {
+    setPrunedFor(characters);
     // 캐릭터 이름 변경은 이름표에만 반영되고, 삭제된 인물의 인트로 말풍선·착장·속마음과
     // 그 인물이 출발/도착인 관계·호감도만 제거한다. 저장본에도 같게 적용해 변경으로 보지 않는다.
-    if (!characters) return;
-    setIntros((value) => removeMissingFromIntros(value, characters));
-    setSavedIntros((value) => removeMissingFromIntros(value, characters));
-    setRelations((value) => removeMissingFromRelations(value, characters));
-    setSavedRelations((value) => removeMissingFromRelations(value, characters));
-    setAffinities((value) => removeMissingFromAffinities(value, characters));
-    setSavedAffinities((value) => removeMissingFromAffinities(value, characters));
-  }, [characters]);
+    if (characters) {
+      setIntros((value) => removeMissingFromIntros(value, characters));
+      setSavedIntros((value) => removeMissingFromIntros(value, characters));
+      setRelations((value) => removeMissingFromRelations(value, characters));
+      setSavedRelations((value) => removeMissingFromRelations(value, characters));
+      setAffinities((value) => removeMissingFromAffinities(value, characters));
+      setSavedAffinities((value) => removeMissingFromAffinities(value, characters));
+    }
+  }
+  // 위 정리는 상태를 영구히 고치지만, 정리보다 먼저 예약된(우선순위가 낮은) 갱신이 뒤에 적용되면 삭제된 인물이 되살아날 수 있다.
+  // 그래서 매 렌더 최신 목록으로 한 번 더 거른다. 입력이 같으면 같은 참조를 돌려줘 하위 메모·이펙트가 반복되지 않는다.
+  const intros = useMemo(
+    () => (characters ? removeMissingFromIntros(rawIntros, characters) : rawIntros),
+    [rawIntros, characters],
+  );
+  const savedIntros = useMemo(
+    () => (characters ? removeMissingFromIntros(rawSavedIntros, characters) : rawSavedIntros),
+    [rawSavedIntros, characters],
+  );
+  const relations = useMemo(
+    () => (characters ? removeMissingFromRelations(rawRelations, characters) : rawRelations),
+    [rawRelations, characters],
+  );
+  const savedRelations = useMemo(
+    () => (characters ? removeMissingFromRelations(rawSavedRelations, characters) : rawSavedRelations),
+    [rawSavedRelations, characters],
+  );
+  const affinities = useMemo(
+    () => (characters ? removeMissingFromAffinities(rawAffinities, characters) : rawAffinities),
+    [rawAffinities, characters],
+  );
+  const savedAffinities = useMemo(
+    () => (characters ? removeMissingFromAffinities(rawSavedAffinities, characters) : rawSavedAffinities),
+    [rawSavedAffinities, characters],
+  );
   const pendingInput: PendingInput = {
     active: fewPending.active || introPending.active,
     lengthDelta: 0,
   };
-  const document =
-    few.snapshot && speech
-      ? { ...withoutForeignAreas(few.snapshot), speech, fewshots: few.groups, intros, relations, affinities }
-      : null;
-  const dirty =
+  // 2~4번(장면) 변경과 등급 변경을 따로 본다. 장면이 그대로면 저장에 preserveScene을 실어 서버가 최신 장면을 유지하게 한다
+  // (등급만 바꾼 저장이 이 화면이 불러온 오래된 장면을 정본처럼 보내지 않게).
+  const sceneDirty =
     few.dirty ||
     (!!loaded && JSON.stringify(speech) !== JSON.stringify(loaded.speech)) ||
     JSON.stringify(intros) !== JSON.stringify(savedIntros) ||
     JSON.stringify(relations) !== JSON.stringify(savedRelations) ||
     // 호감도는 값을 바꾸면 행이 끝으로 옮겨지므로 순서와 무관하게 비교한다.
     !sameAffinities(affinities, savedAffinities);
-  const common = useCommonSave(repository, {
+  const ratingDirty = rating !== null && savedRating !== null && rating !== savedRating;
+  const document: CommonSaveDocument | null =
+    few.snapshot && speech
+      ? {
+          ...withoutForeignAreas(few.snapshot),
+          speech,
+          fewshots: few.groups,
+          intros,
+          relations,
+          affinities,
+          // 바뀐 등급만 싣는다. 빠지면 서버가 기존 선택(다른 화면에서 저장한 값 포함)을 유지한다.
+          requestedRating: ratingDirty ? rating : null,
+          ...(sceneDirty ? {} : { preserveScene: true }),
+        }
+      : null;
+  const dirty = sceneDirty || ratingDirty;
+  // 등급만 담긴 임시 저장본 반영 토큰은 직접 「저장」에만 붙인다(자동·직접 임시 저장은 그대로 임시 저장).
+  const saveRepository = useMemo<CommonSaveRepository>(
+    () => ({
+      load: (id, signal) => repository.load(id, signal),
+      save: (doc, state, mode, requestId, kind) =>
+        repository.save(withRatingFinalize(doc, state, mode, kind), state, mode, requestId, kind),
+    }),
+    [repository],
+  );
+  const common = useCommonSave(saveRepository, {
     storyId,
     document,
     dirty,
@@ -179,18 +291,46 @@ export function CommonCreationWorkspace({
     pendingInput: pendingInput.active,
     captureCommit: () => {
       const commitFew = few.captureCommit();
+      // 저장을 보낼 때의 선택. 응답이 올 때 지금 선택이 이와 같으면 서버 값을 따르고, 다르면(저장 중 다시 고름) 남긴다.
+      const captured = rating;
       return (result, submitted) => {
-        commitFew(result as FewshotsDocument);
-        setLoaded(result);
+        // 실제로 보낸 묶음과 비교해, 저장 중 손대지 않았으면 응답의 (더 새) 예시를 따른다.
+        // 다만 저장 중 예시를 열어 말풍선을 입력 중이면 묶음이 그대로여도 서버 묶음을 따르지 않는다
+        // (서버가 그 예시를 지운 응답이면 작성 중 입력이 사라진다). 이때는 지금 입력을 두고 발급 ID만 합친다.
+        commitFew(result as FewshotsDocument, fewPendingRef.current.active ? undefined : submitted.fewshots);
+        // 저장소(CommonSaveRepository)의 응답이라 등급(rating)을 담고 있다.
+        const response = result as CommonSaveDocument;
+        setLoaded(response);
+        // 응답의 requested가 새 비교 기준이다(등급을 빼고 보냈어도 다른 화면의 선택이 반영돼 있을 수 있다).
+        // 응답에 등급이 없으면(이전 서버) 보낸 등급만 기준으로 삼는다.
+        const sent = (submitted as CommonSaveDocument).requestedRating ?? null;
+        const saved = response.rating ? (response.rating.requested ?? DEFAULT_CONTENT_RATING) : sent;
+        if (saved !== null) {
+          setSavedRating(saved);
+          setRating((current) => (current === captured ? saved : current));
+        }
         setSpeech((current) =>
           JSON.stringify(current) === JSON.stringify(submitted.speech) ? result.speech : current,
         );
+        // 보낸 값 그대로면(저장 중 손대지 않음) 서버 값을 따른다. 장면을 보존한 저장(preserveScene)은 응답에
+        // 보낸 것보다 새 정본 장면이 올 수 있어, 비교 기준만 바꾸면 손대지 않은 입력이 변경으로 보인다.
         // 저장 중 바뀐 인트로 입력·순서는 유지하고 새로 발급된 ID만 합친다.
         setSavedIntros(result.intros);
-        setIntros((current) => applyAllocatedIds(current, result.intros));
-        // 관계는 ID 없이 전체 교체한다. 저장 중 바뀐 입력은 그대로 남아 변경으로 표시된다.
+        // 인트로 본문 편집기도 같은 작성 중 말풍선을 쓰므로, 입력 중이면 서버 목록을 따르지 않는다.
+        setIntros((current) =>
+          !introPendingRef.current.active && JSON.stringify(current) === JSON.stringify(submitted.intros)
+            ? result.intros
+            : applyAllocatedIds(current, result.intros),
+        );
+        // 관계·호감도는 ID 없이 전체 교체한다. 저장 중 바뀐 입력은 그대로 남아 변경으로 표시된다.
         setSavedRelations(result.relations);
+        setRelations((current) =>
+          JSON.stringify(current) === JSON.stringify(submitted.relations) ? result.relations : current,
+        );
         setSavedAffinities(result.affinities);
+        setAffinities((current) =>
+          JSON.stringify(current) === JSON.stringify(submitted.affinities) ? result.affinities : current,
+        );
       };
     },
   });
@@ -202,7 +342,9 @@ export function CommonCreationWorkspace({
     (!!few.snapshot && (completed || guardDraftLeave) && (dirty || pendingInput.active || common.pendingSave));
   // 머리글 뒤로 가기에서 나가기를 확정했다. 가드를 먼저 끈 뒤(다음 커밋) onBack으로 화면을 닫는다.
   const [leaving, setLeaving] = useState(false);
-  const [handoff, setHandoff] = useState<'basic' | 'profile' | null>(null);
+  // 확인 창에서 넘기기를 확정한 요청. 누를 때마다 새 객체라 같은 구역도 다시 넘길 수 있다.
+  const [handoff, setHandoff] = useState<{ section: 'basic' | 'profile' } | null>(null);
+  const handedOff = useRef<typeof handoff>(null);
   // 삭제 성공도 의도한 이동이다. 가드를 먼저 끈 뒤(다음 커밋) onDeleted로 화면을 닫는다.
   const [deleted, setDeleted] = useState(false);
   // 늦게 온 삭제 성공의 이동 판단 기준(편집 화면과 같다): 구역 탭을 오가며 삭제 구역이 내려가도 이 화면이 남아 있으면 마운트로 본다.
@@ -213,13 +355,13 @@ export function CommonCreationWorkspace({
       hostMounted.current = false;
     };
   }, []);
-  useUnsavedCreationGuard(guarded && !leaving && !deleted && handoff === null);
+  // 넘기기 확정 시 고른 공개 범위를 저장된 값으로 되돌려 가드가 꺼진 커밋 뒤에 한 번만 넘긴다.
+  useUnsavedCreationGuard(guarded && !leaving && !deleted);
   useEffect(() => {
-    if (handoff === null) return;
-    setTarget(committedState);
-    setHandoff(null);
-    onOpenEditor?.(handoff);
-  }, [committedState, handoff, onOpenEditor]);
+    if (handoff === null || handedOff.current === handoff) return;
+    handedOff.current = handoff;
+    onOpenEditor?.(handoff.section);
+  }, [handoff, onOpenEditor]);
   useEffect(() => {
     if (leaving) onBack?.();
     // 한 번만 닫는다. onBack 참조가 바뀌어도 다시 부르지 않는다.
@@ -267,7 +409,38 @@ export function CommonCreationWorkspace({
   const irreversible =
     (completed && target === 'draft') || (few.snapshot?.saveState === 'public' && target === 'private');
   // 직접 저장이 진행 중이거나 기다리는 중. 자동 임시 저장만 진행 중일 때는 저장 버튼을 막지 않고, 누르면 이어서 저장한다.
-  const manualBusy = (common.saving && !common.autoSaving) || common.waiting;
+  // 검토 상태 새로고침 중에는 같은 스토리 쓰기 잠금을 쥐므로 저장도 막아 둔다.
+  const refreshing = refreshStatus === 'loading';
+  const manualBusy = (common.saving && !common.autoSaving) || common.waiting || refreshing;
+  /**
+   * CREATE-US-08-AC09·AC12 검토 상태만 한 번 다시 조회한다(입력·고른 등급·나머지 조회 값은 그대로).
+   * 같은 스토리 쓰기 잠금을 쥐어 이 화면·다른 화면의 저장과 겹치지 않게 하고, 그사이 화면 문서가 바뀌었으면(다시 불러오기) 버린다.
+   */
+  const refreshReview = async () => {
+    const start = loaded;
+    if (!start || refreshing) return;
+    const release = writeLock.acquire('save');
+    if (!release) return;
+    const controller = new AbortController();
+    refreshAbort.current = controller;
+    setRefreshStatus('loading');
+    try {
+      const fresh = await repository.load(storyId, controller.signal);
+      if (controller.signal.aborted) return;
+      const review = fresh.rating;
+      if (review)
+        setLoaded((current) =>
+          current === start
+            ? { ...current, rating: { ...review, requested: current.rating?.requested ?? review.requested } }
+            : current,
+        );
+      setRefreshStatus('idle');
+    } catch {
+      if (!controller.signal.aborted) setRefreshStatus('failed');
+    } finally {
+      release();
+    }
+  };
   /**
    * CREATE-US-12 탭 누름. 이 화면이 맡는 구역은 지금처럼 확정된 변경을 자동 임시 저장하고 바꾼다.
    * 기본 설정·유저 프로필은 편집 화면 몫이라 저장된 그대로일 때만 onOpenEditor로 넘긴다(저장을 대신 보내지 않음).
@@ -286,7 +459,7 @@ export function CommonCreationWorkspace({
         setSectionNotice(EDITOR_LOADING_MESSAGE);
         return false;
       }
-      if (common.saving || common.waiting) {
+      if (common.saving || common.waiting || refreshing) {
         setSectionNotice(sectionBusyMessage(next.label));
         return false;
       }
@@ -297,7 +470,10 @@ export function CommonCreationWorkspace({
       setSectionNotice(null);
       if (visibilityChanged) {
         const destination = next.key;
-        confirmUnsavedLeave(() => setHandoff(destination));
+        confirmUnsavedLeave(() => {
+          setTarget(committedState);
+          setHandoff({ section: destination });
+        });
         return false;
       }
       onOpenEditor(next.key);
@@ -399,7 +575,7 @@ export function CommonCreationWorkspace({
           editor={few}
           hideHeader
           hideSaveControls
-          onPendingChange={setFewPending}
+          onPendingChange={onFewPending}
           onEditingChange={setExampleEditing}
           header={speech && !few.loading ? <ExpressionSettings value={speech} onChange={setSpeech} /> : null}
         />
@@ -411,7 +587,7 @@ export function CommonCreationWorkspace({
             intros={intros}
             setIntros={setIntros}
             characters={few.snapshot.characters}
-            onPendingChange={setIntroPending}
+            onPendingChange={onIntroPending}
             onEditingChange={setIntroEditing}
             onOpenState={openStateFor}
           />
@@ -492,12 +668,29 @@ export function CommonCreationWorkspace({
             <Notice tone="alert" message="작성 중인 말풍선을 추가하거나 수정 완료·취소해야 저장할 수 있어요." />
           ) : null}
         </Card>
+        {/* CREATE-US-08-AC09 콘텐츠 등급 선택과 API의 적용 등급·검토 상태·사유·대상. 저장은 하단 저장 버튼이 함께 맡는다. */}
+        {loaded ? (
+          <Card tone="section" style={styles.sectionCard}>
+            <ContentRatingSection
+              visibility={SAVE_STATE_LABEL[committedState]}
+              selected={rating}
+              onSelect={setRating}
+              disabled={manualBusy || common.pendingSave || few.loading || rating === null}
+              applied={loaded.rating?.effective ?? null}
+              reviewStatus={loaded.rating?.reviewStatus ?? null}
+              feedback={formatRatingReviewFeedback(loaded.rating)}
+              refreshStatus={refreshStatus}
+              onRefresh={() => void refreshReview()}
+              refreshDisabled={common.saving || common.pendingSave || few.loading}
+            />
+          </Card>
+        ) : null}
         {/* 다시 불러오기는 목업에 없지만 기존 동작이라 보조 버튼 하나로 둔다. 안내는 확인 단계에서만 보인다. */}
         <View style={styles.confirm}>
           <Button
             label="최신 편집 내용 다시 불러오기"
             variant="secondary"
-            disabled={common.saving || common.pendingSave || few.loading}
+            disabled={common.saving || common.pendingSave || few.loading || refreshing}
             onPress={() =>
               dirty || pendingInput.active || visibilityChanged ? setConfirmReload(true) : void few.reload()
             }

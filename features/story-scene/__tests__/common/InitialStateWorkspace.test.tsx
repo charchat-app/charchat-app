@@ -406,6 +406,31 @@ it('CREATE-US-12: 인트로 상태창의 「초기 상태 설정하기」는 작
   expect(screen.getByRole('button', { name: '초기 상태 설정하기' })).toBeDisabled();
 });
 
+it('저장된 관계·호감도의 인물이 삭제되면 저장본에도 같게 정리해 변경으로 보지 않는다', async () => {
+  const { repository } = fixture({
+    relations: [
+      {
+        clientKey: 'r1',
+        sourceKind: 'character',
+        sourceCharacterId: '5',
+        targetKind: 'character',
+        targetCharacterId: '6',
+        label: '라이벌',
+      },
+    ],
+    affinities: [{ sourceCharacterId: '5', targetKind: 'character', targetCharacterId: '6', value: '40' }],
+  });
+  await render(<CommonCreationWorkspace repository={repository} storyId="1" />);
+  await waitFor(() => expect(screen.getByRole('tab', { name: '초기 상태' })).toBeTruthy());
+  await openTab('초기 상태');
+  expect(screen.getByLabelText('관계 1 관계명').props.value).toBe('라이벌');
+
+  await act(() => setStoryCharacters([{ id: '6', name: '도윤', position: 0 }]));
+  await waitFor(() => expect(screen.queryByLabelText('관계 1 관계명')).toBeNull());
+  expect(screen.queryByText(/하린/)).toBeNull();
+  expect(screen.queryByText('저장하지 않은 변경이 있습니다.')).toBeNull();
+});
+
 it('캐릭터 삭제 정리와 겹친 늦은 변경도 최신 상태에 반영해 삭제된 인물의 행을 되살리지 않는다', async () => {
   const { repository, stored } = fixture();
   await render(<CommonCreationWorkspace repository={repository} storyId="1" />);

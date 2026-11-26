@@ -37,3 +37,6 @@ export { createServerFewshotRepository } from './fewshotRepository';
 export type { FewshotRepository } from './fewshotRepository';
 export { createCommonSaveRepository, type CommonSaveDocument, type CommonSaveRepository } from './commonRepository';
 export { useCommonSave, completionIssues, introLength } from './hooks/useCommonSave';
+// CREATE-US-08-AC09 공개 범위 탭(제작 셸)의 등급 선택·검토 결과 표시
+export { ContentRatingSection, type ContentRatingSectionProps } from './components/ContentRatingSection';
+export { formatRatingReviewFeedback } from './ratingReviewFeedback';

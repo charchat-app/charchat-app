@@ -48,6 +48,7 @@ import { storyImagesKey, useSaveStoryImages, useStoryImages } from '../hooks/use
 import { storyKeys, useSaveStoryBasic, useStory } from '../hooks/useStories';
 import { isUncertain, useStoryPresets, type PresetSaveResult } from '../hooks/useStoryPresets';
 import { useStoryWriteLock, writeBlockedMessage } from '../hooks/useStoryWriteLock';
+import { ContentRatingSection } from './ContentRatingSection';
 import type {
   CommonSaveDocument,
   CreationCharacterImagesPayload,
@@ -60,6 +61,7 @@ import {
   type StoryImagesSaveMode,
   type StoryImagesSnapshot,
 } from '../imagesRepository';
+import { formatRatingReviewFeedback } from '../ratingReviewFeedback';
 import { formatSavedAt } from '../savedAt';
 import type { EditorStory, StoryBasicFields } from '../types';
 
@@ -528,6 +530,8 @@ export function StoryEditorScreen({
       kind,
     );
     if (!result.ok) return false;
+    // 임시 저장본을 바꾸거나 반영한 저장이 성공했으므로 이전 자동 저장의 마무리 키는 대체됐다.
+    autoFinalize.current = null;
     if (result.kind === 'save') {
       autoStaged.current = false;
       // 같은 요청에 담아 반영된 기존 캐릭터 사진은 다음 사진 단계에서 다시 쓰지 않는다.
@@ -558,7 +562,16 @@ export function StoryEditorScreen({
       'manual',
       token.requestId,
     );
-    if (!result.ok) return false;
+    if (!result.ok) {
+      // 마무리 키는 마무리가 성공하거나(아래) 서버가 확실히 거절했거나 다른 저장으로 대체될 때만 버린다.
+      // 사전 조회 실패·차단은 키를 남겨 다시 누른 「저장」이 같은 키로 마무리한다. 성패를 모르면 finalizingAuto로 같은 요청을 다시 보낸다.
+      if (result.rejected) {
+        if (autoFinalize.current === token) autoFinalize.current = null;
+        finalizingAuto.current = null;
+      }
+      return false;
+    }
+    if (autoFinalize.current === token) autoFinalize.current = null;
     finalizingAuto.current = null;
     autoStaged.current = false;
     commonCoveredFaces.current = new Set((imageValues?.characters ?? []).map((c) => c.characterId));
@@ -585,6 +598,21 @@ export function StoryEditorScreen({
         setLockError(FINALIZE_UNBOUND_MESSAGE);
       }
     }
+    stagedKnown.current = stagedSignature(null);
+    setStagedBaseline(null);
+    return true;
+  };
+  /**
+   * CREATE-US-08-AC13 등급만 담긴 임시 저장본을 「저장」으로 반영한다(1단계 대신). 사전 확인·요청은 훅이 맡는다.
+   * 성공하면 임시 저장본이 반영됐으므로 남은 자동 저장 마무리 키는 대체된 것으로 버린다.
+   */
+  const finalizeRating = async () => {
+    save.reset();
+    const result = await presetState.finalizeRatingWorkingCopy();
+    if (!result.ok) return false;
+    autoFinalize.current = null;
+    finalizingAuto.current = null;
+    autoStaged.current = false;
     stagedKnown.current = stagedSignature(null);
     setStagedBaseline(null);
     return true;
@@ -661,6 +689,7 @@ export function StoryEditorScreen({
       basicWithSavedFaces ||
       coverWithOthers ||
       presetState.dirty ||
+      presetState.ratingDirty ||
       presetState.pending
     )
       return saveCommon();
@@ -765,7 +794,8 @@ export function StoryEditorScreen({
   // 미등록 스토리의 하단 「임시 저장」은 유저 프로필을 고쳤으면 kind temporary로 보낸다.
   // 성패를 모르는 임시 저장이 남아 있으면 어느 버튼이든 그 요청을 같은 의도로 다시 보낸다(사진 단계 없이).
   const temporaryFooter =
-    presetState.pendingKind === 'temporary' || (isDraft && presetState.pendingKind === null && presetState.dirty);
+    presetState.pendingKind === 'temporary' ||
+    (isDraft && presetState.pendingKind === null && (presetState.dirty || presetState.ratingDirty));
   /**
    * 성패를 모르는 사진 자동 임시 저장이 남아 있으면 사진을 함께 쓰는 저장(기본 저장의 공통 저장 images·사진 단계,
    * 사진만 다시 저장)은 보내지 않는다. 새 요청키로 사진을 다시 쓰거나 확인 전의 기준으로 덮어쓰지 않게 한다.
@@ -776,6 +806,46 @@ export function StoryEditorScreen({
     setLockError(IMAGES_PENDING_BLOCKED_MESSAGE);
     return true;
   };
+  /**
+   * CREATE-US-07-AC09 「저장」을 자동 임시 저장의 마무리(finalize_auto_request_id)로 보내도 되는지.
+   * 대기한 저장과 자동 저장이 끝난 뒤 누른 저장이 같은 조건을 쓴다: 마무리 가능 응답이 있고, 그 응답의 임시 저장본 시각이
+   * 지금 조회한 임시 저장본 시각과 같으며(그 뒤 다른 임시 저장이 없음), 그 뒤 바뀐 입력이 없을 때만.
+   */
+  const canFinalizeAuto = (token: AutoFinalizeToken | null): token is AutoFinalizeToken => {
+    if (token === null || isDraft || temporaryFooter) return false;
+    const stagedAt =
+      token.source === 'images' ? images.data?.workingCopySavedAt : presetState.query.data?.workingCopySavedAt;
+    return (
+      stagedAt === token.workingCopySavedAt &&
+      !basicChanged() &&
+      !presetState.dirty &&
+      !presetState.ratingDirty &&
+      !storyImagesDirty() &&
+      !savedFacesChanged() &&
+      !newFacesChanged() &&
+      (newCharacters.length === 0 || token.basic?.characters.some((ch) => !ch.id) === true) &&
+      !deletesSavedCharacter()
+    );
+  };
+  /**
+   * CREATE-US-08-AC13 「저장」을 등급만 담긴 임시 저장본의 반영(finalize_rating_working_copy_at)으로 보내도 되는지.
+   * 마지막으로 받은 공통 문서가 등급만 담긴 임시 저장본을 알렸고, 이 화면에 등급 밖의 미저장 변경이 없을 때만.
+   * 등급을 다시 바꾼 것은 허용한다(같은 요청에 requested_rating으로 싣는다). 최신 상태는 보내기 전에 훅이 다시 확인한다.
+   * 일반 차단 조건(completedBlocker·임시 저장본 기본 정보 차단)은 그대로 두고 이 경우만 따로 연다.
+   */
+  const canFinalizeRating = () =>
+    !isDraft &&
+    !temporaryFooter &&
+    presetState.pendingKind === null &&
+    presetState.ratingOnlyWorkingCopy &&
+    !stagedBaseline &&
+    !basicChanged() &&
+    !presetState.dirty &&
+    !storyImagesDirty() &&
+    !savedFacesChanged() &&
+    !newFacesChanged() &&
+    newCharacters.length === 0 &&
+    !deletesSavedCharacter();
   const doSave = temporaryFooter
     ? doTemporary
     : () => {
@@ -783,6 +853,25 @@ export function StoryEditorScreen({
         const pendingAuto = finalizingAuto.current;
         if (presetState.pendingKind === 'save' && pendingAuto) {
           void withWriteLock(() => flow.saveAll(() => finalizeAuto(pendingAuto), saveImagesStep));
+          return;
+        }
+        // 자동 임시 저장이 끝난 뒤 바뀐 입력 없이 누른 「저장」도 그 키로 마무리한다. 키는 마무리가 성공하거나
+        // 거절·대체될 때 버린다(사전 조회가 실패하면 다시 누른 저장이 같은 키로 마무리한다).
+        // CREATE-US-12: 기본 정보 임시본은 공개 범위 탭에서 반영한다. 단, 이미 시작한 마무리의
+        // 사전 조회가 실패했다면 같은 토큰으로 다시 시도한다.
+        const autoToken = autoFinalize.current;
+        if (
+          presetState.pendingKind === null &&
+          (!autoToken?.basic || pendingAuto === autoToken) &&
+          canFinalizeAuto(autoToken)
+        ) {
+          void withWriteLock(() => flow.saveAll(() => finalizeAuto(autoToken), saveImagesStep));
+          return;
+        }
+        // CREATE-US-08-AC13 등급만 임시 저장한 뒤(직접 임시 저장·다시 연 화면·자동 저장 뒤 다시 고른 등급) 누른 「저장」.
+        if (canFinalizeRating()) {
+          finalizingAuto.current = null;
+          void withWriteLock(() => flow.saveAll(finalizeRating, saveImagesStep));
           return;
         }
         finalizingAuto.current = null;
@@ -793,7 +882,7 @@ export function StoryEditorScreen({
     !isDraft &&
     presetState.status === 'ready' &&
     presetState.pendingKind === null &&
-    (isProfileTab ? presetState.dirty : basicChanged());
+    (presetState.ratingDirty || (isProfileTab ? presetState.dirty : basicChanged()));
   const workingCopySavedAt = isDraft ? null : (presetState.query.data?.workingCopySavedAt ?? null);
   const retryImages = () => {
     if (imagesPendingBlocks()) return;
@@ -845,6 +934,7 @@ export function StoryEditorScreen({
     !isDraft &&
     (basicChanged() ||
       presetState.dirty ||
+      presetState.ratingDirty ||
       presetState.pending ||
       imagesPending !== null ||
       storyImagesDirty() ||
@@ -1121,19 +1211,9 @@ export function StoryEditorScreen({
     }
     // CREATE-US-07-AC09 자동 저장이 마무리 가능 응답으로 끝났고 그 뒤 바뀐 입력이 없으면, 대기한 「저장」은
     // 그 키로 최종 저장 한 번만 보낸다(기본 정보·프리셋·이미지 재전송·추가 사진 PUT 없음).
-    const finalizable =
-      intent === 'main' &&
-      token !== null &&
-      !isDraft &&
-      !temporaryFooter &&
-      !basicChanged() &&
-      !presetState.dirty &&
-      !storyImagesDirty() &&
-      !savedFacesChanged() &&
-      !newFacesChanged() &&
-      (newCharacters.length === 0 || token.basic?.characters.some((ch) => !ch.id) === true) &&
-      !deletesSavedCharacter();
-    if (finalizable) {
+    if (intent === 'main' && canFinalizeAuto(token)) {
+      // 마무리가 성공하거나 거절·대체될 때까지 키를 남긴다(사전 조회 실패 뒤 다시 누른 저장이 같은 키로 마무리).
+      autoFinalize.current = token;
       void withWriteLock(() => flow.saveAll(() => finalizeAuto(token), saveImagesStep));
       return;
     }
@@ -1354,7 +1434,23 @@ export function StoryEditorScreen({
         ) : (
           <>
             {/* 라우트가 넘기기를 주지 않은 단독 사용에서만 보인다. 앱에서는 작업 화면이 이 구역을 맡는다. */}
-            <Notice message={`${TABS[tab]} 탭은 아직 연결되지 않았어요.`} />
+            {/* CREATE-US-08 등급 선택은 단독 사용의 공개 범위 탭에서만 그린다(앱 공개 범위 탭 연결은 후속 작업). */}
+            {tab === PUBLISH_TAB ? (
+              <ContentRatingSection
+                visibility={saved.saveState}
+                selected={presetState.rating}
+                onSelect={presetState.setRating}
+                disabled={writeBlocked || presetState.pending || presetState.rating === null}
+                applied={creation.data?.rating?.effective ?? null}
+                reviewStatus={creation.data?.rating?.reviewStatus ?? null}
+                feedback={formatRatingReviewFeedback(creation.data?.rating)}
+                refreshStatus={presetState.reviewRefresh}
+                onRefresh={() => void presetState.refreshRatingReview()}
+                refreshDisabled={saving || presetState.pending}
+              />
+            ) : (
+              <Notice message={`${TABS[tab]} 탭은 아직 연결되지 않았어요.`} />
+            )}
             {tab === PUBLISH_TAB ? (
               <Card tone="section">
                 <StoryDeleteSection
