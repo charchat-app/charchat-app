@@ -46,6 +46,11 @@ export function isConversationAccessDenied(error: unknown) {
   return error instanceof ApiError && [401, 403, 404].includes(error.status);
 }
 
+/** CHAT-US-04-AC04: 서버가 이 계정의 대화가 아니라고 거절했다(남의 방은 404로 숨긴다). 로그인 문제(401)는 뺀다. */
+export function isConversationForbidden(error: unknown) {
+  return error instanceof ApiError && [403, 404].includes(error.status);
+}
+
 async function fetchConversation<T>(
   { client, queryKey, signal }: QueryFunctionContext,
   fetchData: (signal: AbortSignal) => Promise<T>,

@@ -8,7 +8,7 @@ import StoryRoute from '@/app/story/[storyId]';
 import type { ConversationStory } from '@/shared/story-types';
 
 const mockParams = { storyId: '7', sessionId: '19' };
-const mockRouter = { push: jest.fn(), back: jest.fn(), canGoBack: jest.fn(() => true) };
+const mockRouter = { push: jest.fn(), back: jest.fn(), dismissTo: jest.fn(), canGoBack: jest.fn(() => true) };
 
 let mockFocused = true;
 
@@ -761,7 +761,9 @@ describe.each([
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(screen.queryByText('달빛 정원')).not.toBeOnTheScreen();
     expect(screen.queryByTestId('conversation-bubble')).not.toBeOnTheScreen();
-    expect(screen.getByText(errorMessage)).toBeOnTheScreen();
+    // CHAT-US-04-AC04: 대화방이 403·404로 거절되면 공통 접근 불가 안내로 바뀐다.
+    const deniedPage = resource === 'session' && status !== 401;
+    expect(screen.getByText(deniedPage ? '접속할 수 없습니다' : errorMessage)).toBeOnTheScreen();
     expect(screen.queryByRole('button', { name: '다시 시도' })).not.toBeOnTheScreen();
   });
 
