@@ -17,6 +17,7 @@ import {
   getConversationStory,
   startConversation,
 } from '@/features/chat/api';
+import { conversationSessionKey } from '@/features/chat/hooks/chatCache';
 import { ApiError } from '@/lib/api-client';
 import type { ConversationStory, StartConversationInput } from '@/shared/story-types';
 
@@ -44,6 +45,11 @@ export function isDefiniteStartRejection(error: unknown): error is ApiError {
 
 export function isConversationAccessDenied(error: unknown) {
   return error instanceof ApiError && [401, 403, 404].includes(error.status);
+}
+
+/** CHAT-US-04-AC04: 서버가 이 계정의 대화가 아니라고 거절했다(남의 방은 404로 숨긴다). 로그인 문제(401)는 뺀다. */
+export function isConversationForbidden(error: unknown) {
+  return error instanceof ApiError && [403, 404].includes(error.status);
 }
 
 async function fetchConversation<T>(
@@ -182,7 +188,7 @@ export function useConversationStory(id: string) {
 
 export function useConversationSession(id: string) {
   return useQuery({
-    queryKey: ['conversation', 'session', id],
+    queryKey: conversationSessionKey(id),
     queryFn: (context) => fetchConversation(context, (signal) => getConversationSession(id, signal)),
     retry: false,
   });
