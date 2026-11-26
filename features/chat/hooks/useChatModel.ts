@@ -2,15 +2,13 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { changeSessionModel, listChatModels } from '@/features/chat/api';
-import { refreshTurns, turnsKey } from '@/features/chat/hooks/chatCache';
+import { conversationSessionKey as sessionKey, refreshTurns, turnsKey } from '@/features/chat/hooks/chatCache';
 import { ApiError } from '@/lib/api-client';
 import type { ChatTurns, ConversationSession } from '@/shared/story-types';
 
 export const chatModelsKey = ['conversation', 'models'] as const;
 /** 내 대화 목록(모든 계정·페이지). 목록에 세션 모델 이름이 보인다. */
 const sessionListPrefix = ['conversation', 'sessions'] as const;
-/** 대화방 세션 상세(useConversationSession과 같은 키). */
-const sessionKey = (sessionId: string) => ['conversation', 'session', sessionId] as const;
 
 /** 목록을 펼칠 때만 읽는다. 자동 재시도는 하지 않고 이용자가 다시 불러온다. */
 export function useChatModels(enabled: boolean) {

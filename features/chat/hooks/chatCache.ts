@@ -4,6 +4,8 @@ import type { QueryClient } from '@tanstack/react-query';
 import { ApiError } from '@/lib/api-client';
 import type { ChatGeneration, ChatGenerationStatus, ChatTurns } from '@/shared/story-types';
 
+/** 대화방 세션 상세(useConversationSession). 모델 변경·접근 재확인이 같은 키를 무효화한다. */
+export const conversationSessionKey = (sessionId: string) => ['conversation', 'session', sessionId] as const;
 export const turnsKey = (sessionId: string) => ['conversation', 'turns', sessionId] as const;
 export const draftKey = (sessionId: string) => ['conversation', 'draft', sessionId] as const;
 export const sendAttemptKey = (sessionId: string) => ['conversation', 'send-attempt', sessionId] as const;
@@ -27,11 +29,10 @@ export const refreshTurns = (client: QueryClient, sessionId: string) =>
 /**
  * CHAT-US-04-AC04: 방을 연 채로 이력·생성 조회가 403·404로 거절되면(스토리가 비공개·삭제되어 방에 더 들어갈 수 없게 됨 등)
  * 대화방 조회를 다시 해서, 서버가 같은 거절을 주면 대화방 화면이 접근 불가 안내로 바뀌게 한다.
- * 키는 useConversationSession의 대화방 조회 키와 같다.
  */
 export function recheckSessionAccess(client: QueryClient, sessionId: string, error: unknown) {
   if (error instanceof ApiError && (error.status === 403 || error.status === 404)) {
-    void client.invalidateQueries({ queryKey: ['conversation', 'session', sessionId], exact: true });
+    void client.invalidateQueries({ queryKey: conversationSessionKey(sessionId), exact: true });
   }
 }
 

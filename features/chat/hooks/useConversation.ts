@@ -17,6 +17,7 @@ import {
   getConversationStory,
   startConversation,
 } from '@/features/chat/api';
+import { conversationSessionKey } from '@/features/chat/hooks/chatCache';
 import { ApiError } from '@/lib/api-client';
 import type { ConversationStory, StartConversationInput } from '@/shared/story-types';
 
@@ -187,7 +188,7 @@ export function useConversationStory(id: string) {
 
 export function useConversationSession(id: string) {
   return useQuery({
-    queryKey: ['conversation', 'session', id],
+    queryKey: conversationSessionKey(id),
     queryFn: (context) => fetchConversation(context, (signal) => getConversationSession(id, signal)),
     retry: false,
   });
