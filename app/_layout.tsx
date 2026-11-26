@@ -57,6 +57,7 @@ export default function RootLayout() {
             </Stack.Protected>
             <Stack.Protected guard={gate === 'signed-out'}>
               <Stack.Screen name="login" />
+              <Stack.Screen name="signup" />
             </Stack.Protected>
             <Stack.Protected guard={gate === 'pending'}>
               <Stack.Screen name="onboarding" />

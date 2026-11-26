@@ -1,8 +1,8 @@
-// BASE-03 로그인 세션 흐름: 시작 시 복원, 개발용 로그인, 온보딩 완료, 로그아웃
+// BASE-03 로그인 세션 흐름: 시작 시 복원, 이메일 회원가입·로그인, 개발용 로그인, 온보딩 완료, 로그아웃
 import { Platform } from 'react-native';
 
-import { createDevTokens, deleteCurrentSession, updateMe } from '@/features/auth/api';
-import type { ClientPlatform, MePatch, MeResponse } from '@/features/auth/types';
+import { createDevTokens, deleteCurrentSession, signInWithPassword, signUp, updateMe } from '@/features/auth/api';
+import type { ClientPlatform, EmailCredentials, MePatch, MeResponse, TokenResponse } from '@/features/auth/types';
 import { clearChatDeviceData } from '@/features/chat';
 import { ApiError, refreshAccessToken } from '@/lib/api-client';
 import {
@@ -53,13 +53,34 @@ export function restoreSession(): Promise<void> {
   return restoring;
 }
 
-/** 개발용 로그인 키로 로그인한다(EXPO_PUBLIC_DEV_LOGIN=1 + 서버 AUTH_DEV_LOGIN_ENABLED). */
-export async function signInWithDevKey(devUserKey: string): Promise<MeResponse> {
-  const tokens = await createDevTokens(devUserKey.trim(), clientPlatform());
+/** 로그인·가입 응답(TokenResponse)으로 세션을 시작한다. 액세스 토큰은 형식을 보지 않는 문자열로만 다룬다. */
+function startSession(tokens: TokenResponse): MeResponse {
   const grant = grantFromTokenResponse(tokens);
   if (!grant) throw new ApiError(0, 'AUTH_RESPONSE_INVALID', '로그인 응답을 확인하지 못했습니다. 다시 시도해 주세요.');
   applyGrant(grant);
   return tokens.user;
+}
+
+/** 이메일 앞뒤 공백만 지운다. 소문자 변환과 형식 검사는 서버가 한다. 비밀번호는 그대로 보낸다(앞뒤 공백 허용). */
+const emailRequest = ({ email, password }: EmailCredentials) => ({
+  email: email.trim(),
+  password,
+  client_platform: clientPlatform(),
+});
+
+/** 이메일·비밀번호로 가입한다. 새 계정은 온보딩 전(pending)이라 가입 마무리 화면으로 이어진다. */
+export async function signUpWithEmail(credentials: EmailCredentials): Promise<MeResponse> {
+  return startSession(await signUp(emailRequest(credentials)));
+}
+
+/** 이메일·비밀번호로 로그인한다. */
+export async function signInWithEmail(credentials: EmailCredentials): Promise<MeResponse> {
+  return startSession(await signInWithPassword(emailRequest(credentials)));
+}
+
+/** 개발용 로그인 키로 로그인한다(EXPO_PUBLIC_DEV_LOGIN=1 + 서버 AUTH_DEV_LOGIN_ENABLED). */
+export async function signInWithDevKey(devUserKey: string): Promise<MeResponse> {
+  return startSession(await createDevTokens(devUserKey.trim(), clientPlatform()));
 }
 
 /** 필수 동의·기본 플레이 이름을 보내고, 서버가 온보딩 완료로 답하면 이용 가능 상태로 바꾼다. */

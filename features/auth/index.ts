@@ -2,6 +2,7 @@
 export { AuthLoadingScreen } from '@/features/auth/components/AuthLoadingScreen';
 export { LoginScreen } from '@/features/auth/components/LoginScreen';
 export { OnboardingScreen } from '@/features/auth/components/OnboardingScreen';
+export { SignupScreen } from '@/features/auth/components/SignupScreen';
 export { SignOutButton } from '@/features/auth/components/SignOutButton';
 export { useAuthBootstrap, useAuthGate, useSignOut, type AuthGate } from '@/features/auth/hooks/useAuth';
 export { useSessionQueryClient } from '@/features/auth/hooks/useSessionQueryClient';

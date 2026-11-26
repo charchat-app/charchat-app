@@ -3,8 +3,15 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 
 import { getAuthProviders, getMe } from '@/features/auth/api';
-import { completeOnboarding, restoreSession, signInWithDevKey, signOut } from '@/features/auth/session';
-import type { MePatch } from '@/features/auth/types';
+import {
+  completeOnboarding,
+  restoreSession,
+  signInWithDevKey,
+  signInWithEmail,
+  signOut,
+  signUpWithEmail,
+} from '@/features/auth/session';
+import type { AuthProvidersResponse, EmailCredentials, MePatch } from '@/features/auth/types';
 import { devHeaderUserId } from '@/lib/api-client';
 import { getAuthSnapshot, getServerAuthSnapshot, subscribeAuth, type AuthSnapshot } from '@/lib/authSession';
 
@@ -52,12 +59,25 @@ export function useAuthProviders() {
   });
 }
 
+/** 서버가 이메일·비밀번호 가입·로그인을 열어 두었는지(AUTH_PASSWORD_LOGIN_ENABLED). */
+export function offersEmailPassword(data: AuthProvidersResponse | undefined): boolean {
+  return data?.providers.some((item) => item.provider === 'email' && item.flows.includes('password')) ?? false;
+}
+
 export function useMe() {
   return useQuery({ queryKey: authQueryKeys.me, queryFn: ({ signal }) => getMe(signal), retry: false });
 }
 
 export function useDevLogin() {
   return useMutation({ mutationFn: (devUserKey: string) => signInWithDevKey(devUserKey) });
+}
+
+export function useEmailLogin() {
+  return useMutation({ mutationFn: (credentials: EmailCredentials) => signInWithEmail(credentials) });
+}
+
+export function useEmailSignup() {
+  return useMutation({ mutationFn: (credentials: EmailCredentials) => signUpWithEmail(credentials) });
 }
 
 export function useCompleteOnboarding() {

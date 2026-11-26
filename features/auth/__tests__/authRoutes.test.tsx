@@ -10,6 +10,7 @@ import HomeScreen from '@/app/(tabs)/index';
 import RootLayout from '@/app/_layout';
 import LoginRoute from '@/app/login';
 import OnboardingRoute from '@/app/onboarding';
+import SignupRoute from '@/app/signup';
 import { apiRequest } from '@/lib/api-client';
 import { getAuthSnapshot, resetAuthSession } from '@/lib/authSession';
 
@@ -97,6 +98,7 @@ const ROUTES = {
   _layout: RootLayout,
   login: LoginRoute,
   onboarding: OnboardingRoute,
+  signup: SignupRoute,
   '(tabs)/_layout': TabsLayout,
   '(tabs)/index': HomeScreen,
   '(tabs)/chat/index': ChatRoute,
@@ -271,4 +273,55 @@ it('BASE-03 시작 시 복원 실패: 보관된 리프레시 토큰이 거절되
   expect(await screen.findByText('다시 로그인해 주세요')).toBeOnTheScreen();
   expect(view.getPathname()).toBe('/login');
   await waitFor(() => expect(secureValues.has('charchat.auth.v1')).toBe(false));
+});
+
+it('BASE-03 이메일 회원가입: 로그인 화면에서 회원가입으로 가서 가입하면 가입 마무리(온보딩) 화면으로 이어진다', async () => {
+  handler = async (url, init) => {
+    if (url === `${API}/auth/providers`) return json({ providers: [{ provider: 'email', flows: ['password'] }] });
+    if (url === `${API}/auth/signup` && init.method === 'POST')
+      return json({ ...tokens(9, '', true), is_new_user: true }, 201);
+    if (url === `${API}/me`) return json(me(9, true));
+    throw new Error(`unexpected ${init.method ?? 'GET'} ${url}`);
+  };
+
+  const view = await renderRouter(ROUTES, { initialUrl: '/' });
+  await fireEvent.press(await screen.findByRole('button', { name: '회원가입' }));
+  expect(await screen.findByLabelText('비밀번호 확인')).toBeOnTheScreen();
+  expect(view.getPathname()).toBe('/signup');
+
+  // 로그인 화면으로 돌아갔다가 다시 온다.
+  await fireEvent.press(screen.getByRole('button', { name: '이미 계정이 있어요 · 로그인' }));
+  await waitFor(() => expect(view.getPathname()).toBe('/login'));
+  await fireEvent.press(await screen.findByRole('button', { name: '회원가입' }));
+  await waitFor(() => expect(view.getPathname()).toBe('/signup'));
+
+  await fireEvent.changeText(await screen.findByLabelText('이메일'), 'new@example.com');
+  await fireEvent.changeText(screen.getByLabelText('비밀번호'), 'password1');
+  await fireEvent.changeText(screen.getByLabelText('비밀번호 확인'), 'password1');
+  await fireEvent.press(screen.getByRole('button', { name: '가입하기' }));
+
+  expect(await screen.findByText('가입을 마무리해 주세요')).toBeOnTheScreen();
+  expect(view.getPathname()).toBe('/onboarding');
+  expect(await screen.findByRole('checkbox', { name: '(필수) 만 14세 이상입니다' })).toBeOnTheScreen();
+  expect(getAuthSnapshot()).toMatchObject({ status: 'pending', userId: '9', accessToken: 'cca_9' });
+  await waitFor(() => expect(secureValues.get('charchat.auth.v1')).toContain('ccr_9'));
+});
+
+it('BASE-03 이메일 로그인: 가입을 마친 계정은 로그인하면 홈으로 들어간다', async () => {
+  handler = async (url, init) => {
+    if (url === `${API}/auth/providers`) return json({ providers: [{ provider: 'email', flows: ['password'] }] });
+    if (url === `${API}/auth/tokens`) {
+      expect(JSON.parse(String(init.body))).toMatchObject({ grant_type: 'password', email: 'reader@example.com' });
+      return json(tokens(10), 201);
+    }
+    throw new Error(`unexpected ${init.method ?? 'GET'} ${url}`);
+  };
+
+  const view = await renderRouter(ROUTES, { initialUrl: '/' });
+  await fireEvent.changeText(await screen.findByLabelText('이메일'), 'reader@example.com');
+  await fireEvent.changeText(screen.getByLabelText('비밀번호'), 'password1');
+  await fireEvent.press(screen.getByRole('button', { name: '로그인' }));
+  expect(await screen.findByRole('button', { name: '로그아웃' })).toBeOnTheScreen();
+  expect(view.getPathname()).toBe('/');
+  expect(getAuthSnapshot()).toMatchObject({ status: 'active', userId: '10' });
 });

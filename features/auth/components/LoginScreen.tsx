@@ -1,11 +1,19 @@
-// BASE-03 로그인 화면. 1차(A1)는 개발용 로그인 키만 있다. 카카오·구글·Apple 버튼은 A2에서 붙인다.
+// BASE-03 로그인 화면. 이메일·비밀번호 로그인과 회원가입 이동. 개발용 로그인 키는 EXPO_PUBLIC_DEV_LOGIN=1일 때만.
+import { router } from 'expo-router';
 import { useState } from 'react';
 import { ScrollView, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Button, FormField, Notice, Surface, Text, TextField } from '@/components/ui';
 import { MaxContentWidth, Spacing } from '@/constants/theme';
-import { useAuthGate, useAuthProviders, useDevLogin } from '@/features/auth/hooks/useAuth';
+import { emailAuthErrors } from '@/features/auth/components/emailAuthErrors';
+import {
+  offersEmailPassword,
+  useAuthGate,
+  useAuthProviders,
+  useDevLogin,
+  useEmailLogin,
+} from '@/features/auth/hooks/useAuth';
 import { ApiError } from '@/lib/api-client';
 import { clearAuthNotice } from '@/lib/authSession';
 
@@ -17,14 +25,71 @@ function devLoginMessage(error: unknown): string {
   return error.detail || '로그인하지 못했습니다. 다시 시도해 주세요.';
 }
 
-export function LoginScreen() {
-  const { notice } = useAuthGate();
-  const providers = useAuthProviders();
+function EmailLoginForm() {
+  const login = useEmailLogin();
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const errors = emailAuthErrors(login.error);
+  // 요청 중에는 다시 보내지 않는다(중복 로그인 방지).
+  const canSubmit = email.trim() !== '' && password !== '' && !login.isPending;
+
+  const submit = () => {
+    if (!canSubmit) return;
+    clearAuthNotice();
+    login.mutate({ email, password });
+  };
+
+  return (
+    <>
+      <FormField label="이메일" error={errors.email}>
+        <TextField
+          accessibilityLabel="이메일"
+          autoCapitalize="none"
+          autoCorrect={false}
+          autoComplete="email"
+          textContentType="emailAddress"
+          keyboardType="email-address"
+          value={email}
+          onChangeText={setEmail}
+          invalid={errors.email !== undefined}
+        />
+      </FormField>
+      <FormField label="비밀번호" error={errors.password}>
+        <TextField
+          accessibilityLabel="비밀번호"
+          autoCapitalize="none"
+          autoCorrect={false}
+          autoComplete="current-password"
+          textContentType="password"
+          secureTextEntry
+          value={password}
+          onChangeText={setPassword}
+          onSubmitEditing={submit}
+          invalid={errors.password !== undefined}
+        />
+      </FormField>
+      {errors.form ? <Notice tone="alert" message={errors.form} /> : null}
+      <Button
+        label={login.isPending ? '로그인 중…' : '로그인'}
+        disabled={!canSubmit}
+        // 웹(react-native-web)에도 비활성 상태를 알린다.
+        aria-disabled={!canSubmit}
+        onPress={submit}
+      />
+      <Button
+        label="회원가입"
+        variant="secondary"
+        disabled={login.isPending}
+        aria-disabled={login.isPending}
+        onPress={() => router.push('/signup')}
+      />
+    </>
+  );
+}
+
+function DevLoginForm() {
   const devLogin = useDevLogin();
   const [devKey, setDevKey] = useState('');
-  // EXPO_PUBLIC_ 값은 빌드 때 들어간다. 운영 빌드에서는 켜지 않는다.
-  const devLoginEnabled = process.env.EXPO_PUBLIC_DEV_LOGIN === '1';
-  const socialProviders = providers.data?.providers.filter((item) => item.provider !== 'dev') ?? [];
   const canSubmit = devKey.trim() !== '' && !devLogin.isPending;
 
   const submit = () => {
@@ -32,6 +97,37 @@ export function LoginScreen() {
     clearAuthNotice();
     devLogin.mutate(devKey);
   };
+
+  return (
+    <>
+      <FormField label="개발용 로그인 키" hint="서버의 개발용 로그인에 쓰는 값입니다. 예: 1">
+        <TextField
+          accessibilityLabel="개발용 로그인 키"
+          autoCapitalize="none"
+          autoCorrect={false}
+          value={devKey}
+          onChangeText={setDevKey}
+          onSubmitEditing={submit}
+          invalid={devLogin.isError}
+        />
+      </FormField>
+      {devLogin.isError ? <Notice tone="alert" message={devLoginMessage(devLogin.error)} /> : null}
+      <Button
+        label={devLogin.isPending ? '로그인 중…' : '개발용 로그인'}
+        disabled={!canSubmit}
+        aria-disabled={!canSubmit}
+        onPress={submit}
+      />
+    </>
+  );
+}
+
+export function LoginScreen() {
+  const { notice } = useAuthGate();
+  const providers = useAuthProviders();
+  // EXPO_PUBLIC_ 값은 빌드 때 들어간다. 운영 빌드에서는 켜지 않는다.
+  const devLoginEnabled = process.env.EXPO_PUBLIC_DEV_LOGIN === '1';
+  const emailEnabled = offersEmailPassword(providers.data);
 
   return (
     <Surface style={styles.fill}>
@@ -50,33 +146,13 @@ export function LoginScreen() {
               <Notice tone="alert" message="로그인 방법을 불러오지 못했습니다." />
               <Button label="다시 시도" variant="secondary" onPress={() => void providers.refetch()} />
             </>
-          ) : socialProviders.length === 0 && !devLoginEnabled ? (
+          ) : emailEnabled ? (
+            <EmailLoginForm />
+          ) : !devLoginEnabled ? (
             <Text variant="caption">아직 사용할 수 있는 로그인 방법이 없습니다.</Text>
-          ) : (
-            <Text variant="caption">카카오·구글·Apple 로그인은 준비 중입니다.</Text>
-          )}
-
-          {devLoginEnabled ? (
-            <>
-              <FormField label="개발용 로그인 키" hint="서버의 개발용 로그인에 쓰는 값입니다. 예: 1">
-                <TextField
-                  accessibilityLabel="개발용 로그인 키"
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  value={devKey}
-                  onChangeText={setDevKey}
-                  onSubmitEditing={submit}
-                  invalid={devLogin.isError}
-                />
-              </FormField>
-              {devLogin.isError ? <Notice tone="alert" message={devLoginMessage(devLogin.error)} /> : null}
-              <Button
-                label={devLogin.isPending ? '로그인 중…' : '개발용 로그인'}
-                disabled={!canSubmit}
-                onPress={submit}
-              />
-            </>
           ) : null}
+
+          {devLoginEnabled ? <DevLoginForm /> : null}
         </ScrollView>
       </SafeAreaView>
     </Surface>

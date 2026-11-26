@@ -5,6 +5,8 @@ import type {
   DevTokenRequest,
   MePatch,
   MeResponse,
+  PasswordTokenRequest,
+  SignupRequest,
   TokenResponse,
 } from '@/features/auth/types';
 import { apiRequest } from '@/lib/api-client';
@@ -24,6 +26,17 @@ export const createDevTokens = (devUserKey: string, clientPlatform: ClientPlatfo
       dev_user_key: devUserKey,
       client_platform: clientPlatform,
     } satisfies DevTokenRequest),
+  });
+
+/** 이메일·비밀번호 회원가입. 응답은 로그인과 같은 TokenResponse다. */
+export const signUp = (request: SignupRequest) =>
+  apiRequest<TokenResponse>('/auth/signup', { method: 'POST', body: JSON.stringify(request) });
+
+/** 이메일·비밀번호 로그인. */
+export const signInWithPassword = ({ email, password, client_platform }: Omit<PasswordTokenRequest, 'grant_type'>) =>
+  apiRequest<TokenResponse>('/auth/tokens', {
+    method: 'POST',
+    body: JSON.stringify({ grant_type: 'password', email, password, client_platform } satisfies PasswordTokenRequest),
   });
 
 export const deleteCurrentSession = () =>

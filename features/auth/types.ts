@@ -1,10 +1,14 @@
 // BASE-03 로그인·내 계정 API 타입 (서버 계약: POST /auth/tokens, GET·PATCH /me, GET /auth/providers)
 
-export type AuthProviderName = 'kakao' | 'google' | 'apple' | 'dev';
+export type AuthProviderName = 'email' | 'kakao' | 'google' | 'apple' | 'dev';
 export type ClientPlatform = 'ios' | 'android' | 'web';
 
-/** redirect: 시스템 브라우저 인가, native: 기기 로그인(iOS 애플), direct: 개발용 직접 발급(dev 제공자) */
-export type AuthProvider = { provider: AuthProviderName; flows: ('redirect' | 'native' | 'direct')[] };
+/**
+ * password: 이메일·비밀번호(email 제공자), redirect: 시스템 브라우저 인가, native: 기기 로그인(iOS 애플),
+ * direct: 개발용 직접 발급(dev 제공자)
+ */
+export type AuthFlow = 'password' | 'redirect' | 'native' | 'direct';
+export type AuthProvider = { provider: AuthProviderName; flows: AuthFlow[] };
 export type AuthProvidersResponse = { providers: AuthProvider[] };
 
 /** 동의 항목별 동의한 버전. 동의하지 않았으면 null */
@@ -40,3 +44,10 @@ export type TokenResponse = {
 };
 
 export type DevTokenRequest = { grant_type: 'dev'; dev_user_key: string; client_platform: ClientPlatform };
+
+/** 이메일·비밀번호 입력값. 이메일 정규화(공백 제거·소문자)와 규칙 검사는 서버가 한다. */
+export type EmailCredentials = { email: string; password: string };
+/** POST /auth/signup. 성공하면 201 TokenResponse(계정은 온보딩 전 pending). */
+export type SignupRequest = EmailCredentials & { client_platform: ClientPlatform };
+/** POST /auth/tokens grant_type=password. 이메일 없음·비밀번호 틀림은 같은 401 AUTH_INVALID_CREDENTIALS. */
+export type PasswordTokenRequest = EmailCredentials & { grant_type: 'password'; client_platform: ClientPlatform };
