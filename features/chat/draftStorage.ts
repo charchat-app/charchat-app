@@ -15,6 +15,8 @@ export function getDraftStorage(): ChatDraftStorage | null {
       getItem: (key) => asyncStorage.getItem(key),
       setItem: (key, value) => asyncStorage.setItem(key, value),
       removeItem: (key) => asyncStorage.removeItem(key),
+      getAllKeys: () => asyncStorage.getAllKeys(),
+      multiRemove: (keys) => asyncStorage.multiRemove([...keys]),
     };
     return storage;
   } catch {
