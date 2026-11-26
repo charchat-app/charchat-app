@@ -7,14 +7,23 @@ import { getConversationOwnerId } from '@/features/chat/conversationIdentity';
 import { decodeDraft, encodeDraft } from '@/features/chat/draftCodec';
 import { chatDraftKey, persistDraft, readDraft } from '@/features/chat/draftPersistence';
 import { getDraftStorage } from '@/features/chat/draftStorage';
-import { draftKey, turnsKey } from '@/features/chat/hooks/chatCache';
+import { draftKey, recheckSessionAccess, turnsKey } from '@/features/chat/hooks/chatCache';
 import { emptyDraft, isDraftEmpty, type MessageDraft } from '@/features/chat/messageDraft';
 
 /** 화면에 들어올 때마다 다시 읽어 진행 중인 생성을 이어서 표시한다(AC13·AC14). */
 export function useChatTurns(sessionId: string, enabled: boolean) {
+  const client = useQueryClient();
   return useQuery({
     queryKey: turnsKey(sessionId),
-    queryFn: ({ signal }) => getChatTurns(sessionId, signal),
+    queryFn: async ({ signal }) => {
+      try {
+        return await getChatTurns(sessionId, signal);
+      } catch (error) {
+        // CHAT-US-04-AC04: 전송·재시도·생성 조회 거절도 이력 재조회를 거치므로 여기 한 곳에서 접근을 다시 확인한다.
+        if (!signal.aborted) recheckSessionAccess(client, sessionId, error);
+        throw error;
+      }
+    },
     retry: false,
     enabled,
   });

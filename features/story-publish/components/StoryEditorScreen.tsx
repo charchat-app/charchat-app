@@ -1,11 +1,19 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { Badge, Button, Notice, ScreenHeader, Surface, Text, TopTabs } from '@/components/ui';
-import { Spacing } from '@/constants/theme';
-import { useTheme } from '@/hooks/use-theme';
+import {
+  Button,
+  Card,
+  EditorHeader,
+  Notice,
+  ScreenHeader,
+  Section,
+  StickyFooter,
+  Surface,
+  Text,
+} from '@/components/ui';
+import { ContentInset, Spacing } from '@/constants/theme';
 import { ApiError, type FieldIssue } from '@/lib/api-client';
 import { fromImageDto, type MediaImage } from '@/shared/media';
 import type { CreationSaveKind } from '@/shared/story-types';
@@ -24,11 +32,20 @@ import {
 } from '@/features/story-setup';
 
 import { toAppIssues } from '../api';
+import {
+  CREATION_TAB_LABELS,
+  saveStatusLine,
+  sectionAt,
+  sectionBusyMessage,
+  sectionDirtyMessage,
+  sectionIndex,
+  type EditorSection,
+  type SceneSection,
+} from '../creationSections';
 import { applySavedIds, currentBasicIssues, toFieldErrors } from '../formSync';
-import { announceStoryDeleted } from '../hooks/useDeletedNotice';
 import { useSaveFlow } from '../hooks/useSaveFlow';
 import { storyImagesKey, useSaveStoryImages, useStoryImages } from '../hooks/useStoryImages';
-import { storyKeys, useDeleteStory, useSaveStoryBasic, useStory } from '../hooks/useStories';
+import { storyKeys, useSaveStoryBasic, useStory } from '../hooks/useStories';
 import { isUncertain, useStoryPresets, type PresetSaveResult } from '../hooks/useStoryPresets';
 import { useStoryWriteLock, writeBlockedMessage } from '../hooks/useStoryWriteLock';
 import { ContentRatingSection } from './ContentRatingSection';
@@ -48,16 +65,18 @@ import { formatRatingReviewFeedback } from '../ratingReviewFeedback';
 import { formatSavedAt } from '../savedAt';
 import type { EditorStory, StoryBasicFields } from '../types';
 
-import { StoryDeleteConfirm } from './StoryDeleteConfirm';
+import { StoryDeleteSection } from './StoryDeleteSection';
 
-/** 목업의 제작 탭 구성. 지금은 기본 설정 탭만 서버와 연결되어 있다. */
-const TABS = ['기본 설정', '말투·서술', '인트로', '초기 상태', '유저 프로필', '공개 범위'] as const;
-/** 스토리 삭제(CREATE-US-07-AC10) 진입점이 있는 탭. 공개 범위는 7번(저장·공개·수정) 몫이다. */
-const PUBLISH_TAB = TABS.indexOf('공개 범위');
+/**
+ * CREATE-US-12 목업 v15 제작 탭 구성(creationSections). 이 화면은 기본 설정·유저 프로필을 맡고,
+ * 나머지 구역(말투·서술·인트로·초기 상태·공개 범위)은 라우트가 넘긴 onOpenScene으로 작업 화면에 넘긴다.
+ */
+const TABS = CREATION_TAB_LABELS;
+/** 스토리 삭제(CREATE-US-07-AC10) 진입점이 있는 탭. 넘기기가 없을 때(단독 사용)만 이 화면이 그린다. */
+const PUBLISH_TAB = sectionIndex('visibility');
 /** 사진 편집기에서 아직 id가 없는 새 캐릭터 목록을 구분하는 접두사(서버 캐릭터 id와 겹치지 않음). */
 const NEW_CHARACTER = 'new:';
 const UPLOAD_WAIT_MESSAGE = '이미지를 올리는 중이에요. 업로드가 끝나면 저장하거나 다른 탭으로 이동할 수 있어요.';
-const DELETE_BLOCKED_MESSAGE = '저장하는 중에는 삭제할 수 없어요. 저장이 끝난 뒤 다시 시도해 주세요.';
 /** CREATE-US-07-AC09 자동 임시 저장 주기 (2~4번 작업 화면의 자동 저장과 같다) */
 const AUTO_SAVE_INTERVAL_MS = 60000;
 const AUTO_SAVING_MESSAGE = '자동 임시 저장 중…';
@@ -116,18 +135,23 @@ export type StoryEditorScreenProps = {
    */
   onUnsavedChange?: (unsaved: boolean) => void;
   /**
-   * CREATE-US-07 「말투·서술」 탭을 눌렀을 때 2~4번 작업 화면으로 넘긴다. 라우트가 이동을 맡는다.
+   * CREATE-US-07·12 작업 화면이 맡는 구역 탭(말투·서술·인트로·초기 상태·공개 범위)을 눌렀을 때 그 구역을 실어
+   * 2~4번 작업 화면으로 넘긴다. 라우트가 이동을 맡는다.
    * 저장하지 않은 변경(미등록 스토리 포함)·저장·업로드가 남아 있으면 부르지 않고 안내한다(입력은 그대로).
-   * 넘기지 않으면 지금처럼 탭만 바꾼다.
+   * 넘기지 않으면 지금처럼 탭만 바꾼다(연결되지 않은 탭 안내).
+   */
+  onOpenScene?: (section: SceneSection) => void;
+  /**
+   * CREATE-US-07 「말투·서술」 탭만 넘기던 이전 연결. onOpenScene이 없을 때만 쓰며, 다른 구역 탭은 지금처럼 탭만 바꾼다.
+   * 같은 미저장·저장 중 확인을 거친다.
    */
   onOpenSpeech?: () => void;
+  /** CREATE-US-12 처음 보일 구역. 작업 화면에서 기본 설정·유저 프로필로 넘어올 때 라우트가 넘긴다. */
+  initialSection?: EditorSection;
 };
 
-const SPEECH_TAB = TABS.indexOf('말투·서술');
-const SPEECH_DIRTY_MESSAGE =
-  '저장하지 않은 변경이 있어 말투·서술로 이동하지 않았어요. 입력은 그대로예요. 먼저 저장해 주세요.';
-const SPEECH_BUSY_MESSAGE = '저장하는 중에는 말투·서술로 이동할 수 없어요. 저장이 끝난 뒤 다시 눌러 주세요.';
-const SPEECH_LOADING_MESSAGE = '저장된 내용을 불러오는 중이에요. 불러온 뒤 다시 눌러 주세요.';
+const SCENE_SAVE_HINT = '먼저 저장해 주세요.';
+const SCENE_LOADING_MESSAGE = '저장된 내용을 불러오는 중이에요. 불러온 뒤 다시 눌러 주세요.';
 
 const alwaysFocused = () => true;
 
@@ -141,9 +165,10 @@ export function StoryEditorScreen({
   onDeleted,
   isRouteFocused = alwaysFocused,
   onUnsavedChange,
+  onOpenScene,
   onOpenSpeech,
+  initialSection,
 }: StoryEditorScreenProps) {
-  const c = useTheme();
   const queryClient = useQueryClient();
   const { status: writeStatus, acquire, peek, deleteError } = useStoryWriteLock(storyId);
   // 다른 화면이 같은 스토리를 쓰는 중이라 저장을 보내지 않았을 때의 안내 (CREATE-US-07-AC03/07/09)
@@ -151,10 +176,9 @@ export function StoryEditorScreen({
   const story = useStory(storyId, writeStatus !== 'deleted');
   const waitingForSave = useRef(writeStatus === 'save');
   const save = useSaveStoryBasic(storyId);
-  const remove = useDeleteStory(storyId);
-  const [tab, setTab] = useState(0);
+  const [tab, setTab] = useState(() => (initialSection ? sectionIndex(initialSection) : 0));
   const [confirmingDelete, setConfirmingDelete] = useState(false);
-  // CREATE-US-07 말투·서술로 넘기지 못한 이유. 다른 탭을 누르거나 넘기면 지운다.
+  // CREATE-US-07·12 작업 화면 구역으로 넘기지 못한 이유. 다른 탭을 누르거나 넘기면 지운다.
   const [speechNotice, setSpeechNotice] = useState<string | null>(null);
   const mounted = useRef(true);
   // 캐릭터를 끄는 동안 화면 스크롤을 멈춘다 (AC14: 드래그와 페이지 스크롤이 겹치지 않게)
@@ -234,6 +258,8 @@ export function StoryEditorScreen({
   const imagesPendingRef = useRef<PendingImagesSave | null>(null);
   const confirmedImageRetryKey = useRef<string | null>(null);
   const [imagesPending, setImagesPendingState] = useState<PendingImagesSave | null>(null);
+  /** 같은 틱의 누름도 판단하도록 ref로 본다. 진행 중인 업로드나 성패를 모르는 사진 저장이 있으면 true. */
+  const photoEditorBusy = () => imagesPendingRef.current !== null || uploadSources.current.size > 0;
   const setImagesPending = (next: PendingImagesSave | null) => {
     imagesPendingRef.current = next;
     setImagesPendingState(next);
@@ -389,26 +415,6 @@ export function StoryEditorScreen({
   );
   const errors = toFieldErrors(issues, issueKeys);
   const isDraft = saved.saveState === '임시 저장';
-  // 서버가 삭제를 확인(204)하고 캐시 정리가 끝난 뒤에만 목록으로 돌아간다.
-  // 응답이 늦게 와서 그 사이 이 화면이 언마운트됐거나 포커스를 잃었다면 이동하지 않는다
-  // (다른 화면에 있는 사용자를 뒤로 보내지 않게). 실패하면 확인 안내가 오류를 보여 주고 머문다.
-  const doDelete = async (): Promise<void> => {
-    const release = acquire('delete');
-    if (!release) {
-      return Promise.reject(new Error(DELETE_BLOCKED_MESSAGE));
-    }
-    try {
-      await remove.mutateAsync();
-    } catch (e) {
-      release(false, messageOf(e instanceof Error ? e : null));
-      throw e;
-    }
-    release(true);
-    if (mounted.current && isRouteFocused()) {
-      announceStoryDeleted(queryClient);
-      onDeleted();
-    }
-  };
   const newCharacters = values.characters.filter((ch) => !ch.id);
   // 비공개·공개 스토리는 새 캐릭터의 사진을 저장 전에 고르고, 「저장」 한 요청으로 함께 반영한다(AC07·AC08).
   const pickNewCharacterImages = !isDraft;
@@ -714,6 +720,7 @@ export function StoryEditorScreen({
           : v,
       );
       setSavedKeys(sent);
+      presetState.clearBasicFailure();
       return true;
     } catch {
       return false;
@@ -1210,11 +1217,11 @@ export function StoryEditorScreen({
   // 자동 임시 저장 중에도 저장 버튼은 눌러 대기열에 넣을 수 있다. 그 밖의 쓰기 버튼은 지금처럼 막는다.
   const saveBlocked = autoSaving ? uploading : writeBlocked;
   /**
-   * CREATE-US-07 말투·서술 넘기기. 작업 화면은 서버에 저장된 내용만 불러오므로, 이 화면에 저장되지 않은 입력이
+   * CREATE-US-07·12 작업 화면 구역 넘기기. 작업 화면은 서버에 저장된 내용만 불러오므로, 이 화면에 저장되지 않은 입력이
    * 남아 있으면(미등록 스토리 포함) 넘기지 않는다. 자동 저장·직접 저장을 대신 보내지 않고 입력도 버리지 않는다.
    * 같은 틱의 누름도 판단하도록 업로드·자동 저장은 ref로, 쓰기 잠금은 peek()으로 본다. 두 번 누름은 라우트가 한 번만 쌓는다.
    */
-  const openSpeech = (open: () => void) => {
+  const openScene = (label: string, open: () => void) => {
     if (uploadSources.current.size > 0) {
       setSpeechNotice(UPLOAD_WAIT_MESSAGE);
       return;
@@ -1227,11 +1234,11 @@ export function StoryEditorScreen({
       // 같은 틱에 저장 버튼과 함께 눌러도 렌더를 기다리지 않고 지금 잠금 상태를 본다.
       peek() !== 'idle'
     ) {
-      setSpeechNotice(SPEECH_BUSY_MESSAGE);
+      setSpeechNotice(sectionBusyMessage(label));
       return;
     }
     if (presetState.status === 'loading') {
-      setSpeechNotice(SPEECH_LOADING_MESSAGE);
+      setSpeechNotice(SCENE_LOADING_MESSAGE);
       return;
     }
     const dirty =
@@ -1244,7 +1251,14 @@ export function StoryEditorScreen({
       savedFacesChanged() ||
       newFacesChanged();
     if (dirty) {
-      setSpeechNotice(SPEECH_DIRTY_MESSAGE);
+      setSpeechNotice(
+        sectionDirtyMessage(
+          label,
+          showProfileTemporary
+            ? '먼저 저장해 주세요. 아래 「임시 저장」을 누른 뒤 다시 시도해 주세요.'
+            : SCENE_SAVE_HINT,
+        ),
+      );
       return;
     }
     if (!mounted.current || !isRouteFocused()) return;
@@ -1252,8 +1266,14 @@ export function StoryEditorScreen({
     open();
   };
   const changeTab = (next: number) => {
-    if (next === SPEECH_TAB && onOpenSpeech) {
-      openSpeech(onOpenSpeech);
+    const target = sectionAt(next);
+    if (target?.owner === 'scene' && onOpenScene) {
+      const section: SceneSection = target.key;
+      openScene(target.label, () => onOpenScene(section));
+      return;
+    }
+    if (target?.key === 'speech' && !onOpenScene && onOpenSpeech) {
+      openScene(target.label, onOpenSpeech);
       return;
     }
     setSpeechNotice(null);
@@ -1263,23 +1283,59 @@ export function StoryEditorScreen({
     setTab(next);
   };
 
+  // 목업 v15 「스토리 이미지」 카드 내용. 캐릭터 얼굴 사진은 BasicInfoForm이 캐릭터 카드 안에 그린다(characterPhotos).
+  const storyPhotoCard = (
+    <>
+      {!isDraft && images.data?.workingCopySavedAt ? (
+        <Notice message="사진은 임시 저장됐어요. 이용자는 아직 이전 사진을 봐요. 공개 범위 탭에서 저장하면 함께 반영돼요." />
+      ) : null}
+      {images.isError ? (
+        <View style={styles.centered}>
+          <Text variant="error">{`이미지를 불러오지 못했어요. (${messageOf(images.error)})`}</Text>
+          <Button label="다시 시도" variant="secondary" onPress={() => void images.refetch()} />
+        </View>
+      ) : null}
+      {/* 다시 불러오기가 실패해도 이미 편집 중인 값이 있으면 편집기를 남긴다. 언마운트하면 진행 중인 업로드를 잃는다. */}
+      {editorValues === null ? (
+        images.isError ? null : (
+          <Text variant="caption">이미지 불러오는 중…</Text>
+        )
+      ) : (
+        <StoryImagesEditor
+          values={editorValues}
+          onChange={changeImages}
+          // 성공 여부를 모르는 공통 저장이 남아 있으면 같은 요청으로 다시 보내야 하므로 사진도 고치지 않게 한다.
+          // 성패를 모르는 사진 자동 임시 저장도 같은 요청으로 다시 보내야 하므로 확인 전에는 사진을 고정한다.
+          disabled={saving || presetState.pending || imagesPending !== null}
+          unsavedCharacterNames={unsavedCharacterNames}
+          onDragActiveChange={setDragging}
+          onUploadActiveChange={(source, active) => trackUpload(`images:${source}`, active)}
+          includeCharacters={false}
+        />
+      )}
+    </>
+  );
+
   return (
     <Surface style={styles.container}>
-      <ScreenHeader
+      {/* CREATE-US-12 목업 renderEditor 머리글: 압축 제목·상태 배지·저장 정책 한 줄·가로 스크롤 6개 탭 */}
+      <EditorHeader
         title={values.title || '새 스토리'}
         onBack={onBack}
         backLabel="목록으로 돌아가기"
-        right={<Badge label={saved.saveState} />}
+        badge={saved.saveState}
+        status={saveStatusLine(!isDraft)}
+        tabs={TABS}
+        activeIndex={tab}
+        onTabChange={changeTab}
       />
-      {/* 가로 스크롤 탭이 세로로 늘어나지 않게 높이를 내용에 맞춘다 */}
-      <View style={styles.tabs}>
-        <TopTabs tabs={TABS} activeIndex={tab} onChange={changeTab} />
-      </View>
       <ScrollView
         testID="story-editor-body"
         style={styles.body}
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+        showsHorizontalScrollIndicator={false}
         scrollEnabled={!dragging}
       >
         {deleteError && !(tab === PUBLISH_TAB && confirmingDelete) ? (
@@ -1301,41 +1357,31 @@ export function StoryEditorScreen({
                 setValues((v) => {
                   if (!v) return v;
                   const next = update(v);
-                  return saving && !sameRoster(v, next) ? v : next;
+                  if (saving && !sameRoster(v, next)) return v;
+                  // 사진 업로드·성패를 모르는 사진 저장이 남아 있으면 캐릭터 삭제만 막는다(카드 안 사진 편집기가 언마운트된다).
+                  if (photoEditorBusy() && next.characters.length < v.characters.length) return v;
+                  return next;
                 });
               }}
+              removeCharacterDisabled={imagesPending !== null || uploading}
               errors={errors}
               onDragActiveChange={setDragging}
+              // CREATE-US-12 목업 v15 basic(): 스토리 정보 → 스토리 이미지 카드 → 등장 캐릭터(카드마다 얼굴 사진이 이름 위)
+              characterPhotos={{
+                values: editorValues,
+                error: images.isError ? messageOf(images.error) : null,
+                onChange: changeImages,
+                disabled: saving || presetState.pending || imagesPending !== null,
+                onDragActiveChange: setDragging,
+                onUploadActiveChange: (source, active) => trackUpload(`images:${source}`, active),
+                // 저장된 캐릭터는 서버 id, 비공개·공개 스토리의 새 캐릭터는 편집용 목록 id, 미등록 스토리의 새 캐릭터는 저장 뒤에 붙인다.
+                photoIdOf: (ch) => (ch.id ? ch.id : pickNewCharacterImages ? `${NEW_CHARACTER}${ch.key}` : null),
+              }}
+              storyPhotos={
+                // 목업 .section 「스토리 이미지」 구역 카드
+                <Card tone="section">{storyPhotoCard}</Card>
+              }
             />
-            <View style={styles.imagesSection}>
-              <Text variant="heading">이미지</Text>
-              {!isDraft && images.data?.workingCopySavedAt ? (
-                <Notice message="사진은 임시 저장됐어요. 이용자는 아직 이전 사진을 봐요. 저장·공개 탭에서 저장하면 함께 반영돼요." />
-              ) : null}
-              {images.isError ? (
-                <View style={styles.centered}>
-                  <Text variant="error">{`이미지를 불러오지 못했어요. (${messageOf(images.error)})`}</Text>
-                  <Button label="다시 시도" variant="secondary" onPress={() => void images.refetch()} />
-                </View>
-              ) : null}
-              {/* 다시 불러오기가 실패해도 이미 편집 중인 값이 있으면 편집기를 남긴다. 언마운트하면 진행 중인 업로드를 잃는다. */}
-              {editorValues === null ? (
-                images.isError ? null : (
-                  <Text variant="caption">이미지 불러오는 중…</Text>
-                )
-              ) : (
-                <StoryImagesEditor
-                  values={editorValues}
-                  onChange={changeImages}
-                  // 성공 여부를 모르는 공통 저장이 남아 있으면 같은 요청으로 다시 보내야 하므로 사진도 고치지 않게 한다.
-                  // 성패를 모르는 사진 자동 임시 저장도 같은 요청으로 다시 보내야 하므로 확인 전에는 사진을 고정한다.
-                  disabled={saving || presetState.pending || imagesPending !== null}
-                  unsavedCharacterNames={unsavedCharacterNames}
-                  onDragActiveChange={setDragging}
-                  onUploadActiveChange={(source, active) => trackUpload(`images:${source}`, active)}
-                />
-              )}
-            </View>
           </>
         ) : isProfileTab ? (
           presetState.status === 'loading' ? (
@@ -1351,14 +1397,12 @@ export function StoryEditorScreen({
               message="유저 프로필을 불러오지 못했어요. 서버가 프로필 목록을 알려 주지 않아 편집·저장할 수 없어요."
             />
           ) : (
-            <>
-              {isDraft ? (
-                <Notice message="저장하면 기본 정보와 함께 저장돼요." />
-              ) : (
-                <Notice message="「임시 저장」은 유저 프로필만 저장하고 공개 상태를 바꾸지 않아요. 기본 정보·사진은 「변경 내용 저장」으로 저장해요." />
-              )}
+            // 목업 profiles(): 「이용자에게 건넬 역할」 구역 카드
+            // 목업 v15: h2 「이용자에게 건넬 역할」 + .muted 설명 → 프로필 .item 카드들 → 「+ 추천 프로필 추가」 → 안내
+            <Section card first title="이용자에게 건넬 역할" description="제작자 추천 프로필을 0~5개 제공할 수 있어요.">
+              {isDraft ? <Text variant="caption">저장하면 기본 정보와 함께 저장돼요.</Text> : null}
               {workingCopySavedAt ? (
-                <Notice message="임시 저장한 내용이 있어요. 이용자는 아직 이전 내용을 봐요. 저장·공개 탭에서 저장하면 반영돼요." />
+                <Notice message="임시 저장한 내용이 있어요. 이용자는 아직 이전 내용을 봐요. 공개 범위 탭에서 저장하면 반영돼요." />
               ) : null}
               {presetState.pending ? (
                 <Notice message="이전 저장 결과를 확인할 때까지 고칠 수 없어요. 다시 저장해 주세요." />
@@ -1379,10 +1423,12 @@ export function StoryEditorScreen({
                 onDragActiveChange={setDragging}
                 onUploadActiveChange={(source, active) => trackUpload(`presets:${source}`, active)}
               />
-            </>
+            </Section>
           )
         ) : (
           <>
+            {/* 라우트가 넘기기를 주지 않은 단독 사용에서만 보인다. 앱에서는 작업 화면이 이 구역을 맡는다. */}
+            {/* CREATE-US-08 등급 선택은 단독 사용의 공개 범위 탭에서만 그린다(앱 공개 범위 탭 연결은 후속 작업). */}
             {tab === PUBLISH_TAB ? (
               <ContentRatingSection
                 visibility={saved.saveState}
@@ -1400,37 +1446,28 @@ export function StoryEditorScreen({
               <Notice message={`${TABS[tab]} 탭은 아직 연결되지 않았어요.`} />
             )}
             {tab === PUBLISH_TAB ? (
-              <View style={[styles.danger, { borderTopColor: c.border }]}>
-                {confirmingDelete ? (
-                  <StoryDeleteConfirm
-                    storyTitle={saved.title}
-                    onConfirm={doDelete}
-                    onCancel={() => setConfirmingDelete(false)}
-                    pending={writeStatus === 'delete'}
-                    blocked={writeStatus === 'save'}
-                    error={deleteError}
-                  />
-                ) : (
-                  <Button
-                    label="스토리 삭제"
-                    variant="danger"
-                    onPress={() => setConfirmingDelete(true)}
-                    disabled={writeStatus !== 'idle'}
-                  />
-                )}
-              </View>
+              <Card tone="section">
+                <StoryDeleteSection
+                  storyId={storyId}
+                  storyTitle={saved.title}
+                  onDeleted={onDeleted}
+                  isRouteFocused={isRouteFocused}
+                  showHeading={false}
+                  confirming={confirmingDelete}
+                  onConfirmingChange={setConfirmingDelete}
+                  isHostMounted={() => mounted.current}
+                />
+              </Card>
             ) : null}
           </>
         )}
       </ScrollView>
-      {/* 유저 프로필도 이 저장 버튼으로 기본 정보와 함께 저장한다 */}
+      {/* CREATE-US-12 목업 .bottom 하단 고정 줄. 유저 프로필도 이 저장 버튼으로 기본 정보와 함께 저장한다 */}
       {
-        <SafeAreaView
-          edges={['bottom']}
-          style={[styles.footer, { borderTopColor: c.border, backgroundColor: c.background }]}
-        >
-          <View style={styles.status}>
-            {autoSaving ? (
+        <StickyFooter
+          statusFullWidth={imagesPending !== null || !!flow.imageError}
+          status={
+            autoSaving ? (
               <Text variant="caption">{queuedSave ? QUEUED_SAVE_MESSAGE : AUTO_SAVING_MESSAGE}</Text>
             ) : saving ? (
               <Text variant="caption">{queuedSave ? QUEUED_SAVE_MESSAGE : '저장 중…'}</Text>
@@ -1463,8 +1500,9 @@ export function StoryEditorScreen({
                   ? `${formatSavedAt(saved.updatedAt)} · ${formatSavedAt(workingCopySavedAt, '임시 저장')}`
                   : formatSavedAt(saved.updatedAt)}
               </Text>
-            )}
-          </View>
+            )
+          }
+        >
           {showProfileTemporary ? (
             <Button
               label={presetState.errorKind === 'temporary' ? '임시 저장 다시 시도' : '임시 저장'}
@@ -1483,10 +1521,12 @@ export function StoryEditorScreen({
                     ? '임시 저장'
                     : '변경 내용 저장'
             }
+            variant="action"
+            style={styles.mainSave}
             onPress={() => pressSave('main')}
             disabled={saveBlocked}
           />
-        </SafeAreaView>
+        </StickyFooter>
       }
     </Surface>
   );
@@ -1556,9 +1596,9 @@ type AutoFinalizeToken = {
   rowKeys: string[];
 };
 const FINALIZE_UNBOUND_MESSAGE = '저장은 됐지만 캐릭터 목록을 맞추지 못했어요. 화면을 다시 열어 확인해 주세요.';
-const WORKING_COPY_BLOCKED = `${BLOCKED} 임시 저장한 내용(말투·서술·인트로·초기 상태·사진)이 남아 있어 함께 반영돼요. 저장·공개 화면에서 먼저 반영한 뒤 저장해 주세요.`;
+const WORKING_COPY_BLOCKED = `${BLOCKED} 임시 저장한 내용(말투·서술·인트로·초기 상태·사진)이 남아 있어 바로 반영하지 않았어요. 공개 범위 탭에서 저장하면 함께 반영돼요.`;
 const STAGED_BASIC_BLOCKED =
-  '저장하지 않았어요. 입력은 그대로예요. 임시 저장한 내용(기본 정보)이 남아 있어 바로 반영하지 않았어요. 저장·공개 화면에서 먼저 반영한 뒤 저장해 주세요.';
+  '저장하지 않았어요. 입력은 그대로예요. 임시 저장한 내용(기본 정보)이 남아 있어 바로 반영하지 않았어요. 공개 범위 탭에서 저장하면 함께 반영돼요. 그 뒤 바꾼 내용이 있으면 기본 설정에서 먼저 임시 저장해 주세요.';
 
 /** 앱이 보내기 전에 막은 오류(스토리 id 형식 등)는 그 문구를, 서버 오류는 detail을 보여 준다. */
 function errorText(error: Error | null): string {
@@ -1579,20 +1619,15 @@ function saveErrorMessage(error: Error): string {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  tabs: { flexGrow: 0, flexShrink: 0 },
   body: { flex: 1 },
-  content: { padding: Spacing.four, paddingBottom: Spacing.six },
-  footer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.three,
-    paddingHorizontal: Spacing.four,
-    paddingVertical: Spacing.two,
-    borderTopWidth: 1,
+  // CREATE-US-12 목업 .unified-theme .content: 20px 16px 28px
+  content: {
+    paddingTop: ContentInset.top,
+    paddingHorizontal: ContentInset.horizontal,
+    paddingBottom: ContentInset.bottom,
   },
-  status: { flex: 1, minWidth: 0 },
+  // 하단 저장 버튼은 상태 글과 폭을 나누되 글자가 줄지 않게 둔다(목업 .bottom .primary).
+  mainSave: { flexShrink: 0, minWidth: 118 },
   imageFailure: { gap: Spacing.one, alignItems: 'flex-start' },
   centered: { padding: Spacing.four, gap: Spacing.two },
-  imagesSection: { marginTop: Spacing.six, gap: Spacing.three },
-  danger: { marginTop: Spacing.four, paddingTop: Spacing.four, borderTopWidth: 1, alignItems: 'flex-start' },
 });

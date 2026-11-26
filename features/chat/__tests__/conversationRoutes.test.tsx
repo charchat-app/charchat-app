@@ -8,7 +8,7 @@ import StoryRoute from '@/app/story/[storyId]';
 import type { ConversationStory } from '@/shared/story-types';
 
 const mockParams = { storyId: '7', sessionId: '19' };
-const mockRouter = { push: jest.fn(), back: jest.fn(), canGoBack: jest.fn(() => true) };
+const mockRouter = { push: jest.fn(), back: jest.fn(), dismissTo: jest.fn(), canGoBack: jest.fn(() => true) };
 
 let mockFocused = true;
 
@@ -36,6 +36,7 @@ jest.mock('@/features/chat/api', () => ({
     last_failed_generation: null,
     // 이 파일은 세션 응답의 모델 표시만 검증한다. 빈 값이면 대화방은 세션 모델을 보인다.
     model: '',
+    model_id: 1,
   })),
 }));
 
@@ -698,12 +699,15 @@ it('KAN-16: 대화방에 서버의 말풍선, 등장 캐릭터, 적용된 모델
   await show(<SessionRoute />);
   expect(await screen.findByText('달빛 정원')).toBeOnTheScreen();
   expect(screen.getByText('윤슬')).toBeOnTheScreen();
-  expect(screen.getByText('적용 모델: applied-model')).toBeOnTheScreen();
+  expect(screen.getByText('모델: applied-model')).toBeOnTheScreen();
   expect(screen.getAllByTestId('conversation-bubble')).toHaveLength(3);
   expect(screen.getAllByTestId('conversation-bubble')[0]).toHaveTextContent('나레이터문이 열렸다.');
   expect(screen.getAllByTestId('conversation-bubble')[2]).toHaveTextContent('유저실례합니다.');
   expect(screen.queryByText('읽기 전용')).not.toBeOnTheScreen();
-  expect(screen.queryByRole('button', { name: /모델/ })).not.toBeOnTheScreen();
+  // CHAT-US-13: 열린 대화방에서 바꿀 수 있는 것은 대화 모델뿐이다.
+  expect(screen.getAllByRole('button', { name: /모델/ }).map((item) => item.props.accessibilityLabel)).toEqual([
+    '대화 모델 변경',
+  ]);
   // CHAT-US-02: 열린 대화방에는 입력창이 있다.
   expect(await screen.findByLabelText('메시지 입력')).toBeOnTheScreen();
   expect(fetchMock).toHaveBeenCalledWith(
@@ -757,7 +761,9 @@ describe.each([
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(screen.queryByText('달빛 정원')).not.toBeOnTheScreen();
     expect(screen.queryByTestId('conversation-bubble')).not.toBeOnTheScreen();
-    expect(screen.getByText(errorMessage)).toBeOnTheScreen();
+    // CHAT-US-04-AC04: 대화방이 403·404로 거절되면 공통 접근 불가 안내로 바뀐다.
+    const deniedPage = resource === 'session' && status !== 401;
+    expect(screen.getByText(deniedPage ? '접속할 수 없습니다' : errorMessage)).toBeOnTheScreen();
     expect(screen.queryByRole('button', { name: '다시 시도' })).not.toBeOnTheScreen();
   });
 

@@ -1,8 +1,8 @@
 import { useState } from 'react';
-import { Animated, ScrollView, StyleSheet, View } from 'react-native';
+import { Animated, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { Button, Notice, PhotoSlot, Text } from '@/components/ui';
-import { Radius, Spacing } from '@/constants/theme';
+import { MinTouchSize, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import {
   ImageCropper,
@@ -26,11 +26,15 @@ import {
   type ImageListKey,
   type StoryImagesValues,
 } from '../images';
+import { DragGripDots, webDragHandle } from './DragGrip';
 import { usePhotoReorder, type PhotoReorder } from './usePhotoReorder';
 
 /** 사진 칸 너비(PhotoSlot 기본값과 같음)와 칸 사이 간격 */
 const PHOTO_WIDTH = 78;
 const PHOTO_GAP = Spacing.two;
+/** 사진 손잡이 칩 한 변(보이는 크기). 누르는 범위는 GRIP_HIT_SLOP만큼 넓혀 최소 터치 크기(44)를 맞춘다. */
+const GRIP_SIZE = 24;
+const GRIP_HIT_SLOP = (MinTouchSize - GRIP_SIZE) / 2;
 
 export type StoryImagesEditorProps = {
   values: StoryImagesValues;
@@ -46,12 +50,61 @@ export type StoryImagesEditorProps = {
    * 호스트가 진행 중인 업로드가 끝날 때까지 저장을 막는 데 쓴다(선택).
    */
   onUploadActiveChange?: (source: string, active: boolean) => void;
+  /**
+   * CREATE-US-12 목업 v15: false면 캐릭터 사진 줄을 그리지 않는다(표지·스토리 사진과 안내만).
+   * 캐릭터 사진은 호스트가 캐릭터 카드 안에 CharacterImagesEditor로 그린다. 기본값 true(지금 배치).
+   */
+  includeCharacters?: boolean;
 };
+
+export type CharacterImagesEditorProps = Pick<
+  StoryImagesEditorProps,
+  'values' | 'onChange' | 'disabled' | 'onDragActiveChange' | 'onUploadActiveChange'
+> & {
+  /** values.characters의 characterId. 목록에 없으면 빈 목록으로 보인다. */
+  characterId: string;
+  /** 「{이름} 이미지」 제목을 보일지. 캐릭터 카드 안에서는 카드 머리가 제목을 맡아 기본값 false. */
+  showHeading?: boolean;
+};
+
+/**
+ * CREATE-US-12 목업 v15 .character-photo: 캐릭터 카드 안(이름·상세 위)에 두는 한 캐릭터의 얼굴 사진 줄.
+ * 업로드·자르기·순서·교체·삭제 규칙은 StoryImagesEditor의 캐릭터 줄과 같다(CREATE-US-06).
+ * onUploadActiveChange의 source는 `character:<characterId>`로 StoryImagesEditor와 같다.
+ */
+export function CharacterImagesEditor({
+  values,
+  characterId,
+  onChange,
+  disabled = false,
+  onDragActiveChange,
+  onUploadActiveChange,
+  showHeading = false,
+}: CharacterImagesEditorProps) {
+  const character = values.characters.find((c) => c.characterId === characterId);
+  return (
+    <ImageStrip
+      title={`${character?.name || '이름 없는 캐릭터'} 이미지`}
+      heading={showHeading ? `${character?.name || '이름 없는 캐릭터'} 이미지` : undefined}
+      kind="캐릭터 사진"
+      hint="1~5장 필수 · 1:1 · 첫 사진이 대표 얼굴"
+      target="character"
+      listKey={{ kind: 'character', characterId }}
+      values={values}
+      onChange={onChange}
+      disabled={disabled}
+      onDragActiveChange={onDragActiveChange}
+      onUploadActiveChange={
+        onUploadActiveChange ? (active) => onUploadActiveChange(`character:${characterId}`, active) : undefined
+      }
+    />
+  );
+}
 
 /**
  * 스토리·등장 캐릭터 이미지 편집 (CREATE-US-06).
  * - 스토리: 3:4, 선택 입력, 최대 10장, GIF 허용. 등장 캐릭터: 1:1, 1~5장, GIF 불가.
- * - 사진을 길게 눌러 끌면 순서가 바뀐다. 짧게 누르면 앞으로·뒤로·교체·삭제를 고른다.
+ * - 사진의 점 손잡이를 길게 눌러 끌면 순서가 바뀐다. 사진을 누르면 앞으로·뒤로·교체·삭제를 고른다.
  *   맨 앞 사진이 표지·대표 얼굴이다(AC06).
  * - 업로드에 실패하면 어느 칸에서 왜 실패했는지 알리고 기존 사진은 그대로 둔다.
  */
@@ -62,14 +115,16 @@ export function StoryImagesEditor({
   unsavedCharacterNames = [],
   onDragActiveChange,
   onUploadActiveChange,
+  includeCharacters = true,
 }: StoryImagesEditorProps) {
   const missing = charactersMissingImages(values);
   return (
     <View style={styles.container}>
-      <CoverPreview values={values} />
       <ImageStrip
         title="스토리 이미지"
-        hint="선택 · 첫 번째 사진이 표지예요 · GIF 가능"
+        heading="스토리 이미지"
+        kind="스토리 이미지"
+        hint="선택 입력 · 첫 사진이 표지 · 3:4 · GIF 가능"
         target="story"
         listKey={{ kind: 'story' }}
         values={values}
@@ -78,22 +133,22 @@ export function StoryImagesEditor({
         onDragActiveChange={onDragActiveChange}
         onUploadActiveChange={onUploadActiveChange ? (active) => onUploadActiveChange('story', active) : undefined}
       />
-      {values.characters.map((c) => (
-        <ImageStrip
-          key={c.characterId}
-          title={`${c.name || '이름 없는 캐릭터'} 이미지`}
-          hint="필수 · 첫 번째 사진이 대표 얼굴이에요"
-          target="character"
-          listKey={{ kind: 'character', characterId: c.characterId }}
-          values={values}
-          onChange={onChange}
-          disabled={disabled}
-          onDragActiveChange={onDragActiveChange}
-          onUploadActiveChange={
-            onUploadActiveChange ? (active) => onUploadActiveChange(`character:${c.characterId}`, active) : undefined
-          }
-        />
-      ))}
+      {/* AC09 표지 미리보기: 목업에는 없지만 대체 표지(캐릭터 첫 사진)를 알리는 실제 규칙이라 사진 줄 아래에 남긴다 */}
+      <CoverPreview values={values} />
+      {includeCharacters
+        ? values.characters.map((c) => (
+            <CharacterImagesEditor
+              key={c.characterId}
+              characterId={c.characterId}
+              showHeading
+              values={values}
+              onChange={onChange}
+              disabled={disabled}
+              onDragActiveChange={onDragActiveChange}
+              onUploadActiveChange={onUploadActiveChange}
+            />
+          ))
+        : null}
       {unsavedCharacterNames.length > 0 ? (
         <Notice message={`${unsavedCharacterNames.join(', ')}: 캐릭터를 먼저 저장하면 이미지를 추가할 수 있어요.`} />
       ) : null}
@@ -141,6 +196,8 @@ type PendingAction = { kind: 'add' } | { kind: 'replace'; index: number };
 
 function ImageStrip({
   title,
+  heading,
+  kind,
   hint,
   target,
   listKey,
@@ -150,7 +207,12 @@ function ImageStrip({
   onDragActiveChange,
   onUploadActiveChange,
 }: {
+  /** 접근성 이름·오류 안내 앞에 붙는 이름 (예: 「하린 이미지」) */
   title: string;
+  /** 화면에 보이는 제목(목업 h3). 캐릭터 카드 안에서는 카드 머리가 제목을 맡아 두지 않는다. */
+  heading?: string;
+  /** 장수 줄 앞말 (목업 「스토리 이미지」·「캐릭터 사진」) */
+  kind: string;
   hint: string;
   target: ImageTarget;
   listKey: ImageListKey;
@@ -189,10 +251,6 @@ function ImageStrip({
     keys,
     slot: PHOTO_WIDTH + PHOTO_GAP,
     disabled: busy,
-    onTap: (key) => {
-      const index = keys.indexOf(key);
-      setSelected((current) => (current === index ? null : index));
-    },
     onMove: (from, to) => {
       change((list) => moveImage(list, from, to));
       setSelected(null);
@@ -204,15 +262,17 @@ function ImageStrip({
 
   return (
     <View style={styles.strip}>
-      <View style={styles.stripHeader}>
-        <Text variant="subheading">{title}</Text>
-        <Text variant="caption">{`${images.length} / ${max}장`}</Text>
-      </View>
-      <Text variant="caption">{hint}</Text>
+      {/* 목업 v15 photosUI: (스토리만 h3) → 사진 줄 → 「{종류} · n/max장」 → 안내(.hint) */}
+      {heading ? (
+        <Text variant="subheading" accessibilityRole="header">
+          {heading}
+        </Text>
+      ) : null}
       <ScrollView
         horizontal
         contentContainerStyle={styles.thumbs}
         showsHorizontalScrollIndicator={false}
+        showsVerticalScrollIndicator={false}
         scrollEnabled={reorder.draggingKey === null}
       >
         {images.map((image, index) => (
@@ -225,6 +285,9 @@ function ImageStrip({
             first={index === 0}
             selected={selected === index}
             reorder={reorder}
+            // 손잡이는 순서를 바꿀 수 있을 때만 보인다: 사진 2장 이상, 편집 가능(올리는 중·저장 중이 아님)
+            reorderable={images.length > 1}
+            disabled={busy}
             onAction={(action) => {
               if (action === 'activate') setSelected(selected === index ? null : index);
               if (action === 'decrement' && index > 0) move(index, index - 1);
@@ -240,6 +303,8 @@ function ImageStrip({
           />
         ) : null}
       </ScrollView>
+      <Text variant="caption">{`${kind} · ${images.length} / ${max}장`}</Text>
+      <Text variant="caption">{hint}</Text>
       {selected !== null && selected < images.length ? (
         <View style={styles.actions}>
           <Button
@@ -292,8 +357,10 @@ function ImageStrip({
 }
 
 /**
- * 끌 수 있는 사진 한 장. 짧게 누르면 선택, 길게 누른 뒤 끌면 순서 변경.
- * 화면 읽기 기능에서는 두 번 눌러 선택하고, 위·아래로 쓸어 앞으로·뒤로 옮긴다.
+ * 끌 수 있는 사진 한 장 (CREATE-US-06-AC06, CREATE-US-12).
+ * - 사진을 누르면 선택(앞으로·뒤로·교체·삭제 글자 버튼이 열린다). 사진을 누르거나 끌어도 순서 끌기는 시작되지 않는다.
+ * - 순서 끌기는 사진 오른쪽 아래의 전용 손잡이(점 6개)를 길게 누른 뒤 끈다. 손잡이는 순서를 바꿀 수 있을 때만 보인다.
+ * - 화면 읽기 기능에서는 사진을 두 번 눌러 선택하고, 위·아래로 쓸어 앞으로·뒤로 옮긴다. 손잡이는 화면 읽기에서 숨긴다(같은 동작 중복 방지).
  */
 function DraggablePhoto({
   photoKey,
@@ -303,6 +370,8 @@ function DraggablePhoto({
   first,
   selected,
   reorder,
+  reorderable,
+  disabled,
   onAction,
 }: {
   photoKey: string;
@@ -312,6 +381,10 @@ function DraggablePhoto({
   first: boolean;
   selected: boolean;
   reorder: PhotoReorder;
+  /** 같은 줄에 사진이 2장 이상이라 순서를 바꿀 수 있는지 */
+  reorderable: boolean;
+  /** 올리는 중·저장 중이라 순서를 바꿀 수 없는지. 손잡이 자리는 두고 감춘다. */
+  disabled: boolean;
   onAction: (action: string) => void;
 }) {
   const c = useTheme();
@@ -320,34 +393,54 @@ function DraggablePhoto({
   return (
     <Animated.View
       testID={`photo-${photoKey}`}
-      accessible
-      accessibilityRole="button"
-      accessibilityLabel={label}
-      accessibilityHint="길게 눌러 끌면 순서를 바꿀 수 있어요"
-      accessibilityState={{ selected }}
-      accessibilityActions={[
-        { name: 'activate', label: '선택' },
-        { name: 'decrement', label: '앞으로' },
-        { name: 'increment', label: '뒤로' },
-      ]}
-      onAccessibilityAction={(e) => onAction(e.nativeEvent.actionName)}
-      {...reorder.responderOf(photoKey).panHandlers}
       style={[
         styles.photo,
         { transform: [{ translateX: reorder.offsetOf(photoKey) }, { scale: lifted ? 1.06 : 1 }] },
         lifted && [styles.lifted, { shadowColor: c.text }],
       ]}
     >
-      <View
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={label}
+        accessibilityHint="누르면 앞으로·뒤로·교체·삭제를 고를 수 있어요"
+        accessibilityState={{ selected }}
+        accessibilityActions={[
+          { name: 'activate', label: '선택' },
+          { name: 'decrement', label: '앞으로' },
+          { name: 'increment', label: '뒤로' },
+        ]}
+        onAccessibilityAction={(e) => onAction(e.nativeEvent.actionName)}
+        onPress={() => onAction('activate')}
         style={[
           styles.photoFrame,
-          { width: PHOTO_WIDTH, height, backgroundColor: c.placeholderBackground },
+          { width: PHOTO_WIDTH, height, backgroundColor: c.placeholderBackground, borderColor: c.placeholderBorder },
+          // 목업 v15: 첫 사진(표지·대표 얼굴)은 밝은 파랑 2px 테두리, 고른 사진은 강조색 테두리
+          first && [styles.firstFrame, { borderColor: c.accentText }],
           selected && { borderColor: c.accent, borderWidth: 2 },
         ]}
       >
         <ServerImage uri={uri} style={styles.photoImage} accessibilityIgnoresInvertColors />
-      </View>
-      {first ? <Text variant="eyebrow">대표</Text> : null}
+      </Pressable>
+      {reorderable ? (
+        // 전용 손잡이: 사진 위에 겹쳐 두는 작은 칩. 끌기 제스처는 여기에만 붙는다.
+        <View
+          testID={`photo-drag-handle-${photoKey}`}
+          {...reorder.responderOf(photoKey).panHandlers}
+          accessible={false}
+          accessibilityElementsHidden
+          importantForAccessibility="no-hide-descendants"
+          hitSlop={GRIP_HIT_SLOP}
+          pointerEvents={disabled ? 'none' : 'auto'}
+          style={[
+            styles.photoGrip,
+            { backgroundColor: c.inputSurface, borderColor: c.surfaceBorder },
+            webDragHandle,
+            disabled && styles.hidden,
+          ]}
+        >
+          <DragGripDots testID={`photo-drag-grip-${photoKey}`} color={lifted ? c.accent : c.headerIcon} />
+        </View>
+      ) : null}
     </Animated.View>
   );
 }
@@ -359,11 +452,26 @@ const styles = StyleSheet.create({
   coverImage: { width: '100%', height: '100%' },
   coverText: { flex: 1, gap: Spacing.one },
   strip: { gap: Spacing.two },
-  stripHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' },
   thumbs: { gap: PHOTO_GAP, alignItems: 'flex-start' },
   photo: { gap: Spacing.half },
-  photoFrame: { borderRadius: Radius.sm + 2, overflow: 'hidden' },
+  // 목업 v15 .upload: 둥근 10px, 1px 테두리
+  photoFrame: { borderRadius: Radius.control, borderWidth: 1, overflow: 'hidden' },
+  firstFrame: { borderWidth: 2 },
   photoImage: { width: '100%', height: '100%' },
+  // 사진 오른쪽 아래에 겹치는 손잡이 칩
+  photoGrip: {
+    position: 'absolute',
+    right: Spacing.one,
+    bottom: Spacing.one,
+    width: GRIP_SIZE,
+    height: GRIP_SIZE,
+    borderRadius: Radius.sm,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  // 순서를 바꿀 수 없는 동안(올리는 중·저장 중)은 손잡이를 감춘다
+  hidden: { opacity: 0 },
   // 들고 있는 사진은 다른 사진 위에 떠 보이게 한다(웹 zIndex, 안드로이드 elevation, iOS 그림자)
   lifted: { zIndex: 10, elevation: 8, shadowOpacity: 0.2, shadowRadius: 8, shadowOffset: { width: 0, height: 4 } },
   actions: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.two },

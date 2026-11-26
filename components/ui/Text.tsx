@@ -26,7 +26,7 @@ const DEFAULT_COLOR: Record<TextVariant, ThemeColor> = {
   subheading: 'text',
   body: 'text',
   caption: 'textSecondary',
-  eyebrow: 'accent',
+  eyebrow: 'eyebrow',
   error: 'danger',
 };
 

@@ -27,6 +27,15 @@ const apiMock = apiRequest as jest.Mock;
 const UPLOAD_FLOW_TIMEOUT_MS = 20000;
 
 const SERVER = 'http://api.test/api/v1/creation/image-files';
+// 인증 헤더는 API 기준 주소(EXPO_PUBLIC_API_URL)와 origin·경로가 같은 이미지에만 붙는다(BASE-03 리뷰).
+const ORIGINAL_API_URL = process.env.EXPO_PUBLIC_API_URL;
+beforeAll(() => {
+  process.env.EXPO_PUBLIC_API_URL = 'http://api.test/api/v1';
+});
+afterAll(() => {
+  if (ORIGINAL_API_URL === undefined) delete process.env.EXPO_PUBLIC_API_URL;
+  else process.env.EXPO_PUBLIC_API_URL = ORIGINAL_API_URL;
+});
 
 const p = (key: string, name: string, extra: Partial<PresetValues> = {}): PresetValues => ({
   key,
@@ -256,7 +265,12 @@ describe('CREATE-US-05-AC03 프리셋 이미지 실제 업로드', () => {
 
       await press('프로필 1 이미지 선택');
       await pressPending('확인');
-      await press('프로필 1 아래로 이동');
+      // 손잡이의 접근성 동작(아래로 이동)으로 순서를 바꾼다(CREATE-US-12: 화면의 ↑·↓ 버튼 없음)
+      await act(async () => {
+        await fireEvent(screen.getByTestId('preset-drag-handle-a'), 'accessibilityAction', {
+          nativeEvent: { actionName: 'increment' },
+        });
+      });
       await act(async () => {
         upload.resolve(dto(42));
       });
@@ -269,51 +283,32 @@ describe('CREATE-US-05-AC03 프리셋 이미지 실제 업로드', () => {
   );
 
   it(
-    '올리는 사이 이미지를 해제하면 늦게 끝난 결과가 해제를 되돌리지 않는다',
-    async () => {
-      pickMock.mockResolvedValue({ canceled: false, assets: [pngAsset] });
-      const upload = deferred<ReturnType<typeof dto>>();
-      apiMock.mockReturnValue(upload.promise);
-      const { latest } = await setup([p('a', '가', { imageId: 3, photoUrl: `${SERVER}/3` })]);
-
-      await press('프로필 1 이미지 선택');
-      await pressPending('확인');
-      await press('프로필 1 이미지 해제');
-      await act(async () => {
-        upload.resolve(dto(10));
-      });
-
-      expect(latest()[0]).toEqual(p('a', '가'));
-      expect(screen.getByText('이미지를 선택해 주세요.')).toBeTruthy();
-    },
-    UPLOAD_FLOW_TIMEOUT_MS,
-  );
-
-  it(
-    '자르기 창이 열린 사이 이미지를 해제하면 그 선택을 확인해도 업로드하거나 해제를 되돌리지 않는다',
+    'CREATE-US-12: 사진이 있는 칸을 누르면 새 사진을 올려 교체하고, 해제 버튼은 없다',
     async () => {
       pickMock.mockResolvedValue({ canceled: false, assets: [pngAsset] });
       apiMock.mockResolvedValue(dto(10));
       const { latest } = await setup([p('a', '가', { imageId: 3, photoUrl: `${SERVER}/3` })]);
 
+      expect(screen.queryByLabelText('프로필 1 이미지 해제')).toBeNull();
+      expect(screen.getByTestId('preset-photo-a').props.source).toMatchObject({ uri: `${SERVER}/3` });
       await press('프로필 1 이미지 선택');
+      // 자르기 창이 열린 동안에도 기존 미리보기는 그대로다
       expect(screen.getByText('이미지 자르기 (1:1)')).toBeTruthy();
-      await press('프로필 1 이미지 해제');
+      expect(latest()[0]).toEqual(p('a', '가', { imageId: 3, photoUrl: `${SERVER}/3` }));
       await confirmCrop();
 
-      expect(apiMock).not.toHaveBeenCalled();
-      expect(latest()[0]).toEqual(p('a', '가'));
-      expect(screen.queryByText('이미지 자르기 (1:1)')).toBeNull();
-      expect(screen.getByText('이미지를 선택해 주세요.')).toBeTruthy();
-      expect(screen.getByLabelText('프로필 1 이미지 선택').props.accessibilityState.disabled).toBe(false);
+      expect(apiMock).toHaveBeenCalledTimes(1);
+      expect(apiMock.mock.calls[0][0]).toBe('/creation/images?target=profile');
+      expect(latest()[0]).toEqual(p('a', '가', { imageId: 10, photoUrl: `${SERVER}/10` }));
+      expect(screen.getByTestId('preset-photo-a').props.source).toMatchObject({ uri: `${SERVER}/10` });
     },
     UPLOAD_FLOW_TIMEOUT_MS,
   );
 
-  it('이미지가 없으면 이미지 안내를 보여 주고, 편집 불가면 선택·해제가 막힌다', async () => {
+  it('이미지가 없으면 이미지 안내를 보여 주고, 편집 불가면 선택이 막힌다', async () => {
     await setup([p('a', '가'), p('b', '나', { imageId: 8, photoUrl: `${SERVER}/8` })], { editable: false });
     expect(screen.getByText('이미지를 선택해 주세요.')).toBeTruthy();
-    for (const label of ['프로필 1 이미지 선택', '프로필 2 이미지 선택', '프로필 2 이미지 해제']) {
+    for (const label of ['프로필 1 이미지 선택', '프로필 2 이미지 선택']) {
       expect(screen.getByLabelText(label).props.accessibilityState.disabled).toBe(true);
     }
     await press('프로필 2 이미지 선택');

@@ -1,14 +1,17 @@
 // CHAT-US-01 대화 진입 API · CHAT-US-02 메시지 전송·응답 API · CHAT-US-03 내 대화 목록·요청 ID 확인
+// CHAT-US-13 대화 중 모델 변경
 import { ApiError, apiRequest } from '@/lib/api-client';
 import type {
   ChatGeneration,
   ChatGenerationLookup,
+  ChatModelList,
   ChatTurns,
   ConversationSession,
   ConversationSessionCreated,
   ConversationSessionPage,
   ConversationStory,
   SendChatMessageInput,
+  SessionModelChange,
   StartConversationInput,
 } from '@/shared/story-types';
 
@@ -74,3 +77,13 @@ export const findGenerationsByRequest = (sessionId: string, requestId: string, s
     `${sessionPath(sessionId)}/generations?request_id=${encodeURIComponent(requestId)}`,
     { signal },
   );
+
+/** 고를 수 있는 응답 모델 목록 (CHAT-US-13-AC01). */
+export const listChatModels = (signal: AbortSignal) => apiRequest<ChatModelList>('/conversation/models', { signal });
+
+/** 세션의 다음 응답부터 쓸 모델을 바꾼다. 진행 중인 생성은 기존 모델로 끝까지 만든다(CHAT-US-13-AC02). */
+export const changeSessionModel = (sessionId: string, modelId: number) =>
+  apiRequest<SessionModelChange>(`${sessionPath(sessionId)}/model`, {
+    method: 'PUT',
+    body: JSON.stringify({ model_id: modelId }),
+  });

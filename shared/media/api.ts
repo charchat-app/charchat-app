@@ -38,9 +38,19 @@ export function imageUri(url: string): string {
 /**
  * 서버 이미지 파일 주소인지. 미등록·비공개 스토리나 아직 연결하지 않은 사진은 소유자만 볼 수 있어
  * 이 주소를 불러올 때는 인증 헤더를 붙여야 한다. 기기에서 고른 사진(file:, blob:, data:)은 해당하지 않는다.
+ * 인증 헤더가 다른 서버로 새지 않도록 문자열 포함이 아니라 주소를 해석해 확인한다(BASE-03 리뷰):
+ * origin이 API 기준 주소(EXPO_PUBLIC_API_URL)와 같고, 경로가 `{API 기준 경로}/creation/image-files/`로 시작할 때만.
+ * 해석하지 못하면 붙이지 않는다.
  */
 export function isServerImage(uri: string): boolean {
-  return /^https?:\/\//.test(uri) && uri.includes('/creation/image-files/');
+  try {
+    const api = new URL(process.env.EXPO_PUBLIC_API_URL ?? '');
+    const target = new URL(uri);
+    if (!/^https?:$/.test(target.protocol) || target.origin !== api.origin) return false;
+    return target.pathname.startsWith(`${api.pathname.replace(/\/+$/, '')}/creation/image-files/`);
+  } catch {
+    return false;
+  }
 }
 
 /** 이미지 요청에 붙일 source. 기기(iOS·안드로이드)의 Image는 headers를 그대로 지원한다. */

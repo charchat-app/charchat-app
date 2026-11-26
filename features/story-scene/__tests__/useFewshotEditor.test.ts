@@ -313,3 +313,65 @@ it('퓨샷 조회보다 오래된 스토리 조회 결과로는 다른 기기에
   await act(() => cache.setCharacters([harin]));
   expect(result.current.groups[0].messages).toHaveLength(0);
 });
+
+it('스토리·저장소가 바뀌면 같은 렌더에서 로딩으로 비우고, 이전 조회는 중단해 늦은 응답을 버린다', async () => {
+  const cache = storyCache(null);
+  const signals: AbortSignal[] = [];
+  const resolvers: ((value: FewshotsDocument) => void)[] = [];
+  const pendingLoad = (_id: string, signal?: AbortSignal) => {
+    if (signal) signals.push(signal);
+    return new Promise<FewshotsDocument>((resolve) => resolvers.push(resolve));
+  };
+  const first: jest.Mocked<FewshotRepository> = { load: jest.fn(pendingLoad), save: jest.fn() };
+  const second: jest.Mocked<FewshotRepository> = { load: jest.fn(pendingLoad), save: jest.fn() };
+  const { result, rerender } = await renderHook(
+    ({ repo, id }: { repo: FewshotRepository; id: string }) => useFewshotEditor(repo, id),
+    { wrapper: cache.wrapper, initialProps: { repo: first, id: '1' } },
+  );
+  expect(result.current.loading).toBe(true);
+  await act(async () => resolvers[0]({ ...initial(), title: '첫 스토리' }));
+  await waitFor(() => expect(result.current.loading).toBe(false));
+  expect(result.current.snapshot?.title).toBe('첫 스토리');
+
+  // 스토리 변경: 이전 화면 상태를 바로 비우고 로딩으로 둔다.
+  await rerender({ repo: first, id: '2' });
+  expect(result.current.loading).toBe(true);
+  expect(result.current.snapshot).toBeNull();
+  expect(first.load).toHaveBeenLastCalledWith('2', expect.anything());
+  // 저장소 변경: 스토리 2 조회를 중단하고 새 저장소로 다시 조회한다.
+  await rerender({ repo: second, id: '2' });
+  expect(signals[1].aborted).toBe(true);
+  expect(second.load).toHaveBeenCalledTimes(1);
+  expect(result.current.loading).toBe(true);
+
+  // 중단된 늦은 응답은 화면을 바꾸지 않는다.
+  await act(async () => resolvers[1]({ ...initial(), id: '2', title: '늦은 응답' }));
+  expect(result.current.snapshot).toBeNull();
+  expect(result.current.loading).toBe(true);
+  await act(async () => resolvers[2]({ ...initial(), id: '2', title: '새 저장소' }));
+  await waitFor(() => expect(result.current.loading).toBe(false));
+  expect(result.current.snapshot?.title).toBe('새 저장소');
+  expect(result.current.error).toBeNull();
+});
+it('스토리 A에서 예약된 늦은 갱신은 B로 초기화된 상태를 바꾸지 않는다', async () => {
+  const cache = storyCache([]);
+  const repo: jest.Mocked<FewshotRepository> = {
+    load: jest.fn(async (id: string) => ({ ...initial(), id, title: `스토리 ${id}` })),
+    save: jest.fn(),
+  };
+  const { result, rerender } = await renderHook(({ id }: { id: string }) => useFewshotEditor(repo, id), {
+    wrapper: cache.wrapper,
+    initialProps: { id: '1' },
+  });
+  await waitFor(() => expect(result.current.loading).toBe(false));
+  const setGroupsA = result.current.setGroups;
+  await rerender({ id: '2' });
+  // A 출처로 묶인 갱신(예약된 setGroups)을 B 초기화 뒤에 적용한다.
+  await act(() => setGroupsA([newFewshotGroup()]));
+  expect(result.current.groups).toEqual([]);
+  await waitFor(() => expect(result.current.loading).toBe(false));
+  expect(result.current.snapshot?.title).toBe('스토리 2');
+  await act(() => setGroupsA((value) => [...value, newFewshotGroup()]));
+  expect(result.current.groups).toEqual([]);
+  expect(result.current.dirty).toBe(false);
+});

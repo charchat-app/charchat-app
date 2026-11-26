@@ -41,7 +41,13 @@ const room = (id: number): ConversationSession => ({
   messages: [{ speaker_kind: 'narrator', speaker_name: null, body: '문이 열렸다.' }],
   characters: [{ id: 2, name: '윤슬' }],
 });
-const emptyTurns: ChatTurns = { messages: [], active_generation: null, last_failed_generation: null, model: '루나' };
+const emptyTurns: ChatTurns = {
+  messages: [],
+  active_generation: null,
+  last_failed_generation: null,
+  model: '루나',
+  model_id: 1,
+};
 const userMessage: ChatMessage = {
   id: 5,
   role: 'user',
@@ -58,6 +64,7 @@ const generation = (overrides: Partial<ChatGeneration> = {}): ChatGeneration => 
   next_offset: 0,
   error_code: null,
   retryable: false,
+  model: '루나',
   ...overrides,
 });
 

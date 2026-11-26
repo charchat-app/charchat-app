@@ -176,6 +176,9 @@ export function useStoryPresets(
   const [ratingBaseline, setRatingBaseline] = useState<ContentRating | null>(null);
   // 같은 이유로 보내지 않은(거절·충돌) 등급. 자동 임시 저장은 같은 선택을 주기마다 다시 보내지 않는다.
   const failedRatingFor = useRef<ContentRating | null>(null);
+  // 지금 안내(error)가 기본 정보만 실은 요청의 확실한 실패(거절·차단)에서 왔는지. 프리셋·이미지를 함께 실었거나
+  // 성패를 모르는 실패면 false다. 기본 정보가 다른 경로로 저장되면 이 안내만 지운다(clearBasicFailure).
+  const basicOnlyError = useRef(false);
 
   useEffect(() => {
     if (presets !== null || !query.data?.presets) return;
@@ -292,6 +295,7 @@ export function useStoryPresets(
       failedFor.current = null;
       failedBasicFor.current = null;
       failedRatingFor.current = null;
+      basicOnlyError.current = false;
       setPendingKind(null);
       setError(null);
       client.setQueryData(storyCreationKey(storyId), result);
@@ -341,6 +345,7 @@ export function useStoryPresets(
           failedBasicFor.current = JSON.stringify({ basic: op.document.basic, images: op.document.images });
         } else if (op.document.basic) failedBasicFor.current = JSON.stringify(op.document.basic);
       }
+      basicOnlyError.current = !uncertain && !!op.document.basic && !op.document.presets && !op.document.images;
       setAttemptKind(op.kind);
       setPendingKind(uncertain ? op.kind : null);
       setError(
@@ -397,6 +402,7 @@ export function useStoryPresets(
     // 시작만으로 지우지 않고, 자기 실패를 알릴 때만 안내와 그 의도(errorKind)를 바꾼다.
     // remember: 같은 내용을 자동 저장이 다시 보내지 않도록 이번에 실으려던 프리셋·기본 정보를 기억한다.
     const fail = (message: string, remember = false): PresetSaveResult => {
+      basicOnlyError.current = basic !== null && content === null && images === null;
       setAttemptKind(kind);
       setError(message);
       if (remember) {
@@ -589,6 +595,18 @@ export function useStoryPresets(
       ? saveWithBasic(basic, blockers, images, rowKeys, 'temporary', 'auto')
       : Promise.resolve<PresetSaveResult>({ ok: false });
 
+  /**
+   * 기본 정보가 다른 경로(PUT /creation/stories/{id})로 저장된 뒤 부른다. 지금 안내가 기본 정보만 실은 요청의
+   * 확실한 실패에서 왔다면 그 안내는 이제 지난 내용이므로 지우고, 같은 내용 재전송 방지 기록도 버린다.
+   * 성패를 모르는 요청이 남아 있거나(같은 키로 다시 보내야 함) 프리셋·이미지가 걸린 안내는 그대로 둔다.
+   */
+  const clearBasicFailure = useCallback(() => {
+    if (operation.current !== null || !basicOnlyError.current) return;
+    basicOnlyError.current = false;
+    failedBasicFor.current = null;
+    setError(null);
+  }, []);
+
   return {
     query,
     status,
@@ -622,5 +640,6 @@ export function useStoryPresets(
     saveWithBasic,
     autoSaveNeeded,
     autoSave,
+    clearBasicFailure,
   };
 }
