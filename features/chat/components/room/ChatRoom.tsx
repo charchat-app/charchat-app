@@ -2,7 +2,7 @@
 // CHAT-US-13 대화 중 모델 변경: 다음 응답부터 적용, 진행 중 생성은 기존 모델 유지
 import { useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { AccessibilityInfo, Pressable, StyleSheet, View } from 'react-native';
 
 import { Badge, Button, Notice, Section, Text } from '@/components/ui';
 import { MinTouchSize, Radius, Spacing } from '@/constants/theme';
@@ -94,7 +94,13 @@ export function ChatRoom({ session, onBack }: { session: ConversationSession; on
       return;
     }
     // 응답 생성 중에도 바꿀 수 있다. 진행 중 생성은 서버가 기존 모델로 끝까지 만든다(CHAT-US-13-AC02).
-    modelChange.mutate(picked.id, { onSuccess: () => setPickingModel(false) });
+    modelChange.mutate(picked.id, {
+      onSuccess: (change) => {
+        setPickingModel(false);
+        // 목록이 닫히며 초점이 사라지므로 바뀐 결과를 화면 읽기 프로그램에 바로 알린다.
+        AccessibilityInfo.announceForAccessibility(modelChangeNotice(change, active?.id ?? null));
+      },
+    });
   };
 
   const blockedReason = !turns.isSuccess
@@ -184,7 +190,10 @@ export function ChatRoom({ session, onBack }: { session: ConversationSession; on
           onSelect={selectModel}
         />
       ) : null}
-      {modelChange.isError ? <Notice tone="alert" message="모델을 바꾸지 못했어요. 다시 시도해 주세요." /> : null}
+      {/* 읽기 전용이 되어 거절된 경우(409)에는 다시 시도할 수 없으므로 이 안내를 띄우지 않는다. */}
+      {modelChange.isError && !session.read_only ? (
+        <Notice tone="alert" message="모델을 바꾸지 못했어요. 다시 시도해 주세요." />
+      ) : null}
       {modelChange.data ? (
         // 목록이 닫히며 초점이 사라져도 바뀐 결과를 화면 읽기 프로그램이 읽도록 알린다.
         <View accessibilityLiveRegion="polite" aria-live="polite">

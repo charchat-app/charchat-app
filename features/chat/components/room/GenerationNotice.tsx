@@ -67,6 +67,9 @@ export function GenerationNotice({
         />
       ) : null}
       {retryModel ? <Text variant="caption">다시 시도하면 {withParticle(retryModel, '으로')} 요청해요.</Text> : null}
+      {canRetry && retryBlocked ? (
+        <Text variant="caption">모델을 바꾸는 중이에요. 바뀐 뒤에 다시 시도할 수 있어요.</Text>
+      ) : null}
     </View>
   );
 }

@@ -1,6 +1,7 @@
 // CHAT-US-13 (KAN-23) 대화 중 모델 변경: 목록·변경·생성 중 안내·실패 표시·재시도 모델 안내
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react-native';
+import { AccessibilityInfo } from 'react-native';
 
 import SessionRoute from '@/app/chat-session/[sessionId]';
 import type {
@@ -316,6 +317,7 @@ it('CHAT-US-13-AC02: 모델을 바꾸는 요청 중에는 전송·재시도를 �
       };
     });
   });
+  const announce = jest.spyOn(AccessibilityInfo, 'announceForAccessibility').mockImplementation(() => undefined);
   await show();
   await ready();
   // 지금 선택된 모델을 이름과 값으로 함께 알린다.
@@ -327,11 +329,14 @@ it('CHAT-US-13-AC02: 모델을 바꾸는 요청 중에는 전송·재시도를 �
   await waitFor(() => expect(sendButton()).toBeDisabled());
   expect(screen.getByText('모델을 바꾸는 중입니다.')).toBeOnTheScreen();
   expect(screen.getByRole('button', { name: '응답 생성 다시 시도' })).toBeDisabled();
+  expect(screen.getByText('모델을 바꾸는 중이에요. 바뀐 뒤에 다시 시도할 수 있어요.')).toBeOnTheScreen();
   await fireEvent.press(sendButton());
   expect(server.onPost).not.toHaveBeenCalled();
 
   await act(async () => releasePut?.());
   expect(await screen.findByText('다음 답변부터 테라를 써요.')).toBeOnTheScreen();
+  expect(announce).toHaveBeenCalledWith('다음 답변부터 테라를 써요.');
+  expect(screen.queryByText('모델을 바꾸는 중이에요. 바뀐 뒤에 다시 시도할 수 있어요.')).not.toBeOnTheScreen();
   expect(changeButton()).toHaveAccessibilityValue({ text: '테라' });
   await waitFor(() => expect(sendButton()).toBeEnabled());
   expect(screen.getByRole('button', { name: '응답 생성 다시 시도' })).toBeEnabled();
@@ -353,6 +358,8 @@ it('CHAT-US-13-AC01: 바꾸는 사이 스토리가 삭제돼 409가 오면 대�
   expect(await screen.findByText('읽기 전용')).toBeOnTheScreen();
   await waitFor(() => expect(screen.queryByRole('button', { name: '대화 모델 변경' })).not.toBeOnTheScreen());
   expect(screen.getByText('모델: 루나')).toBeOnTheScreen();
+  // 다시 시도할 수 없으므로 "다시 시도해 주세요" 안내는 띄우지 않는다.
+  expect(screen.queryByText('모델을 바꾸지 못했어요. 다시 시도해 주세요.')).not.toBeOnTheScreen();
 });
 
 it('CHAT-US-13-AC02: 모델을 바꾸지 못하면 오류를 알리고 기존 모델 표시를 그대로 둔다', async () => {
