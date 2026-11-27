@@ -38,7 +38,7 @@ export function useAuthGate(): { gate: AuthGate; sessionKey: number; notice: str
   const gate: AuthGate =
     snapshot.status === 'signing-out'
       ? 'signed-out'
-      : snapshot.status === 'signed-out' && devHeaderUserId()
+      : snapshot.status === 'signed-out' && !snapshot.devHeaderRejected && devHeaderUserId()
         ? 'active'
         : snapshot.status;
   return { gate, sessionKey: snapshot.sessionKey, notice: snapshot.notice, signedIn };

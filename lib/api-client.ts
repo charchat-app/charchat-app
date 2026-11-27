@@ -20,10 +20,10 @@
 
 import {
   expireSession,
-  finishSignOut,
   getAuthSnapshot,
   getRefreshToken,
   grantFromTokenResponse,
+  markDevHeaderRejected,
   applyGrant,
   setOnboardingRequired,
 } from '@/lib/authSession';
@@ -69,29 +69,14 @@ export class ApiError extends Error {
 /** 서버가 개발용 사용자 번호(X-User-Id)를 받지 않아 로그인 화면으로 보낼 때의 안내 */
 export const DEV_HEADER_REJECTED_NOTICE = '서버가 개발용 사용자 번호를 받지 않아요. 로그인해 주세요.';
 
-// 이번 실행에서 서버가 개발용 헤더를 거절했는지. 거절된 뒤에는 앱을 다시 켤 때까지 헤더 모드를 쓰지 않는다.
-let devHeaderRejected = false;
-
 /**
  * 개발용 헤더 모드의 사용자 번호. 모드가 꺼져 있으면 null.
  * EXPO_PUBLIC_DEV_AUTH=header이고 DEV_USER_ID가 있을 때만 켠다. 비어 있거나 token(그 밖의 값)이면 끈다.
  * 서버가 헤더를 거절한 뒤에도 끈다.
  */
 export function devHeaderUserId(): string | null {
-  if (!DEV_USER_ID || DEV_AUTH !== 'header' || devHeaderRejected) return null;
+  if (!DEV_USER_ID || DEV_AUTH !== 'header' || getAuthSnapshot().devHeaderRejected) return null;
   return DEV_USER_ID;
-}
-
-/**
- * 헤더 모드 요청이 401 UNAUTHENTICATED로 거절됐다. 헤더 모드를 끄고, 로그인 세션이 없는 상태면
- * 안내와 함께 로그인 화면으로 보낸다(세션 번호가 바뀌어 이전 사용자 번호의 캐시도 버린다).
- */
-function rejectDevHeader() {
-  if (devHeaderRejected) return;
-  devHeaderRejected = true;
-  if (getAuthSnapshot().status === 'signed-out') {
-    void finishSignOut({ notice: DEV_HEADER_REJECTED_NOTICE, keepStoredAuth: true });
-  }
 }
 
 /**
@@ -203,7 +188,8 @@ async function send<T>(
     if (!response.ok) {
       const error = await toApiError(response);
       if (bearer) sentAuth.set(error, { bearer, sessionKey });
-      if (devHeaderOnly && error.status === 401 && error.code === 'UNAUTHENTICATED') rejectDevHeader();
+      if (devHeaderOnly && error.status === 401 && error.code === 'UNAUTHENTICATED')
+        markDevHeaderRejected(DEV_HEADER_REJECTED_NOTICE);
       throw error;
     }
     if (response.status === 204) {

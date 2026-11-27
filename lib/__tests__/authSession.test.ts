@@ -103,9 +103,18 @@ describe('BASE-03 로그인 진입점: 서버가 개발용 헤더를 거절할 �
     // 세션 번호가 바뀌어 이전 사용자 번호로 받은 캐시를 버린다.
     expect(session.getAuthSnapshot().sessionKey).toBe(before + 1);
 
+    // 라우트 보호가 스냅샷 값으로 화면을 바꾸도록 거절 여부도 스냅샷에 실린다.
+    expect(session.getAuthSnapshot().devHeaderRejected).toBe(true);
+
     await api.apiRequest('/y').catch(() => undefined);
     const headers = (fetchMock.mock.calls[1][1] as RequestInit).headers as Record<string, string>;
     expect(headers['X-User-Id']).toBeUndefined();
+
+    // 이번 실행 동안은 로그인했다가 로그아웃해도 헤더 모드로 돌아가지 않는다.
+    signIn(session, 'cca_after');
+    await session.finishSignOut();
+    expect(session.getAuthSnapshot().devHeaderRejected).toBe(true);
+    expect(api.devHeaderUserId()).toBeNull();
   });
 
   it.each([
