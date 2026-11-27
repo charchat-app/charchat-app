@@ -69,6 +69,12 @@ export type ChatMessage = {
   role: 'user' | 'assistant';
   parts: ChatMessagePart[];
   created_at: string;
+  /**
+   * CHAT-US-08 (KAN-22): AI 응답 하나에 적힌 장면 상태(```info 블록, 누적 아님).
+   * 새 서버는 `null | {text, date, time, place, characters}`를 준다. 옛 서버는 주지 않는다.
+   * 아직 쓰는 화면이 없고 모양이 확정되기 전이라 `unknown`으로 받는다. 쓸 때 모양을 확인한다.
+   */
+  info?: unknown;
 };
 
 /** pending·streaming = 진행 중. 나머지는 끝난 상태다. */
@@ -99,6 +105,11 @@ export type ChatTurns = {
   model: string;
   /** CHAT-US-13: 세션에 지금 선택된 모델 id. 다음 전송·재시도가 이 모델로 요청한다. */
   model_id: number;
+  /**
+   * CHAT-US-08 (KAN-22): 다음 요청에 쓰일 누적 현재 장면(세션 시작 값 + 완료 응답 info를 덮어쓴 결과).
+   * 옛 서버는 주지 않는다. 상태 카드를 만들 때 모양을 정하므로 지금은 `unknown`으로 받는다.
+   */
+  current_scene?: unknown;
 };
 
 export type SendChatMessageInput = { request_id: string; parts: ChatMessagePartInput[] };
