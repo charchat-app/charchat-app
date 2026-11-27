@@ -29,16 +29,18 @@ export function useAuthSnapshot(): AuthSnapshot {
 
 /**
  * 라우트 보호 상태. 로그아웃 정리 중은 이미 로그인 화면으로 보낸다.
- * 개발용 헤더 모드(EXPO_PUBLIC_DEV_AUTH=header, 또는 미설정 + EXPO_PUBLIC_DEV_USER_ID)에서
- * 로그인 세션이 없으면 기존처럼 X-User-Id 사용자로 바로 이용한다.
+ * 개발용 헤더 모드(EXPO_PUBLIC_DEV_AUTH=header + EXPO_PUBLIC_DEV_USER_ID)에서
+ * 로그인 세션이 없으면 기존처럼 X-User-Id 사용자로 바로 이용한다. 서버가 헤더를 거절하면 로그인 화면으로 바뀐다.
  */
 export function useAuthGate(): { gate: AuthGate; sessionKey: number; notice: string | null; signedIn: boolean } {
   const snapshot = useAuthSnapshot();
   const signedIn = snapshot.accessToken !== null && (snapshot.status === 'active' || snapshot.status === 'pending');
+  // 화면 보호는 스냅샷 값만으로 정한다. React Compiler는 스냅샷 밖 값(devHeaderUserId가 읽는 환경값)의 변화를
+  // 알지 못해, 서버가 헤더를 거절해도 화면이 바뀌지 않는다. 그래서 거절 여부를 스냅샷에서 먼저 확인한다.
   const gate: AuthGate =
     snapshot.status === 'signing-out'
       ? 'signed-out'
-      : snapshot.status === 'signed-out' && devHeaderUserId()
+      : snapshot.status === 'signed-out' && !snapshot.devHeaderRejected && devHeaderUserId()
         ? 'active'
         : snapshot.status;
   return { gate, sessionKey: snapshot.sessionKey, notice: snapshot.notice, signedIn };

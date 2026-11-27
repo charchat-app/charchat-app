@@ -16,6 +16,11 @@ export type AuthSnapshot = Readonly<{
   sessionKey: number;
   /** 로그인 화면에 보일 안내. 예: 세션 만료 후 '다시 로그인해 주세요' */
   notice: string | null;
+  /**
+   * 서버가 개발용 헤더(X-User-Id)를 거절했다. 이번 실행 동안 개발용 헤더 모드를 쓰지 않는다.
+   * 라우트 보호가 이 값을 스냅샷에서 읽어야 화면이 바뀐다(React Compiler는 스냅샷 밖 값의 변화를 모른다).
+   */
+  devHeaderRejected: boolean;
 }>;
 
 /** 토큰 응답에서 세션에 필요한 값만 뽑은 것 */
@@ -23,9 +28,18 @@ export type SessionGrant = { accessToken: string; refreshToken: string; userId: 
 
 export const SESSION_EXPIRED_NOTICE = '다시 로그인해 주세요';
 
-const INITIAL: AuthSnapshot = { status: 'loading', userId: null, accessToken: null, sessionKey: 0, notice: null };
+const INITIAL: AuthSnapshot = {
+  status: 'loading',
+  userId: null,
+  accessToken: null,
+  sessionKey: 0,
+  notice: null,
+  devHeaderRejected: false,
+};
 
 let snapshot: AuthSnapshot = INITIAL;
+// 개발용 헤더 거절 여부. 로그인·로그아웃으로 스냅샷을 새로 만들어도 이번 실행 동안 유지한다.
+let devHeaderRejected = false;
 let refreshToken: string | null = null;
 const listeners = new Set<() => void>();
 // 보관·삭제를 시작한 순서대로 실행해 늦게 끝난 보관이 로그아웃 삭제를 되살리지 않게 한다.
@@ -36,8 +50,8 @@ function persist(run: () => Promise<void>): Promise<void> {
   return storageQueue;
 }
 
-function publish(next: AuthSnapshot) {
-  snapshot = next;
+function publish(next: Omit<AuthSnapshot, 'devHeaderRejected'>) {
+  snapshot = { ...next, devHeaderRejected };
   listeners.forEach((listener) => listener());
 }
 
@@ -128,6 +142,17 @@ export function expireSession(): void {
   void finishSignOut({ notice: SESSION_EXPIRED_NOTICE });
 }
 
+/**
+ * 서버가 개발용 헤더를 거절했다(401 UNAUTHENTICATED). 이번 실행 동안 헤더 모드를 끄고,
+ * 로그인 세션이 없으면 안내와 함께 로그인 화면으로 보낸다(세션 번호가 바뀌어 이전 사용자 번호의 캐시도 버린다).
+ */
+export function markDevHeaderRejected(notice: string): void {
+  if (devHeaderRejected) return;
+  devHeaderRejected = true;
+  if (snapshot.status === 'signed-out') void finishSignOut({ notice, keepStoredAuth: true });
+  else publish(snapshot);
+}
+
 /** 로그인 화면의 안내를 지운다(입력을 다시 시작할 때). */
 export function clearAuthNotice(): void {
   if (snapshot.notice !== null) publish({ ...snapshot, notice: null });
@@ -156,5 +181,6 @@ export function grantFromTokenResponse(body: unknown): SessionGrant | null {
 export function resetAuthSession(): void {
   refreshToken = null;
   storageQueue = Promise.resolve();
+  devHeaderRejected = false;
   publish(INITIAL);
 }
