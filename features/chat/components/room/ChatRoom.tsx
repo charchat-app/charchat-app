@@ -51,14 +51,14 @@ export function ChatRoom({ session, onBack }: { session: ConversationSession; on
   const colors = useTheme();
   const client = useQueryClient();
   const turns = useChatTurns(sessionId, true);
-  const { draft, update, clearSent, deviceUnavailable } = useChatDraft(sessionId, !session.read_only);
-  const sender = useSendMessage(sessionId);
+  const { names, chips, labelOf, characterNames } = useSpeakers(session);
+  const { draft, update, clearSent, deviceUnavailable } = useChatDraft(sessionId, names, !session.read_only);
+  const sender = useSendMessage(sessionId, names);
   const retrier = useRetryGeneration(sessionId, turns.data);
   const messages = turns.data?.messages ?? [];
   const active = turns.data?.active_generation ?? null;
   const lastFailed = turns.data?.last_failed_generation ?? null;
   const stream = useGenerationStream(sessionId, active);
-  const { options, labelOf, characterNames } = useSpeakers(session);
   const retryAttempt = retrier.attempt;
   // 결과를 모르는 재시도의 실패 안내가 이력에서 사라졌으면 따로 확인 버튼을 보인다(같은 요청 ID로 확인).
   const orphanRetry =
@@ -122,7 +122,7 @@ export function ChatRoom({ session, onBack }: { session: ConversationSession; on
   const send = (parts: Parameters<typeof sender.send>[0]) => {
     const secured = sender.send(parts);
     if (!secured) return false;
-    // 보낸 내용만 비우고 다음 발화자는 유저 캐릭터로 되돌린다(CHAT-US-02-AC01·AC05).
+    // 보낸 내용만 비운다. 다음 입력은 태그 없이 쓰면 다시 유저 캐릭터 대사다(CHAT-US-02-AC01·AC05).
     clearSent(secured, emptyDraft());
     // 모델 변경 안내는 바꾼 뒤 첫 전송까지만 보인다. 이후에는 진행 표시의 모델 이름이 대신한다.
     // 변경 요청이 진행 중일 때 reset하면 결과(성공·실패 안내)를 잃으므로 그때는 두지 않는다.
@@ -150,8 +150,8 @@ export function ChatRoom({ session, onBack }: { session: ConversationSession; on
           <ChatComposer
             draft={draft}
             update={update}
-            options={options}
-            labelOf={labelOf}
+            names={names}
+            chips={chips}
             blockedReason={blockedReason}
             onSend={send}
           />

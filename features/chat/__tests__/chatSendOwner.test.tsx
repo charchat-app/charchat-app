@@ -93,7 +93,7 @@ async function startSending() {
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={client}>{children}</QueryClientProvider>
   );
-  const hook = await renderHook(() => useSendMessage(SESSION), { wrapper });
+  const hook = await renderHook(() => useSendMessage(SESSION, { playName: '여행자', characters: [] }), { wrapper });
   await waitFor(() => expect(hook.result.current.checking).toBe(false));
   await act(async () => {
     hook.result.current.send(PARTS);

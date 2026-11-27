@@ -2,7 +2,7 @@
 import { decodeDraft, encodeDraft } from '@/features/chat/draftCodec';
 import { chatDraftKey, persistDraft, readDraft } from '@/features/chat/draftPersistence';
 import type { DraftStorage } from '@/features/chat/draftStorage.types';
-import { emptyDraft, type MessageDraft } from '@/features/chat/messageDraft';
+import { emptyDraft, type MessageDraft, type SpeakerNames, toMessageParts } from '@/features/chat/messageDraft';
 
 const entries = new Map<string, string>();
 const local: DraftStorage = {
@@ -32,20 +32,15 @@ it('CHAT-US-03-AC05: 보관 키는 계정·대화방마다 다르고 ID가 올�
   }
 });
 
-it('CHAT-US-03-AC05: 발화자별 부분과 입력 중 본문을 그대로 보관·복원하고, 빈 입력과 깨진 보관분은 버린다', () => {
-  const draft: MessageDraft = {
-    parts: [
-      { speaker: { kind: 'character', characterId: 2 }, body: '  *서술*\n대사  ' },
-      { speaker: { kind: 'narrator' }, body: '바람' },
-    ],
-    speaker: { kind: 'user' },
-    text: '쓰던 줄 😀',
-  };
-  expect(decodeDraft(encodeDraft(draft))).toEqual(draft);
+const names: SpeakerNames = { playName: '여행자', characters: [{ id: 2, name: '윤슬' }] };
+
+it('CHAT-US-03-AC05: `@이름:` 줄을 포함한 입력창 글자를 그대로 보관·복원하고, 빈 입력과 깨진 보관분은 버린다', () => {
+  const draft: MessageDraft = { text: '먼저\n@윤슬:   *서술*\n대사  \n@나레이터: 바람\n쓰던 줄 😀' };
+  expect(JSON.parse(encodeDraft(draft))).toEqual({ v: 2, text: draft.text });
+  expect(decodeDraft(encodeDraft(draft), names)).toEqual(draft);
   expect(encodeDraft(emptyDraft())).toBe('');
-  expect(encodeDraft({ ...emptyDraft(), speaker: { kind: 'narrator' } })).toBe('');
-  for (const broken of ['', 'not json', '{"v":2,"parts":[],"speaker":{"kind":"user"},"text":"x"}', '[]']) {
-    expect(decodeDraft(broken)).toBeNull();
+  for (const broken of ['', 'not json', '{"v":3,"text":"x"}', '{"v":2,"text":1}', '{"v":2,"text":""}', '[]']) {
+    expect(decodeDraft(broken, names)).toBeNull();
   }
   expect(
     decodeDraft(
@@ -55,8 +50,55 @@ it('CHAT-US-03-AC05: 발화자별 부분과 입력 중 본문을 그대로 보�
         speaker: { kind: 'user' },
         text: '',
       }),
+      names,
     ),
   ).toBeNull();
+});
+
+it('CHAT-US-03-AC05: 이전 형식(v1, 발화자별 부분) 보관분은 버리지 않고 세션 이름으로 `@이름:` 줄 글자로 바꿔 복원한다', () => {
+  const v1 = (parts: unknown[], speaker: unknown, text: string) => JSON.stringify({ v: 1, parts, speaker, text });
+  // 맨 앞 유저 부분은 태그를 생략하고, 입력 중이던 발화자가 유저가 아니면 그 태그 줄을 남겨 이어 쓰게 한다.
+  expect(
+    decodeDraft(
+      v1(
+        [
+          { speaker: { kind: 'user' }, body: '안녕' },
+          { speaker: { kind: 'character', characterId: 2 }, body: '  *서술*\n대사  ' },
+        ],
+        { kind: 'narrator' },
+        '',
+      ),
+      names,
+    ),
+  ).toEqual({ text: '안녕\n@윤슬:   *서술*\n대사  \n@나레이터: ' });
+  expect(decodeDraft(v1([], { kind: 'user' }, '쓰던 줄'), names)).toEqual({ text: '쓰던 줄' });
+  expect(decodeDraft(v1([{ speaker: { kind: 'narrator' }, body: '바람' }], { kind: 'user' }, '나'), names)).toEqual({
+    text: '@나레이터: 바람\n@여행자: 나',
+  });
+  // 아무것도 없던 v1 보관분은 복원할 것이 없다.
+  expect(decodeDraft(v1([], { kind: 'user' }, ''), names)).toBeNull();
+});
+
+it('CHAT-US-03-AC05: `:`가 있는 이름의 v1 보관분도 바꾼 글자를 다시 파싱하면 같은 발화자별 부분이다', () => {
+  const colon: SpeakerNames = { playName: 'Re:Zero', characters: [{ id: 2, name: 'A:B' }] };
+  const restored = decodeDraft(
+    JSON.stringify({
+      v: 1,
+      parts: [
+        { speaker: { kind: 'character', characterId: 2 }, body: '콜론' },
+        { speaker: { kind: 'user' }, body: '유저' },
+      ],
+      speaker: { kind: 'narrator' },
+      text: '바람',
+    }),
+    colon,
+  );
+  expect(restored).toEqual({ text: '@A:B: 콜론\n@Re:Zero: 유저\n@나레이터: 바람' });
+  expect(toMessageParts(restored!, colon)).toEqual([
+    { speaker_kind: 'character', character_id: 2, body: '콜론' },
+    { speaker_kind: 'user', character_id: null, body: '유저' },
+    { speaker_kind: 'narrator', character_id: null, body: '바람' },
+  ]);
 });
 
 it.each([null, '기존 저장본'])(

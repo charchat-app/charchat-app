@@ -131,8 +131,14 @@ const show = (client = newClient()) =>
 
 const input = () => screen.getByLabelText('메시지 입력');
 const sendButton = () => screen.getByRole('button', { name: '메시지 전송' });
-const openPicker = async () => fireEvent.press(screen.getByRole('button', { name: /^발화자 바꾸기/ }));
-const pick = async (label: string) => fireEvent.press(screen.getByRole('button', { name: `발화자 ${label} 선택` }));
+const chips = () => screen.queryAllByRole('button', { name: /로 말하기$/ });
+/** 입력창 끝에 이어 친다(사용자가 한 글자씩 치는 것과 같은 값 변화). */
+const type = async (more: string) => fireEvent.changeText(input(), `${input().props.value}${more}`);
+/** 입력창 끝에 `@`를 치고 칩을 누른다. */
+const speakAs = async (label: string) => {
+  await type('@');
+  await fireEvent.press(screen.getByRole('button', { name: label }));
+};
 const ready = async () => {
   await screen.findByLabelText('메시지 입력');
   await waitFor(() => expect(screen.queryByText('대화 이력을 불러오는 중…')).not.toBeOnTheScreen());
@@ -144,15 +150,26 @@ afterEach(() => {
   jest.restoreAllMocks();
 });
 
-it('CHAT-US-02-AC01: 발화자를 고르지 않으면 유저 캐릭터로 보내고, 선택지는 유저·모든 등장 캐릭터·나레이터다', async () => {
+it('CHAT-US-02-AC01: 화자를 고르지 않으면 유저 캐릭터로 보내고, `@`를 치면 입력창 위에 나레이터·유저·모든 등장 캐릭터 칩이 뜬다', async () => {
   const server = fakeServer();
   await show();
   await ready();
-  await openPicker();
-  expect(
-    screen.getAllByRole('button', { name: /^발화자 .+ 선택$/ }).map((item) => item.props.accessibilityLabel),
-  ).toEqual(['발화자 여행자 선택', '발화자 윤슬 선택', '발화자 서윤 선택', '발화자 나레이터 선택']);
-  await openPicker();
+  // 따로 있는 화자 버튼·앞 내용 카드는 없다.
+  expect(screen.queryByRole('button', { name: /발화자/ })).not.toBeOnTheScreen();
+  expect(input().props.placeholder).toBe('내용 입력하기 (@로 화자 바꾸기)');
+  expect(chips()).toHaveLength(0);
+  await type('@');
+  // 제타 순서: 나레이터, 유저(플레이 이름), 캐릭터들. `@`는 입력창에 남는다.
+  expect(chips().map((chip) => chip.props.accessibilityLabel)).toEqual([
+    '나레이터로 말하기',
+    '여행자로 말하기',
+    '윤슬로 말하기',
+    '서윤으로 말하기',
+  ]);
+  expect(input()).toHaveDisplayValue('@');
+  // 칩을 누르지 않고 지우면 칩 줄을 닫는다.
+  await fireEvent.changeText(input(), '');
+  expect(chips()).toHaveLength(0);
   await fireEvent.changeText(input(), '첫 메시지');
   await fireEvent.press(sendButton());
   await waitFor(() => expect(server.postBodies()).toHaveLength(1));
@@ -162,23 +179,22 @@ it('CHAT-US-02-AC01: 발화자를 고르지 않으면 유저 캐릭터로 보내
   });
 }, 20_000); // 첫 React Native 렌더는 콜드 캐시에서 기본 5초를 넘길 수 있다.
 
-it('CHAT-US-02-AC01·AC02: @로 발화자를 바꿔 여러 부분을 한 번에 순서대로 보내고, 보낸 뒤 발화자는 유저로 돌아온다', async () => {
+it('CHAT-US-02-AC01·AC02: `@`로 칩을 골라 한 입력창에 `@이름:` 줄을 쌓아 여러 화자를 한 번에 순서대로 보내고, 보낸 뒤에는 유저로 돌아온다', async () => {
   const server = fakeServer();
   await show();
   await ready();
-  await fireEvent.changeText(input(), '안녕');
-  await openPicker();
-  await pick('윤슬');
-  await fireEvent.changeText(input(), '*웃는다* 반가워');
-  // 입력창에 @를 치면 발화자 선택이 열리고 @는 본문에 남지 않는다.
-  await fireEvent.changeText(input(), '*웃는다* 반가워@');
-  expect(input()).toHaveDisplayValue('*웃는다* 반가워');
-  await pick('나레이터');
-  await fireEvent.changeText(input(), '바람이 분다');
-  const parts = screen.getAllByTestId('draft-part');
-  expect(parts).toHaveLength(2);
-  expect(parts[0]).toHaveTextContent('여행자안녕삭제');
-  expect(parts[1]).toHaveTextContent('윤슬*웃는다* 반가워삭제');
+  await type('안녕');
+  // 줄 중간에서 칩을 고르면 새 줄에서 `@윤슬: `로 시작하고 커서는 태그 뒤에 둔다.
+  await speakAs('윤슬로 말하기');
+  expect(input()).toHaveDisplayValue('안녕\n@윤슬: ');
+  expect(input().props.selection).toEqual({ start: 8, end: 8 });
+  expect(chips()).toHaveLength(0);
+  await type('*웃는다* 반가워\n');
+  await speakAs('나레이터로 말하기');
+  await type('바람이 분다');
+  expect(input()).toHaveDisplayValue('안녕\n@윤슬: *웃는다* 반가워\n@나레이터: 바람이 분다');
+  // 글자 수는 `@이름: ` 접두어를 빼고 본문만 센다: 2 + 9 + 6
+  expect(screen.getByText('17 / 5,000자')).toBeOnTheScreen();
 
   await fireEvent.press(sendButton());
   await waitFor(() => expect(server.postBodies()).toHaveLength(1));
@@ -190,20 +206,28 @@ it('CHAT-US-02-AC01·AC02: @로 발화자를 바꿔 여러 부분을 한 번에 
     ],
   });
   expect(input()).toHaveDisplayValue('');
-  expect(screen.queryAllByTestId('draft-part')).toHaveLength(0);
-  expect(screen.getByRole('button', { name: '발화자 바꾸기, 현재 여행자' })).toBeOnTheScreen();
+  // 다음 입력은 태그 없이 쓰면 다시 유저 대사다.
+  await type('다음 말');
+  expect(input()).toHaveDisplayValue('다음 말');
 });
 
-it('CHAT-US-02-AC02: 구성한 부분을 지울 수 있다', async () => {
+it('CHAT-US-02-AC02: 칩 줄은 다른 글자를 치면 닫히고, 줄 맨 앞의 `@`는 줄바꿈 없이 그 자리에서 태그가 된다', async () => {
   fakeServer();
   await show();
   await ready();
-  await fireEvent.changeText(input(), '지울 대사');
-  await openPicker();
-  await pick('서윤');
-  expect(screen.getAllByTestId('draft-part')).toHaveLength(1);
-  await fireEvent.press(screen.getByRole('button', { name: '1번째 부분(여행자) 삭제' }));
-  expect(screen.queryAllByTestId('draft-part')).toHaveLength(0);
+  await type('@');
+  expect(chips()).toHaveLength(4);
+  await type('a');
+  expect(chips()).toHaveLength(0);
+  // 붙여넣기처럼 여러 글자가 한꺼번에 들어오면 칩 줄을 열지 않는다.
+  await fireEvent.changeText(input(), '@a\n@@');
+  expect(chips()).toHaveLength(0);
+  await fireEvent.changeText(input(), '첫 줄\n');
+  await speakAs('서윤으로 말하기');
+  expect(input()).toHaveDisplayValue('첫 줄\n@서윤: ');
+  // 커서를 옮기면 지정했던 커서 위치를 풀어 이용자가 움직인 곳을 따른다.
+  await fireEvent(input(), 'selectionChange', { nativeEvent: { selection: { start: 1, end: 1 } } });
+  expect(input().props.selection).toBeUndefined();
 });
 
 it('CHAT-US-02-AC03: 저장된 메시지의 *서술*은 기울임, **강조**는 굵게, 나머지는 일반 대사로 기호 없이 표시한다', async () => {
@@ -240,20 +264,21 @@ it('CHAT-US-02-AC04: 빈 입력은 이유를 안내하고 전송하지 않는다
   expect(server.postBodies()).toHaveLength(0);
 });
 
-it('CHAT-US-02-AC04: 모든 발화자 합산 5,000자를 넘는 입력은 입력창에서 막고 기존 내용을 지킨다', async () => {
+it('CHAT-US-02-AC04: 모든 발화자 본문 합산 5,000자를 넘는 입력은 입력창에서 막고 기존 내용을 지킨다', async () => {
   fakeServer();
   await show();
   await ready();
   await fireEvent.changeText(input(), 'a'.repeat(4990));
-  await openPicker();
-  await pick('나레이터');
-  expect(input().props.maxLength).toBe(10);
-  await fireEvent.changeText(input(), 'b'.repeat(25));
-  expect(input()).toHaveDisplayValue('b'.repeat(10));
+  await speakAs('나레이터로 말하기');
+  // `@나레이터: ` 접두어는 세지 않는다.
+  expect(screen.getByText('4,990 / 5,000자')).toBeOnTheScreen();
+  await type('b'.repeat(25));
+  expect(input()).toHaveDisplayValue(`${'a'.repeat(4990)}\n@나레이터: ${'b'.repeat(10)}`);
   expect(screen.getByText('5,000 / 5,000자')).toBeOnTheScreen();
   // 한도 안에서 지우고 고칠 수 있다.
-  await fireEvent.changeText(input(), 'b'.repeat(4));
-  expect(input()).toHaveDisplayValue('bbbb');
+  await fireEvent.changeText(input(), `${'a'.repeat(4990)}\n@나레이터: bbbb`);
+  expect(input()).toHaveDisplayValue(`${'a'.repeat(4990)}\n@나레이터: bbbb`);
+  expect(screen.getByText('4,994 / 5,000자')).toBeOnTheScreen();
 });
 
 it('CHAT-US-02-AC05·AC06·AC08·AC09·AC12: 생성 중 진행 표시와 스트리밍, 작성은 허용하고 전송은 막으며 완료 응답을 저장 이력으로 표시한다', async () => {
@@ -611,17 +636,13 @@ it('CHAT-US-02-AC04·AC16: 서버가 검증으로 거절하면 이유를 안내�
   server.onPost.mockImplementationOnce(() => json({ code: 'MESSAGE_INVALID_SPEAKER', detail: 'invalid speaker' }, 422));
   await show();
   await ready();
-  await fireEvent.changeText(input(), '안녕');
-  await openPicker();
-  await pick('윤슬');
-  await fireEvent.changeText(input(), '반가워');
+  await fireEvent.changeText(input(), '안녕\n@윤슬: 반가워');
   await fireEvent.press(sendButton());
 
   expect(
     await screen.findByText('선택한 발화자를 이 대화에서 쓸 수 없습니다. 보낸 내용을 입력창에 되돌렸습니다.'),
   ).toBeOnTheScreen();
-  await waitFor(() => expect(screen.getAllByTestId('draft-part')).toHaveLength(2));
-  expect(screen.getAllByTestId('draft-part')[1]).toHaveTextContent('윤슬반가워삭제');
+  await waitFor(() => expect(input()).toHaveDisplayValue('안녕\n@윤슬: 반가워'));
   expect(screen.queryByTestId('chat-pending-bubble')).not.toBeOnTheScreen();
   expect(sendButton()).toBeEnabled();
   expect(server.postBodies()).toHaveLength(1);
@@ -655,8 +676,8 @@ it('CHAT-US-02-AC06·AC10: 다른 곳에서 이미 생성 중(409)이면 보낸 
   await fireEvent.changeText(input(), '다른 탭의 메시지');
   await fireEvent.press(sendButton());
   expect(await screen.findByText(/다른 응답이 아직 생성 중이라 보내지 못했습니다/)).toBeOnTheScreen();
-  await waitFor(() => expect(input()).toHaveDisplayValue(''));
-  expect(screen.getAllByTestId('draft-part')[0]).toHaveTextContent('여행자다른 탭의 메시지삭제');
+  // 보낸 내용은 입력창 글자로 되돌아온다(맨 앞 유저 부분은 태그 없이).
+  await waitFor(() => expect(input()).toHaveDisplayValue('다른 탭의 메시지'));
   await waitFor(() => expect(server.pollUrls()).toEqual([`${BASE}/generations/12?offset=0&wait=10`]));
   expect(screen.getByLabelText('응답 생성 중')).toBeOnTheScreen();
   expect(sendButton()).toBeDisabled();
