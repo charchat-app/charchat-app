@@ -131,6 +131,44 @@ describe('BASE-03 로그인 진입점: 서버가 개발용 헤더를 거절할 �
     expect(session.getAuthSnapshot().notice).toBeNull();
   });
 
+  it('BASE-03 동시에 거절된 헤더 요청 두 개는 로그인 화면 전환을 한 번만 한다', async () => {
+    const { api, session } = load(HEADER_MODE);
+    session.finishSignOut({ keepStoredAuth: true });
+    const before = session.getAuthSnapshot().sessionKey;
+    jest.spyOn(globalThis, 'fetch').mockImplementation(async () => rejected());
+
+    await Promise.all([api.apiRequest('/a').catch(() => undefined), api.apiRequest('/b').catch(() => undefined)]);
+    expect(session.getAuthSnapshot()).toMatchObject({
+      status: 'signed-out',
+      sessionKey: before + 1,
+      notice: api.DEV_HEADER_REJECTED_NOTICE,
+      devHeaderRejected: true,
+    });
+  });
+
+  it('BASE-03 헤더로 보낸 요청의 401이 로그인한 뒤 늦게 오면 헤더 모드만 끄고 로그인 세션은 그대로 둔다', async () => {
+    const { api, session } = load(HEADER_MODE);
+    session.finishSignOut({ keepStoredAuth: true });
+    let release!: (response: Response) => void;
+    jest.spyOn(globalThis, 'fetch').mockImplementation(() => new Promise<Response>((done) => (release = done)));
+
+    const late = api.apiRequest('/x').catch(() => undefined);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    signIn(session, 'cca_live');
+    const signedIn = session.getAuthSnapshot();
+    release(rejected());
+    await late;
+
+    expect(session.getAuthSnapshot()).toMatchObject({
+      status: 'active',
+      accessToken: 'cca_live',
+      sessionKey: signedIn.sessionKey,
+      notice: null,
+      devHeaderRejected: true,
+    });
+    expect(api.devHeaderUserId()).toBeNull();
+  });
+
   it('BASE-03 로그인 중에는 헤더를 보내지 않으므로 401 UNAUTHENTICATED를 받아도 헤더 모드 거절로 보지 않는다', async () => {
     const { api, session } = load(HEADER_MODE);
     signIn(session, 'cca_live');

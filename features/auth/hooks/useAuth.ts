@@ -35,6 +35,8 @@ export function useAuthSnapshot(): AuthSnapshot {
 export function useAuthGate(): { gate: AuthGate; sessionKey: number; notice: string | null; signedIn: boolean } {
   const snapshot = useAuthSnapshot();
   const signedIn = snapshot.accessToken !== null && (snapshot.status === 'active' || snapshot.status === 'pending');
+  // 화면 보호는 스냅샷 값만으로 정한다. React Compiler는 스냅샷 밖 값(devHeaderUserId가 읽는 환경값)의 변화를
+  // 알지 못해, 서버가 헤더를 거절해도 화면이 바뀌지 않는다. 그래서 거절 여부를 스냅샷에서 먼저 확인한다.
   const gate: AuthGate =
     snapshot.status === 'signing-out'
       ? 'signed-out'
