@@ -36,18 +36,27 @@ export const sameSpeaker = (a: DraftSpeaker, b: DraftSpeaker) =>
  * - 플레이 이름은 캐릭터 이름과 같을 수 없다(CHAT-US-01-AC17). 겹치면 유저를 우선한다.
  * - `:`가 없는 이름에서는 AI 응답 파서의 정규식 `^@([^:\n]+?):[ \t]?(.*)$`와 같은 결과다(그 경우 첫 `:`가 이름 바로 뒤다).
  *   알려진 이름에 맞지 않는 태그 줄은 일반 줄과 똑같이 다루므로 정규식으로 다시 볼 필요가 없다.
+ * - 남은 한계: 한 이름이 다른 이름 + `: `로 시작하면(플레이 이름 `A`, 캐릭터 `A: B`) `@A: B: …` 줄은 긴 이름(캐릭터)으로 읽힌다.
+ *   서버가 막지 않는 드문 조합이라 그대로 둔다.
  */
-function matchSpeakerTag(line: string, names: SpeakerNames): { speaker: DraftSpeaker; body: string } | null {
-  const candidates: { name: string; speaker: DraftSpeaker }[] = [
+type TagCandidate = { name: string; speaker: DraftSpeaker };
+
+/** 태그로 맞출 이름 목록. 한 번 파싱할 때 한 번만 만든다. */
+function tagCandidates(names: SpeakerNames): TagCandidate[] {
+  const candidates: TagCandidate[] = [
     { name: NARRATOR_TAG, speaker: { kind: 'narrator' } },
     { name: names.playName, speaker: USER_SPEAKER },
     ...names.characters.map(({ id, name }) => ({ name, speaker: { kind: 'character', characterId: id } as const })),
   ];
   // sort는 안정 정렬이라 길이가 같으면 위 순서를 지킨다.
   candidates.sort((a, b) => b.name.length - a.name.length);
+  return candidates.filter(({ name }) => name !== '');
+}
+
+function matchSpeakerTag(line: string, candidates: TagCandidate[]): { speaker: DraftSpeaker; body: string } | null {
   for (const { name, speaker } of candidates) {
     const prefix = `@${name}:`;
-    if (name === '' || !line.startsWith(prefix)) continue;
+    if (!line.startsWith(prefix)) continue;
     const rest = line.slice(prefix.length);
     return { speaker, body: rest.startsWith(' ') || rest.startsWith('\t') ? rest.slice(1) : rest };
   }
@@ -56,7 +65,7 @@ function matchSpeakerTag(line: string, names: SpeakerNames): { speaker: DraftSpe
 
 /** 입력창에 `@이름: `로 넣었을 때 실제로 읽히는 발화자. 다른 화자와 이름이 같으면 그 화자다. */
 export const speakerOfTagName = (name: string, names: SpeakerNames) =>
-  matchSpeakerTag(`@${name}: `, names)?.speaker ?? null;
+  matchSpeakerTag(`@${name}: `, tagCandidates(names))?.speaker ?? null;
 
 /** 태그에 쓰는 발화자 이름 */
 export function speakerName(speaker: DraftSpeaker, names: SpeakerNames) {
@@ -81,9 +90,10 @@ const toPartInput = (speaker: DraftSpeaker, body: string): ChatMessagePartInput 
  * - 모르는 이름의 태그 줄은 태그 없는 줄과 똑같이 다룬다.
  */
 export function parseUserText(text: string, names: SpeakerNames): ChatMessagePartInput[] {
+  const candidates = tagCandidates(names);
   const blocks: { speaker: DraftSpeaker; lines: string[] }[] = [];
   for (const line of splitLines(text)) {
-    const tag = matchSpeakerTag(line, names);
+    const tag = matchSpeakerTag(line, candidates);
     const open = blocks.at(-1);
     if (tag) blocks.push({ speaker: tag.speaker, lines: [tag.body] });
     else if (open) open.lines.push(line);
@@ -105,14 +115,12 @@ export const draftLength = (draft: MessageDraft, names: SpeakerNames) => textLen
 
 /**
  * 한도(합산 5,000자)를 넘는 추가 입력을 막는다. 새로 들어온 글자는 한도까지만 받고 기존 내용은 그대로 둔다.
- * 원문이 짧아지는 편집(지우기)과 합산 길이를 늘리지 않는 편집은 이미 한도를 넘었어도 받는다.
+ * 글자를 지우기만 한 편집과 합산 길이를 늘리지 않는 편집은 이미 한도를 넘었어도 받는다.
  * 태그의 `:`나 `@`를 지우면 태그가 본문이 되어 합산이 늘 수 있는데, 지우기가 무시되면 혼란스러우므로 받고
  * 전송 때 `validateDraft`가 한도 초과로 막는다.
+ * 선택한 글을 다른 글로 바꾸는 편집(붙여넣기 등)은 원문이 짧아져도 새 글자를 한도까지만 받는다.
  */
 export function limitInput(previous: string, next: string, names: SpeakerNames): string {
-  if (Array.from(next).length < Array.from(previous).length) return next;
-  const nextLength = textLength(next, names);
-  if (nextLength <= MESSAGE_MAX_LENGTH || nextLength <= textLength(previous, names)) return next;
   const before = Array.from(previous);
   const after = Array.from(next);
   let start = 0;
@@ -127,6 +135,9 @@ export function limitInput(previous: string, next: string, names: SpeakerNames):
   }
   const head = after.slice(0, start).join('');
   const inserted = after.slice(start, after.length - end);
+  if (inserted.length === 0) return next;
+  const nextLength = textLength(next, names);
+  if (nextLength <= MESSAGE_MAX_LENGTH || nextLength <= textLength(previous, names)) return next;
   const tail = after.slice(after.length - end).join('');
   const build = (count: number) => head + inserted.slice(0, count).join('') + tail;
   // 들어온 글자 수에 대해 한도 안에 드는 가장 긴 앞부분을 찾는다(전부는 이미 넘는다).

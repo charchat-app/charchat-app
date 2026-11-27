@@ -218,6 +218,15 @@ describe('CHAT-US-02-AC04: 5,000자 한도와 빈 입력', () => {
     expect(limitInput(prev, `${'a'.repeat(4998)}\n윤슬: bb`, names)).toBe(`${'a'.repeat(4998)}\n윤슬: bb`);
   });
 
+  it('CHAT-US-02-AC04: 태그 줄 전체를 더 짧은 일반 글로 바꿔 붙여도 원문 길이와 상관없이 본문 합산 한도까지만 받는다', () => {
+    const prev = Array.from({ length: 50 }, () => `@윤슬: ${'a'.repeat(100)}`).join('\n');
+    expect(draftLength({ text: prev }, names)).toBe(MESSAGE_MAX_LENGTH);
+    const pasted = 'b'.repeat(prev.length - 1);
+    const limited = limitInput(prev, pasted, names);
+    expect(draftLength({ text: limited }, names)).toBe(MESSAGE_MAX_LENGTH);
+    expect(limited).toBe('b'.repeat(MESSAGE_MAX_LENGTH));
+  });
+
   it('CHAT-US-02-AC04: 빈 입력과 한도 초과를 구분해 전송하지 않는다', () => {
     expect(validateDraft(emptyDraft(), names)).toBe('empty');
     expect(validateDraft({ text: ' \n ' }, names)).toBe('empty');
