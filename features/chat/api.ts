@@ -1,5 +1,5 @@
 // CHAT-US-01 대화 진입 API · CHAT-US-02 메시지 전송·응답 API · CHAT-US-03 내 대화 목록·요청 ID 확인
-// CHAT-US-13 대화 중 모델 변경
+// CHAT-US-13 대화 중 모델 변경 · CHAT-US-08 최신 AI 응답의 장면 정보 수정
 import { ApiError, apiRequest } from '@/lib/api-client';
 import type {
   ChatGeneration,
@@ -10,6 +10,8 @@ import type {
   ConversationSessionCreated,
   ConversationSessionPage,
   ConversationStory,
+  SceneInfoUpdateInput,
+  SceneInfoUpdateResult,
   SendChatMessageInput,
   SessionModelChange,
   StartConversationInput,
@@ -87,3 +89,17 @@ export const changeSessionModel = (sessionId: string, modelId: number) =>
     method: 'PUT',
     body: JSON.stringify({ model_id: modelId }),
   });
+
+/**
+ * 가장 뒤 완료 AI 응답의 장면 정보(info)를 고친다(CHAT-US-08, KAN-40 결정 C). 바뀐 칸만 보낸다.
+ * 응답은 고친 info와 새 누적 장면(current_scene)이다. 모델은 다시 부르지 않는다.
+ */
+export function updateSceneInfo(sessionId: string, messageId: number, input: SceneInfoUpdateInput) {
+  if (!Number.isSafeInteger(messageId) || messageId <= 0) {
+    throw new ApiError(0, 'INVALID_MESSAGE_ID', '메시지 ID가 올바르지 않습니다.');
+  }
+  return apiRequest<SceneInfoUpdateResult>(`${sessionPath(sessionId)}/messages/${messageId}/info`, {
+    method: 'PUT',
+    body: JSON.stringify(input),
+  });
+}
