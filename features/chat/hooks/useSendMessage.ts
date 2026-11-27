@@ -16,7 +16,7 @@ import {
   refreshTurns,
   sendAttemptKey,
 } from '@/features/chat/hooks/chatCache';
-import { fromMessageParts, isDraftEmpty, type MessageDraft } from '@/features/chat/messageDraft';
+import { fromMessageParts, isDraftEmpty, type MessageDraft, type SpeakerNames } from '@/features/chat/messageDraft';
 import { newRequestId } from '@/features/chat/requestId';
 import {
   clearSendAttempt,
@@ -75,7 +75,8 @@ async function restoreDraftOnDevice(sessionId: string, draft: MessageDraft, owne
   return writeDraftNow(storage, key, encodeDraft(draft), () => isSameOwner(owner));
 }
 
-export function useSendMessage(sessionId: string) {
+/** `names`(세션 화자 이름)는 거절된 전송을 `@이름: 본문` 줄 글자로 입력창에 되돌릴 때 쓴다. */
+export function useSendMessage(sessionId: string, names: SpeakerNames) {
   const client = useQueryClient();
   const key = sendAttemptKey(sessionId);
   const { data: attempt } = useQuery<SendAttempt | null>({ queryKey: key, queryFn: skipToken, gcTime: Infinity });
@@ -105,12 +106,13 @@ export function useSendMessage(sessionId: string) {
         const current = client.getQueryData<MessageDraft>(draftKey(sessionId));
         const restored = !current || isDraftEmpty(current);
         const message = REJECTION_MESSAGES[error.code] ?? error.detail;
-        if (restored) client.setQueryData<MessageDraft>(draftKey(sessionId), fromMessageParts(sent.parts));
+        const draft = fromMessageParts(sent.parts, names);
+        if (restored) client.setQueryData<MessageDraft>(draftKey(sessionId), draft);
         setAttempt({ ...sent, status: 'rejected', restored, message });
         // 방이 닫혀 있어도 원문을 기기에서 되찾을 수 있게 한 뒤에만 전송 기록을 정리한다(CHAT-US-03-AC05).
         // 입력창으로 되돌렸으면 기기의 작성 중 입력에, 새로 쓴 내용이 있으면 거절 표시를 단 전송 기록에 남긴다.
         void (async () => {
-          if (restored && (await restoreDraftOnDevice(sessionId, fromMessageParts(sent.parts), owner))) {
+          if (restored && (await restoreDraftOnDevice(sessionId, draft, owner))) {
             await clearSendAttempt(sessionId, sent.requestId, owner.ownerId);
           } else {
             await markSendAttemptRejected(sessionId, sent.requestId, message, owner.ownerId);

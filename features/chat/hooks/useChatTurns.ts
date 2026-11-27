@@ -8,7 +8,7 @@ import { decodeDraft, encodeDraft } from '@/features/chat/draftCodec';
 import { chatDraftKey, persistDraft, readDraft } from '@/features/chat/draftPersistence';
 import { getDraftStorage } from '@/features/chat/draftStorage';
 import { draftKey, recheckSessionAccess, turnsKey } from '@/features/chat/hooks/chatCache';
-import { emptyDraft, isDraftEmpty, type MessageDraft } from '@/features/chat/messageDraft';
+import { emptyDraft, isDraftEmpty, type MessageDraft, type SpeakerNames } from '@/features/chat/messageDraft';
 
 /** 화면에 들어올 때마다 다시 읽어 진행 중인 생성을 이어서 표시한다(AC13·AC14). */
 export function useChatTurns(sessionId: string, enabled: boolean) {
@@ -35,8 +35,9 @@ const EMPTY_DRAFT = emptyDraft();
  * 보내지 않은 작성 내용. 같은 앱 실행 안에서는 Query 캐시에, 앱·브라우저를 닫았다 열어도 남도록
  * 계정·대화방별로 이 기기에도 보관한다(CHAT-US-03-AC05~AC08). 서버에는 보내지 않는다.
  * 응답 완료·실패·재시도는 이 값을 건드리지 않는다(CHAT-US-02-AC05·AC16, CHAT-US-03-AC08).
+ * `names`(세션 화자 이름)는 이전 형식(v1) 보관분을 `@이름:` 줄 글자로 바꿔 복원할 때 쓴다.
  */
-export function useChatDraft(sessionId: string, persist = false) {
+export function useChatDraft(sessionId: string, names: SpeakerNames, persist = false) {
   const client = useQueryClient();
   const key = draftKey(sessionId);
   const ownerId = getConversationOwnerId();
@@ -73,7 +74,7 @@ export function useChatDraft(sessionId: string, persist = false) {
     const apply = (stored: string) => {
       // 읽는 동안 이용자가 고쳤거나 화면을 떠났으면 늦게 읽은 보관분을 덮어쓰지 않는다.
       if (!active || touched.current || !canPersist()) return;
-      const restored = decodeDraft(stored);
+      const restored = decodeDraft(stored, names);
       if (!restored) return;
       written.current.add(restored);
       setDraft(restored);
@@ -88,7 +89,7 @@ export function useChatDraft(sessionId: string, persist = false) {
     return () => {
       active = false;
     };
-  }, [canPersist, client, key, storageKey]);
+  }, [canPersist, client, key, names, storageKey]);
 
   useEffect(() => {
     written.current.add(draft);

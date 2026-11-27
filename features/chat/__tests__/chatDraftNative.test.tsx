@@ -8,7 +8,7 @@ import * as identity from '@/features/chat/conversationIdentity';
 import { decodeDraft } from '@/features/chat/draftCodec';
 import { chatDraftKey } from '@/features/chat/draftPersistence';
 import { useChatDraft } from '@/features/chat/hooks/useChatTurns';
-import type { MessageDraft } from '@/features/chat/messageDraft';
+import type { MessageDraft, SpeakerNames } from '@/features/chat/messageDraft';
 import { clearSendAttempt, loadSendAttempt, saveSendAttempt, sendAttemptKey } from '@/features/chat/sendAttemptStorage';
 
 jest.mock('@react-native-async-storage/async-storage', () => ({
@@ -20,7 +20,8 @@ const storage = jest.mocked(AsyncStorage);
 const key = chatDraftKey('8', '19')!;
 const entries = new Map<string, string>();
 const clients: QueryClient[] = [];
-const draft = (text: string): MessageDraft => ({ parts: [], speaker: { kind: 'user' }, text });
+const draft = (text: string): MessageDraft => ({ text });
+const names: SpeakerNames = { playName: '여행자', characters: [] };
 const tick = (ms: number) => act(async () => jest.advanceTimersByTime(ms));
 
 function deferred<T>() {
@@ -38,7 +39,7 @@ function open(sessionId = '19') {
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={client}>{children}</QueryClientProvider>
   );
-  return renderHook(() => useChatDraft(sessionId, true), { wrapper });
+  return renderHook(() => useChatDraft(sessionId, names, true), { wrapper });
 }
 
 beforeEach(() => {
@@ -67,7 +68,7 @@ it('CHAT-US-03-AC05·AC06: 네이티브에서도 0.5초 뒤 계정·대화방 �
   await first.unmount();
   // 화면을 떠나도 예약한 보관은 끝까지 한다.
   await tick(1);
-  expect(decodeDraft(entries.get(key)!)).toEqual(draft('  원문\n다음 줄  '));
+  expect(decodeDraft(entries.get(key)!, names)).toEqual(draft('  원문\n다음 줄  '));
 
   expect((await open('20')).result.current.draft.text).toBe('');
   const again = await open();
@@ -84,7 +85,7 @@ it('CHAT-US-03-AC06: 늦게 읽힌 보관분은 그동안 고친 입력을 덮�
   await act(async () => read.resolve(entries.get(key)!));
   expect(result.current.draft.text).toBe('새 입력');
   await tick(500);
-  expect(decodeDraft(entries.get(key)!)?.text).toBe('새 입력');
+  expect(decodeDraft(entries.get(key)!, names)?.text).toBe('새 입력');
 });
 
 it('CHAT-US-03-AC07: 보관 중에 모두 지우면 그 쓰기가 끝난 뒤 지우고 다시 열어도 복원하지 않는다', async () => {
@@ -120,7 +121,7 @@ it('CHAT-US-03-AC05: 기기 보관이 실패해도 입력을 유지하고 안내
   await act(async () => result.current.update(() => draft('다시 시도')));
   await tick(500);
   expect(result.current.deviceUnavailable).toBe(false);
-  expect(decodeDraft(entries.get(key)!)?.text).toBe('다시 시도');
+  expect(decodeDraft(entries.get(key)!, names)?.text).toBe('다시 시도');
 });
 
 it('CHAT-US-03-AC09: 요청 ID 기록·삭제는 시작한 순서대로 처리하고 다른 요청 ID의 기록은 지우지 않는다', async () => {

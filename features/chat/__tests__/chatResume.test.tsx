@@ -166,10 +166,10 @@ afterEach(async () => {
 it('CHAT-US-03-AC05·AC06: 입력을 멈추면 계정·대화방별로 기기에 보관하고, 앱을 다시 열면 그 대화방에만 복원한다', async () => {
   const server = fakeServer();
   await openApp('19');
-  await fireEvent.changeText(input(), '윤슬에게 할 말');
-  await fireEvent.press(screen.getByRole('button', { name: /^발화자 바꾸기/ }));
-  await fireEvent.press(screen.getByRole('button', { name: '발화자 윤슬 선택' }));
-  await fireEvent.changeText(input(), '윤슬의 대사');
+  await fireEvent.changeText(input(), '윤슬에게 할 말\n');
+  await fireEvent.changeText(input(), '윤슬에게 할 말\n@');
+  await fireEvent.press(screen.getByRole('button', { name: '윤슬로 말하기' }));
+  await fireEvent.changeText(input(), '윤슬에게 할 말\n@윤슬: 윤슬의 대사');
   // 저장 버튼·팝업 없이, 바로가 아니라 입력이 멈춘 뒤에 보관한다(AC06).
   expect(entries.has(chatDraftKey('8', '19')!)).toBe(false);
   expect(screen.queryByRole('button', { name: /저장/ })).not.toBeOnTheScreen();
@@ -182,20 +182,16 @@ it('CHAT-US-03-AC05·AC06: 입력을 멈추면 계정·대화방별로 기기에
 
   // 앱을 닫았다 열면 각 대화방에 그 방의 마지막 보관분만 복원한다(AC05).
   await openApp('19');
-  await waitFor(() => expect(input()).toHaveDisplayValue('윤슬의 대사'));
-  expect(screen.getByText('윤슬에게 할 말')).toBeOnTheScreen();
-  expect(screen.getByRole('button', { name: '발화자 바꾸기, 현재 윤슬' })).toBeOnTheScreen();
+  await waitFor(() => expect(input()).toHaveDisplayValue('윤슬에게 할 말\n@윤슬: 윤슬의 대사'));
   await closeApp();
   await openApp('20');
   await waitFor(() => expect(input()).toHaveDisplayValue('다른 방 입력'));
-  expect(screen.queryByText('윤슬에게 할 말')).not.toBeOnTheScreen();
   await closeApp();
 
   // 다른 계정에는 보이지 않는다.
   jest.spyOn(identity, 'getConversationOwnerId').mockReturnValue('9');
   await openApp('19');
   expect(input()).toHaveDisplayValue('');
-  expect(screen.queryByText('윤슬에게 할 말')).not.toBeOnTheScreen();
 
   // 작성 중 입력은 서버 요청에 실리지 않는다.
   expect(server.postBodies()).toHaveLength(0);
@@ -204,8 +200,8 @@ it('CHAT-US-03-AC05·AC06: 입력을 멈추면 계정·대화방별로 기기에
 
 it('CHAT-US-03-AC07: 유효한 메시지를 보내면 그 대화방 보관분만 지우고 다시 열어도 되살아나지 않는다', async () => {
   const server = fakeServer();
-  entries.set(chatDraftKey('8', '19')!, encodeDraft({ parts: [], speaker: { kind: 'user' }, text: '보낼 메시지' }));
-  entries.set(chatDraftKey('8', '20')!, encodeDraft({ parts: [], speaker: { kind: 'user' }, text: '다른 방 보관분' }));
+  entries.set(chatDraftKey('8', '19')!, encodeDraft({ text: '보낼 메시지' }));
+  entries.set(chatDraftKey('8', '20')!, encodeDraft({ text: '다른 방 보관분' }));
   await openApp('19');
   await waitFor(() => expect(input()).toHaveDisplayValue('보낼 메시지'));
   server.state.turns = { ...emptyTurns, messages: [userMessage], active_generation: generation() };
@@ -221,6 +217,33 @@ it('CHAT-US-03-AC07: 유효한 메시지를 보내면 그 대화방 보관분만
   server.state.turns = emptyTurns;
   await openApp('19');
   expect(input()).toHaveDisplayValue('');
+});
+
+it('CHAT-US-03-AC05: 이전 형식(발화자별 부분) 보관분은 세션 이름으로 `@이름:` 줄 글자로 바꿔 입력창에 복원한다', async () => {
+  const server = fakeServer();
+  entries.set(
+    chatDraftKey('8', '19')!,
+    JSON.stringify({
+      v: 1,
+      parts: [
+        { speaker: { kind: 'user' }, body: '안녕' },
+        { speaker: { kind: 'character', characterId: 2 }, body: '반가워' },
+      ],
+      speaker: { kind: 'narrator' },
+      text: '바람',
+    }),
+  );
+  await openApp('19');
+  await waitFor(() => expect(input()).toHaveDisplayValue('안녕\n@윤슬: 반가워\n@나레이터: 바람'));
+  await fireEvent.press(sendButton());
+  await waitFor(() => expect(server.postBodies()).toHaveLength(1));
+  expect(server.postBodies()[0]).toMatchObject({
+    parts: [
+      { speaker_kind: 'user', character_id: null, body: '안녕' },
+      { speaker_kind: 'character', character_id: 2, body: '반가워' },
+      { speaker_kind: 'narrator', character_id: null, body: '바람' },
+    ],
+  });
 });
 
 it('CHAT-US-03-AC07: 입력을 모두 지우면 바로 보관분을 지운다', async () => {
@@ -433,8 +456,8 @@ it('CHAT-US-03-AC05: 방을 나간 뒤 전송이 거절되면 입력이 비어 �
 
   await closeApp();
   await openApp('19');
-  // 되돌린 원문은 기존 거절 처리와 같이 발화자별 부분으로 입력창에 들어온다.
-  expect(await screen.findByText('거절될 말')).toBeOnTheScreen();
+  // 되돌린 원문은 기존 거절 처리와 같이 입력창 글자(`@이름:` 줄, 맨 앞 유저 부분은 태그 없이)로 들어온다.
+  await waitFor(() => expect(input()).toHaveDisplayValue('거절될 말'));
   expect(screen.queryByTestId('chat-pending-bubble')).not.toBeOnTheScreen();
   expect(server.lookups()).toHaveLength(0);
   expect(sendButton()).toBeEnabled();
