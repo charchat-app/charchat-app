@@ -1,7 +1,7 @@
 // CHAT-US-08 장면 정보 수정 시트(KAN-40 결정 C): 가장 뒤 AI 응답의 날짜·시간·장소·캐릭터별 착장·속마음을 고친다.
 // 바뀐 칸만 보내고, 서버 거절(409·422)은 시트 맨 위나 해당 칸 옆에 한국어로 보인다.
 import { useState } from 'react';
-import { AccessibilityInfo, Modal, ScrollView, StyleSheet, View } from 'react-native';
+import { AccessibilityInfo, KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, View } from 'react-native';
 
 import { Button, FormField, Notice, Text, TextField } from '@/components/ui';
 import { MaxContentWidth, Radius, Spacing } from '@/constants/theme';
@@ -90,7 +90,7 @@ export function SceneEditSheet({
     );
   };
 
-  const field = (key: TextKey, label: string, extra?: { numeric?: boolean; flex?: boolean }) => (
+  const input = (key: TextKey, label: string, numeric = false) => (
     <TextField
       accessibilityLabel={label}
       placeholder={label}
@@ -98,17 +98,29 @@ export function SceneEditSheet({
       onChangeText={setText(key)}
       invalid={!!errors[errorKeyOf(key)]}
       editable={!save.isPending}
-      keyboardType={extra?.numeric ? 'number-pad' : 'default'}
-      style={extra?.flex ? styles.flex : undefined}
+      keyboardType={numeric ? 'number-pad' : 'default'}
     />
+  );
+  /**
+   * 한 줄에 여러 칸을 둘 때의 칸 하나. 값이 차 있어도 무슨 칸인지 보이게 칸 위에 이름(연호·기준 사건)이나
+   * 단위(년·월·일·일째·시·분)를 작게 적는다.
+   */
+  const cell = (key: TextKey, label: string, unit: string, numeric = false) => (
+    <View style={styles.cell}>
+      <Text variant="caption">{unit}</Text>
+      {input(key, label, numeric)}
+    </View>
   );
 
   return (
     <Modal visible transparent animationType="slide" onRequestClose={onClose}>
-      <View style={[styles.backdrop, { backgroundColor: c.background + 'cc' }]}>
+      {/* 키보드가 올라오면 시트를 그만큼 올려 아래쪽 칸(마지막 캐릭터의 속마음)과 저장 버튼이 가려지지 않게 한다. */}
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={[styles.backdrop, { backgroundColor: c.background + 'cc' }]}
+      >
         <View
           accessibilityViewIsModal
-          accessibilityLabel="장면 정보 수정"
           style={[styles.sheet, { backgroundColor: c.backgroundElement, borderColor: c.border }]}
         >
           <Text variant="subheading" accessibilityRole="header">
@@ -121,33 +133,33 @@ export function SceneEditSheet({
               <FormField label="📅 날짜" error={errors.date}>
                 {mode === 'elapsed' ? (
                   <View style={styles.row}>
-                    {field('referenceEvent', '기준 사건', { flex: true })}
-                    {field('elapsedDay', '일차', { numeric: true, flex: true })}
+                    {cell('referenceEvent', '기준 사건', '기준 사건')}
+                    {cell('elapsedDay', '일차', '일째', true)}
                   </View>
                 ) : (
-                  <>
-                    {mode === 'world' ? field('era', '연호') : null}
-                    <View style={styles.row}>
-                      {field('year', '연', { numeric: true, flex: true })}
-                      {field('month', '월', { numeric: true, flex: true })}
-                      {field('day', '일', { numeric: true, flex: true })}
-                    </View>
-                  </>
+                  <View style={styles.row}>
+                    {mode === 'world' ? cell('era', '연호', '연호') : null}
+                    {cell('year', '연', '년', true)}
+                    {cell('month', '월', '월', true)}
+                    {cell('day', '일', '일', true)}
+                  </View>
                 )}
               </FormField>
             ) : null}
             <FormField label="⏰ 시간" hint="분을 비우면 「19시」처럼 시만 써요." error={errors.time}>
               <View style={styles.row}>
-                {field('hour', '시', { numeric: true, flex: true })}
-                {field('minute', '분', { numeric: true, flex: true })}
+                {cell('hour', '시', '시', true)}
+                {cell('minute', '분', '분', true)}
               </View>
             </FormField>
             <FormField label="📍 장소" hint={counter(form.place, SCENE_EDIT_LIMITS.place)} error={errors.place}>
-              {field('place', '장소')}
+              {input('place', '장소')}
             </FormField>
             {form.characters.map((person) => (
-              <View key={person.name} accessibilityLabel={`${person.name}의 상태 수정`} style={styles.person}>
-                <Text style={styles.name}>{person.name}</Text>
+              <View key={person.name} testID={`scene-edit-person-${person.name}`} style={styles.person}>
+                <Text accessibilityRole="header" style={styles.name}>
+                  {person.name}
+                </Text>
                 <FormField
                   label="👔 착장"
                   hint={counter(person.clothing, SCENE_EDIT_LIMITS.clothing)}
@@ -195,7 +207,7 @@ export function SceneEditSheet({
             />
           </View>
         </View>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
@@ -216,6 +228,7 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', gap: Spacing.two },
   // 웹 입력창은 기본 너비가 있어 한 줄에 여러 칸을 두면 넘친다. 0에서 늘려 나눠 갖게 한다.
   flex: { flex: 1, flexBasis: 0, minWidth: 0 },
+  cell: { flex: 1, flexBasis: 0, minWidth: 0, gap: Spacing.half },
   person: { marginTop: Spacing.three, gap: Spacing.half },
   name: { fontWeight: '600' },
   actions: { flexDirection: 'row', gap: Spacing.two },

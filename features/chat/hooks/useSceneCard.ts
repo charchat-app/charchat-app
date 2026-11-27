@@ -53,7 +53,9 @@ export function useUpdateSceneInfo(sessionId: string) {
   return useMutation({
     mutationFn: ({ messageId, input }: SceneInfoUpdateVariables) => updateSceneInfo(sessionId, messageId, input),
     retry: false,
-    onSuccess: (result) => {
+    onSuccess: async (result) => {
+      // 이미 출발한 이력 조회(웹 포커스 재조회 등)가 늦게 도착해 옛 current_scene으로 카드를 되돌리지 않게 먼저 취소한다.
+      await client.cancelQueries({ queryKey: turnsKey(sessionId), exact: true });
       client.setQueryData<ChatTurns>(turnsKey(sessionId), (old) =>
         old
           ? {

@@ -20,9 +20,11 @@ export function SceneStatusCard({ scene, onEdit }: { scene: CurrentScene; onEdit
   ].filter((line): line is string => line !== null);
 
   return (
-    <Card tone="state" testID="chat-scene-card" accessibilityLabel="지금 장면 상태" style={styles.card}>
+    // 컨테이너에는 이름표를 달지 않는다(accessible 없이 단 이름표는 iOS에서 무시되고 TalkBack은 안의 줄을 건너뛸 수 있다).
+    // 제목을 header로 두고 줄마다 그대로 읽게 한다.
+    <Card tone="state" testID="chat-scene-card" style={styles.card}>
       <View style={styles.head}>
-        <Text variant="subheading" style={styles.title}>
+        <Text variant="subheading" accessibilityRole="header" style={styles.title}>
           🌿 지금 상태
         </Text>
         {onEdit ? (
@@ -39,7 +41,7 @@ export function SceneStatusCard({ scene, onEdit }: { scene: CurrentScene; onEdit
       </View>
       {isSceneCardEmpty(lines) ? <Text variant="caption">아직 정해진 장면 정보가 없어요.</Text> : null}
       {common.length ? (
-        <View accessibilityLabel="공통 장면">
+        <View>
           {common.map((line) => (
             <Text key={line} style={row}>
               {line}
@@ -48,7 +50,7 @@ export function SceneStatusCard({ scene, onEdit }: { scene: CurrentScene; onEdit
         </View>
       ) : null}
       {lines.characters.map(({ name, clothing, innerThought }) => (
-        <View key={name} accessibilityLabel={`${name}의 상태`} style={row}>
+        <View key={name} testID={`chat-scene-card-person-${name}`} style={row}>
           <Text style={styles.name}>{name}</Text>
           {clothing ? <Text>👔 착장 · {clothing}</Text> : null}
           {innerThought ? <Text>💭 속마음 · {innerThought}</Text> : null}

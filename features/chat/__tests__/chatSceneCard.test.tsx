@@ -4,6 +4,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 
 import SessionRoute from '@/app/chat-session/[sessionId]';
 import * as storage from '@/features/chat/draftStorage';
+import { turnsKey } from '@/features/chat/hooks/chatCache';
 import type { DraftStorage, NativeDraftStorage } from '@/features/chat/draftStorage.types';
 import { SCENE_CARD_PREFERENCE_KEY } from '@/features/chat/scene/sceneCardPreference';
 import type {
@@ -108,13 +109,20 @@ function fakeServer(turns: ChatTurns = turnsWith(), sessionBody: ConversationSes
   const calls: Call[] = [];
   const polls: ((value: Response) => void)[] = [];
   const state = { turns };
+  /** 잡아 둔 이력 조회. 풀어 줄 때 그때의 응답을 준다(늦게 도착하는 옛 조회 흉내). */
+  const heldTurns: (() => void)[] = [];
+  const hold = { turns: false };
   const onInfo = jest.fn<Response, [Call]>(() => json({}, 500));
   jest.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
     const url = String(input);
     const call = { url, method: init?.method ?? 'GET', body: init?.body ? JSON.parse(String(init.body)) : null };
     calls.push(call);
     if (url === `${BASE}/sessions/19`) return json(sessionBody);
-    if (url === `${BASE}/sessions/19/turns`) return json(state.turns);
+    if (url === `${BASE}/sessions/19/turns`) {
+      if (!hold.turns) return json(state.turns);
+      const stale = json(state.turns);
+      return new Promise<Response>((resolve) => heldTurns.push(() => resolve(stale)));
+    }
     if (url === INFO_URL) return onInfo(call);
     if (url.startsWith(`${BASE}/generations/`))
       return new Promise<Response>((resolve, reject) => {
@@ -126,6 +134,8 @@ function fakeServer(turns: ChatTurns = turnsWith(), sessionBody: ConversationSes
   return {
     calls,
     state,
+    hold,
+    releaseTurns: () => heldTurns.splice(0).forEach((release) => release()),
     onInfo,
     polls,
     turnsReads: () => calls.filter(({ url }) => url.endsWith('/turns')).length,
@@ -341,6 +351,46 @@ it('CHAT-US-08: 연필로 시트를 열어 바뀐 칸만 보내고, 응답의 cu
   expect(server.turnsReads()).toBe(reads);
 });
 
+it('CHAT-US-08: 저장 성공은 이력 캐시의 그 메시지 info도 바꾸고, 그 전에 출발한 이력 조회가 늦게 와도 카드를 되돌리지 않는다', async () => {
+  const server = fakeServer();
+  const updated: CurrentScene = { ...scene, place: '온실' };
+  const info = { ...updated, text: '📍 장소: 온실' };
+  server.onInfo.mockImplementation(() =>
+    json({ message_id: 6, info, current_scene: updated } satisfies SceneInfoUpdateResult),
+  );
+  await openRoom();
+  const client = clients[0];
+  await fireEvent.press(pencil());
+  await fireEvent.changeText(screen.getByLabelText('장소'), '온실');
+  // 저장 전에 이력 조회가 출발해(웹 포커스 재조회 등) 옛 장면을 들고 늦게 도착한다.
+  server.hold.turns = true;
+  await act(async () => void client.invalidateQueries({ queryKey: turnsKey('19') }));
+  await waitFor(() => expect(client.isFetching({ queryKey: turnsKey('19') })).toBe(1));
+  await fireEvent.press(saveButton());
+  await waitFor(() => expect(screen.queryByRole('button', { name: '장면 정보 저장' })).toBeNull());
+  expect(within(card()).getByText('📍 장소 · 온실')).toBeOnTheScreen();
+
+  await act(async () => server.releaseTurns());
+  await act(async () => {});
+  expect(within(card()).getByText('📍 장소 · 온실')).toBeOnTheScreen();
+  const cached = client.getQueryData<ChatTurns>(turnsKey('19'));
+  expect(cached?.current_scene).toEqual(updated);
+  expect(cached?.messages.find(({ id }) => id === 6)?.info).toEqual(info);
+  expect(cached?.messages.find(({ id }) => id === 5)).toEqual(userMessage);
+});
+
+it('CHAT-US-08: 시트의 날짜·시간 칸은 값이 차 있어도 단위(년·월·일, 시·분)가 보이고, 카드는 제목과 줄을 그대로 읽는다', async () => {
+  fakeServer();
+  await openRoom();
+  // 카드 컨테이너에는 이름표가 없고(줄을 가리지 않게) 제목이 header다.
+  expect(card().props.accessibilityLabel).toBeUndefined();
+  expect(within(card()).getByRole('header', { name: '🌿 지금 상태' })).toBeOnTheScreen();
+  expect(within(card()).getByText('⏰ 시간 · 19:30')).toBeOnTheScreen();
+  await fireEvent.press(pencil());
+  expect(screen.getByLabelText('연').props.value).toBe('2026');
+  for (const unit of ['년', '월', '일', '시', '분']) expect(screen.getByText(unit)).toBeOnTheScreen();
+});
+
 it('CHAT-US-08: 아무것도 바꾸지 않고 저장하면 요청 없이 닫고, 앱에서 막는 값(장소 30자 초과)은 칸 옆에 안내하고 보내지 않는다', async () => {
   const server = fakeServer();
   await openRoom();
@@ -376,7 +426,7 @@ it.each([
   expect(within(card()).getByText('📍 장소 · 정원 입구')).toBeOnTheScreen();
 });
 
-it('CHAT-US-08: 422 field는 그 칸 옆에 서버 안내를 보이고 시트를 닫지 않는다(캐릭터는 보낸 순서로 찾는다)', async () => {
+it('CHAT-US-08: 422 issues[0].field는 그 칸 옆에 서버 안내를 보이고 시트를 닫지 않는다(캐릭터는 보낸 순서로 찾는다)', async () => {
   const server = fakeServer();
   server.onInfo.mockImplementation(() =>
     json(
@@ -385,6 +435,14 @@ it('CHAT-US-08: 422 field는 그 칸 옆에 서버 안내를 보이고 시트를
         code: 'SCENE_INFO_INVALID_VALUE',
         field: 'characters[0].clothing',
         detail: '착장 값이 올바르지 않습니다.',
+        // 서버는 SCENE_INFO_* 422에 공용 클라이언트가 읽는 issues도 함께 준다. 앱은 이것만 읽는다.
+        issues: [
+          {
+            field: 'characters[0].clothing',
+            code: 'SCENE_INFO_INVALID_VALUE',
+            message: '착장 값이 올바르지 않습니다.',
+          },
+        ],
       },
       422,
     ),
@@ -393,9 +451,9 @@ it('CHAT-US-08: 422 field는 그 칸 옆에 서버 안내를 보이고 시트를
   await fireEvent.press(pencil());
   await fireEvent.changeText(screen.getByLabelText('서윤 착장'), '미정');
   await fireEvent.press(saveButton());
-  const person = within(screen.getByLabelText('서윤의 상태 수정'));
+  const person = within(screen.getByTestId('scene-edit-person-서윤'));
   expect(await person.findByText('착장 값이 올바르지 않습니다.')).toBeOnTheScreen();
-  expect(within(screen.getByLabelText('윤슬의 상태 수정')).queryByText('착장 값이 올바르지 않습니다.')).toBeNull();
+  expect(within(screen.getByTestId('scene-edit-person-윤슬')).queryByText('착장 값이 올바르지 않습니다.')).toBeNull();
   expect(server.infoBodies()).toEqual([{ characters: [{ name: '서윤', clothing: '미정' }] }]);
   expect(saveButton()).toBeOnTheScreen();
 });

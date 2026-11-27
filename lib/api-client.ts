@@ -55,23 +55,14 @@ export class ApiError extends Error {
   readonly code: string;
   readonly detail: string;
   readonly issues: FieldIssue[];
-  /** Problem Details 본문 전체. 기능별 추가 필드(예: CHAT-US-08 `field`, `latest_message_id`)를 읽는다. 본문이 없으면 빈 객체다. */
-  readonly body: Readonly<Record<string, unknown>>;
 
-  constructor(
-    status: number,
-    code: string,
-    detail: string,
-    issues: FieldIssue[] = [],
-    body: Readonly<Record<string, unknown>> = {},
-  ) {
+  constructor(status: number, code: string, detail: string, issues: FieldIssue[] = []) {
     super(detail);
     this.name = 'ApiError';
     this.status = status;
     this.code = code;
     this.detail = detail;
     this.issues = issues;
-    this.body = body;
   }
 }
 
@@ -140,7 +131,7 @@ async function toApiError(response: Response): Promise<ApiError> {
   if (isRecord(body)) {
     const code = typeof body.code === 'string' ? body.code : 'HTTP_ERROR';
     const detail = typeof body.detail === 'string' ? body.detail : `요청 실패: ${response.status}`;
-    return new ApiError(response.status, code, detail, toIssues(body.issues), body);
+    return new ApiError(response.status, code, detail, toIssues(body.issues));
   }
   return new ApiError(response.status, 'HTTP_ERROR', `요청 실패: ${response.status}`);
 }

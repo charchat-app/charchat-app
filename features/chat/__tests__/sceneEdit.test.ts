@@ -59,6 +59,57 @@ describe('CHAT-US-08 장면 정보 수정 요청', () => {
     expect(edit((form) => form)).toEqual({ ok: true, input: {}, characterNames: [] });
   });
 
+  it('CHAT-US-08: 손대지 않은 여러 줄·앞뒤 공백 시작 값은 한 줄로 보이고 다시 보내지 않는다(장소만 고쳐도 저장된다)', () => {
+    const multiLine: CurrentScene = {
+      ...scene,
+      place: ' 공원 매점 ',
+      characters: [
+        { name: '도경', clothing: '상의\n하의 ', inner_thought: '  피곤하다\r\n졸리다' },
+        { name: 'Bea', clothing: null, inner_thought: null },
+      ],
+    };
+    const form = sceneToForm(multiLine);
+    expect(form.characters[0]).toEqual({ name: '도경', clothing: '상의 하의', innerThought: '피곤하다 졸리다' });
+    expect(planSceneUpdate(multiLine, form)).toEqual({ ok: true, input: {}, characterNames: [] });
+    expect(planSceneUpdate(multiLine, { ...form, place: '공원 벤치' })).toEqual({
+      ok: true,
+      input: { place: '공원 벤치' },
+      characterNames: [],
+    });
+    // 폼이 원문 그대로(여러 줄)를 들고 있어도 손대지 않았으면 보내지 않는다.
+    const raw = {
+      ...form,
+      characters: [{ name: '도경', clothing: '상의\n하의 ', innerThought: '피곤하다' }, form.characters[1]],
+    };
+    expect(planSceneUpdate(multiLine, { ...raw, place: '공원 벤치' })).toMatchObject({
+      ok: true,
+      input: { place: '공원 벤치' },
+    });
+  });
+
+  it('CHAT-US-08: 숫자 칸은 숫자로 비교한다(07과 7은 같아 다시 보내지 않는다)', () => {
+    const morning: CurrentScene = { ...scene, time: { hour: 7, minute: 5 } };
+    expect(edit((form) => ({ ...form, hour: '07', minute: '05', year: '02026', day: ' 23 ' }), morning)).toEqual({
+      ok: true,
+      input: {},
+      characterNames: [],
+    });
+    expect(edit((form) => ({ ...form, hour: '08' }), morning)).toMatchObject({
+      input: { time: { hour: 8, minute: 5 } },
+    });
+    const noMinute: CurrentScene = { ...scene, time: { hour: 19, minute: null } };
+    expect(edit((form) => ({ ...form, minute: '' }), noMinute)).toEqual({ ok: true, input: {}, characterNames: [] });
+    const elapsed: CurrentScene = {
+      ...scene,
+      date: date({ mode: 'elapsed', reference_event: '전학', elapsed_day: 3 }),
+    };
+    expect(edit((form) => ({ ...form, elapsedDay: '003' }), elapsed)).toEqual({
+      ok: true,
+      input: {},
+      characterNames: [],
+    });
+  });
+
   it('CHAT-US-08: 바뀐 칸만 보내고 앞뒤 공백은 잘라 보낸다(캐릭터는 바뀐 항목만)', () => {
     const plan = edit((form) => ({
       ...form,
@@ -120,8 +171,10 @@ describe('CHAT-US-08 장면 정보 수정 요청', () => {
 });
 
 describe('CHAT-US-08 수정 거절 안내', () => {
-  const problem = (status: number, code: string, body: Record<string, unknown> = {}, detail = '서버 안내') =>
-    new ApiError(status, code, detail, [], { code, detail, ...body });
+  const problem = (status: number, code: string, detail = '서버 안내') => new ApiError(status, code, detail);
+  /** 서버 SCENE_INFO_* 422: 칸은 `issues[0].field`, 안내는 `issues[0].message`(= detail)다. */
+  const invalid = (field: string, message = '값이 올바르지 않습니다.') =>
+    new ApiError(422, 'SCENE_INFO_INVALID_VALUE', message, [{ field, code: 'SCENE_INFO_INVALID_VALUE', message }]);
 
   it.each([
     ['GENERATION_IN_PROGRESS', '응답을 만드는 중에는 고칠 수 없어요'],
@@ -132,8 +185,7 @@ describe('CHAT-US-08 수정 거절 안내', () => {
     expect(sceneEditErrors(problem(409, code), []).form).toContain(message);
   });
 
-  it('CHAT-US-08: 422 field는 그 칸에(캐릭터는 보낸 순서의 이름으로) 서버 안내를 붙인다', () => {
-    const invalid = (field: string) => problem(422, 'SCENE_INFO_INVALID_VALUE', { field }, '값이 올바르지 않습니다.');
+  it('CHAT-US-08: 422 issues[0].field는 그 칸에(캐릭터는 보낸 순서의 이름으로) 서버 안내를 붙인다', () => {
     expect(sceneEditErrors(invalid('place'), [])).toEqual({ place: '값이 올바르지 않습니다.' });
     expect(sceneEditErrors(invalid('date.era'), [])).toEqual({ date: '값이 올바르지 않습니다.' });
     expect(sceneEditErrors(invalid('characters[1].inner_thought'), ['도경', 'Bea'])).toEqual({
@@ -147,5 +199,9 @@ describe('CHAT-US-08 수정 거절 안내', () => {
   it('CHAT-US-08: 그 밖의 실패는 다시 시도 안내다', () => {
     expect(sceneEditErrors(new ApiError(0, 'NETWORK_ERROR', 'x'), []).form).toMatch(/다시 시도/);
     expect(sceneEditErrors(problem(422, 'VALIDATION_ERROR'), []).form).toBe('입력한 값을 확인해 주세요.');
+    // 칸을 알 수 없는 SCENE_INFO_* 422는 서버 안내를 맨 위에 보인다.
+    expect(sceneEditErrors(problem(422, 'SCENE_INFO_INVALID_VALUE', '장면 값이 올바르지 않습니다.'), [])).toEqual({
+      form: '장면 값이 올바르지 않습니다.',
+    });
   });
 });
