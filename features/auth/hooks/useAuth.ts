@@ -29,8 +29,8 @@ export function useAuthSnapshot(): AuthSnapshot {
 
 /**
  * 라우트 보호 상태. 로그아웃 정리 중은 이미 로그인 화면으로 보낸다.
- * 개발용 헤더 모드(EXPO_PUBLIC_DEV_AUTH=header, 또는 미설정 + EXPO_PUBLIC_DEV_USER_ID)에서
- * 로그인 세션이 없으면 기존처럼 X-User-Id 사용자로 바로 이용한다.
+ * 개발용 헤더 모드(EXPO_PUBLIC_DEV_AUTH=header + EXPO_PUBLIC_DEV_USER_ID)에서
+ * 로그인 세션이 없으면 기존처럼 X-User-Id 사용자로 바로 이용한다. 서버가 헤더를 거절하면 로그인 화면으로 바뀐다.
  */
 export function useAuthGate(): { gate: AuthGate; sessionKey: number; notice: string | null; signedIn: boolean } {
   const snapshot = useAuthSnapshot();

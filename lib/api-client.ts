@@ -4,8 +4,10 @@
  *
  * 인증(BASE-03): 로그인하면 `Authorization: Bearer <액세스 토큰>`을 붙인다(lib/authSession).
  * 로그인하지 않았을 때는 개발용 헤더 모드에서만 `X-User-Id`(EXPO_PUBLIC_DEV_USER_ID)를 붙인다.
- * 개발용 헤더 모드: EXPO_PUBLIC_DEV_AUTH=header. 값이 없으면 기존 개발 설정 호환을 위해
- * EXPO_PUBLIC_DEV_USER_ID가 있을 때 헤더 모드로 본다. 로그인 화면을 쓰려면 EXPO_PUBLIC_DEV_AUTH=token으로 둔다.
+ * 개발용 헤더 모드는 EXPO_PUBLIC_DEV_AUTH=header로 직접 켤 때만 쓴다. EXPO_PUBLIC_DEV_USER_ID만 있으면
+ * 쓰지 않고 로그인 화면으로 시작한다(앱·서버 설정이 어긋나 로그인 화면 없이 막히지 않게).
+ * 헤더 모드에서 서버가 401 UNAUTHENTICATED로 거절하면(서버 AUTH_DEV_HEADER_ENABLED가 꺼짐)
+ * 이번 실행 동안 헤더 모드를 끄고 안내와 함께 로그인 화면으로 보낸다.
  *
  * 요청 취소(signal)와 시간 제한을 지원한다. 시간 제한은 기본 15초이고, 이미지 업로드처럼 오래 걸리는 호출은
  * `timeoutMs`로 호출별로 바꾼다. 실패해도 자동으로 다시 호출하지 않는다.
@@ -18,6 +20,7 @@
 
 import {
   expireSession,
+  finishSignOut,
   getAuthSnapshot,
   getRefreshToken,
   grantFromTokenResponse,
@@ -63,13 +66,32 @@ export class ApiError extends Error {
   }
 }
 
+/** 서버가 개발용 사용자 번호(X-User-Id)를 받지 않아 로그인 화면으로 보낼 때의 안내 */
+export const DEV_HEADER_REJECTED_NOTICE = '서버가 개발용 사용자 번호를 받지 않아요. 로그인해 주세요.';
+
+// 이번 실행에서 서버가 개발용 헤더를 거절했는지. 거절된 뒤에는 앱을 다시 켤 때까지 헤더 모드를 쓰지 않는다.
+let devHeaderRejected = false;
+
 /**
  * 개발용 헤더 모드의 사용자 번호. 모드가 꺼져 있으면 null.
- * EXPO_PUBLIC_DEV_AUTH=header면 켜고, =token(그 밖의 값)이면 끈다. 비어 있으면 DEV_USER_ID가 있을 때 켠다(기존 설정 호환).
+ * EXPO_PUBLIC_DEV_AUTH=header이고 DEV_USER_ID가 있을 때만 켠다. 비어 있거나 token(그 밖의 값)이면 끈다.
+ * 서버가 헤더를 거절한 뒤에도 끈다.
  */
 export function devHeaderUserId(): string | null {
-  if (!DEV_USER_ID) return null;
-  return DEV_AUTH === 'header' || DEV_AUTH === '' ? DEV_USER_ID : null;
+  if (!DEV_USER_ID || DEV_AUTH !== 'header' || devHeaderRejected) return null;
+  return DEV_USER_ID;
+}
+
+/**
+ * 헤더 모드 요청이 401 UNAUTHENTICATED로 거절됐다. 헤더 모드를 끄고, 로그인 세션이 없는 상태면
+ * 안내와 함께 로그인 화면으로 보낸다(세션 번호가 바뀌어 이전 사용자 번호의 캐시도 버린다).
+ */
+function rejectDevHeader() {
+  if (devHeaderRejected) return;
+  devHeaderRejected = true;
+  if (getAuthSnapshot().status === 'signed-out') {
+    void finishSignOut({ notice: DEV_HEADER_REJECTED_NOTICE, keepStoredAuth: true });
+  }
 }
 
 /**
@@ -156,12 +178,14 @@ async function send<T>(
     typeof timeoutMs === 'number' && Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : DEFAULT_TIMEOUT_MS;
   const { accessToken, sessionKey } = getAuthSnapshot();
   if (expectedSessionKey !== undefined && sessionKey !== expectedSessionKey) throw new SessionChangedError();
-  const headers = mergeHeaders(
-    init.headers,
-    !(typeof FormData !== 'undefined' && init.body instanceof FormData),
-    withAuth ? authHeaders() : {},
-  );
+  const auth = withAuth ? authHeaders() : {};
+  const headers = mergeHeaders(init.headers, !(typeof FormData !== 'undefined' && init.body instanceof FormData), auth);
   const bearer = accessToken && headers.Authorization === `Bearer ${accessToken}` ? accessToken : null;
+  // 개발용 헤더만으로 보낸 요청인지(호출 측이 X-User-Id·Authorization을 바꾸지 않았는지)
+  const devHeaderOnly =
+    auth['X-User-Id'] !== undefined &&
+    headers['X-User-Id'] === auth['X-User-Id'] &&
+    !Object.keys(headers).some((key) => key.toLowerCase() === 'authorization');
 
   const controller = new AbortController();
   const abort = () => controller.abort();
@@ -179,6 +203,7 @@ async function send<T>(
     if (!response.ok) {
       const error = await toApiError(response);
       if (bearer) sentAuth.set(error, { bearer, sessionKey });
+      if (devHeaderOnly && error.status === 401 && error.code === 'UNAUTHENTICATED') rejectDevHeader();
       throw error;
     }
     if (response.status === 204) {

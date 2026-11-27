@@ -9,9 +9,10 @@ import type { ConversationSessionSummary } from '@/shared/story-types';
 const mockPush = jest.fn();
 jest.mock('expo-router', () => ({ useRouter: () => ({ push: mockPush }), useFocusEffect: jest.fn() }));
 jest.mock('@/lib/api-client', () => {
-  const { EXPO_PUBLIC_API_URL: url, EXPO_PUBLIC_DEV_USER_ID: id } = process.env;
+  const { EXPO_PUBLIC_API_URL: url, EXPO_PUBLIC_DEV_USER_ID: id, EXPO_PUBLIC_DEV_AUTH: mode } = process.env;
   process.env.EXPO_PUBLIC_API_URL = 'http://localhost:8000/api/v1';
   process.env.EXPO_PUBLIC_DEV_USER_ID = '8';
+  process.env.EXPO_PUBLIC_DEV_AUTH = 'header';
   try {
     return jest.requireActual('@/lib/api-client');
   } finally {
@@ -19,6 +20,8 @@ jest.mock('@/lib/api-client', () => {
     else process.env.EXPO_PUBLIC_API_URL = url;
     if (id === undefined) delete process.env.EXPO_PUBLIC_DEV_USER_ID;
     else process.env.EXPO_PUBLIC_DEV_USER_ID = id;
+    if (mode === undefined) delete process.env.EXPO_PUBLIC_DEV_AUTH;
+    else process.env.EXPO_PUBLIC_DEV_AUTH = mode;
   }
 });
 

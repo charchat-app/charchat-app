@@ -21,7 +21,11 @@ afterEach(() => {
 });
 
 describe('apiRequest', () => {
-  const env = { EXPO_PUBLIC_API_URL: 'http://api.test/api/v1', EXPO_PUBLIC_DEV_USER_ID: '3' };
+  const env = {
+    EXPO_PUBLIC_API_URL: 'http://api.test/api/v1',
+    EXPO_PUBLIC_DEV_USER_ID: '3',
+    EXPO_PUBLIC_DEV_AUTH: 'header',
+  };
 
   it('개발용 사용자 헤더를 붙여 요청한다', async () => {
     const { apiRequest } = load(env);

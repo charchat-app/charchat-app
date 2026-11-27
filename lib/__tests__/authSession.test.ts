@@ -71,11 +71,8 @@ describe('BASE-03 인증 헤더', () => {
       { EXPO_PUBLIC_DEV_AUTH: 'header', EXPO_PUBLIC_DEV_USER_ID: '3' },
       true,
     ],
-    [
-      'DEV_AUTH 미설정 + DEV_USER_ID (기존 개발 설정 호환)',
-      { EXPO_PUBLIC_DEV_AUTH: undefined, EXPO_PUBLIC_DEV_USER_ID: '3' },
-      true,
-    ],
+    // 번호만 있고 방식을 적지 않으면 헤더 모드를 켜지 않는다(로그인 화면으로 시작).
+    ['DEV_AUTH 미설정 + DEV_USER_ID', { EXPO_PUBLIC_DEV_AUTH: undefined, EXPO_PUBLIC_DEV_USER_ID: '3' }, false],
     ['EXPO_PUBLIC_DEV_AUTH=token', { EXPO_PUBLIC_DEV_AUTH: 'token', EXPO_PUBLIC_DEV_USER_ID: '3' }, false],
     ['DEV_USER_ID 없음', { EXPO_PUBLIC_DEV_AUTH: 'header', EXPO_PUBLIC_DEV_USER_ID: undefined }, false],
   ])('BASE-03 개발용 헤더 대체는 플래그가 있을 때만: %s', async (_name, env, expected) => {
@@ -86,6 +83,54 @@ describe('BASE-03 인증 헤더', () => {
     expect(headers['X-User-Id']).toBe(expected ? '3' : undefined);
     expect(headers.Authorization).toBeUndefined();
     expect(api.devHeaderUserId()).toBe(expected ? '3' : null);
+  });
+});
+
+describe('BASE-03 로그인 진입점: 서버가 개발용 헤더를 거절할 때', () => {
+  const HEADER_MODE = { EXPO_PUBLIC_DEV_AUTH: 'header', EXPO_PUBLIC_DEV_USER_ID: '3' };
+  const rejected = () =>
+    json({ status: 401, code: 'UNAUTHENTICATED', detail: 'Authorization: Bearer <액세스 토큰>을 보내세요.' }, 401);
+
+  it('BASE-03 헤더 모드 요청이 401 UNAUTHENTICATED면 헤더 모드를 끄고 안내와 함께 로그인 화면 상태로 바꾼다', async () => {
+    const { api, session } = load(HEADER_MODE);
+    session.finishSignOut({ keepStoredAuth: true });
+    const before = session.getAuthSnapshot().sessionKey;
+    const fetchMock = jest.spyOn(globalThis, 'fetch').mockImplementation(async () => rejected());
+
+    await expect(api.apiRequest('/x')).rejects.toMatchObject({ status: 401, code: 'UNAUTHENTICATED' });
+    expect(api.devHeaderUserId()).toBeNull();
+    expect(session.getAuthSnapshot()).toMatchObject({ status: 'signed-out', notice: api.DEV_HEADER_REJECTED_NOTICE });
+    // 세션 번호가 바뀌어 이전 사용자 번호로 받은 캐시를 버린다.
+    expect(session.getAuthSnapshot().sessionKey).toBe(before + 1);
+
+    await api.apiRequest('/y').catch(() => undefined);
+    const headers = (fetchMock.mock.calls[1][1] as RequestInit).headers as Record<string, string>;
+    expect(headers['X-User-Id']).toBeUndefined();
+  });
+
+  it.each([
+    ['다른 401 코드', () => problem(401, 'AUTH_TOKEN_INVALID'), {}],
+    ['403', () => problem(403, 'FORBIDDEN'), {}],
+    ['호출 측이 Authorization을 직접 붙인 요청', rejected, { headers: { Authorization: 'Bearer cca_manual' } }],
+  ])('BASE-03 %s에는 헤더 모드를 유지한다', async (_name, response, options) => {
+    const { api, session } = load(HEADER_MODE);
+    session.finishSignOut({ keepStoredAuth: true });
+    jest.spyOn(globalThis, 'fetch').mockImplementation(async () => response());
+
+    await api.apiRequest('/x', options).catch(() => undefined);
+    expect(api.devHeaderUserId()).toBe('3');
+    expect(session.getAuthSnapshot().notice).toBeNull();
+  });
+
+  it('BASE-03 로그인 중에는 헤더를 보내지 않으므로 401 UNAUTHENTICATED를 받아도 헤더 모드 거절로 보지 않는다', async () => {
+    const { api, session } = load(HEADER_MODE);
+    signIn(session, 'cca_live');
+    jest.spyOn(globalThis, 'fetch').mockImplementation(async () => rejected());
+
+    await api.apiRequest('/x').catch(() => undefined);
+    expect(session.getAuthSnapshot().notice).not.toBe(api.DEV_HEADER_REJECTED_NOTICE);
+    await session.finishSignOut({ keepStoredAuth: true });
+    expect(api.devHeaderUserId()).toBe('3');
   });
 });
 
