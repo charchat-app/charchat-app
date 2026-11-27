@@ -1,4 +1,4 @@
-// CHAT-US-08 (KAN-22) ```info 장면 상태 블록 떼어 내기: 서버·앱 공통 계약 A의 규칙 1~7
+// CHAT-US-08 (KAN-22) ```info 장면 상태 블록 떼어 내기: 서버·앱 공통 계약 A의 규칙 1~7(4~6은 11-27 개정)
 import { splitInfo } from '@/features/chat/infoBlock';
 
 const done = (text: string) => splitInfo(text, { streaming: false });
@@ -42,16 +42,61 @@ describe('splitInfo', () => {
     });
   });
 
-  it('CHAT-US-08 규칙 4: 여는 줄이 여러 개면 마지막 여는 줄만 쓴다', () => {
-    expect(done('본문\n```info\n장소: 집\n```\n사이\n```info\n장소: 바다\n```')).toEqual({
-      body: '본문\n```info\n장소: 집\n```\n사이',
+  it('CHAT-US-08 규칙 4·5 (11-27 개정): 닫힌 블록이 둘이면 둘 다 본문에서 빼고 info는 마지막 블록이다', () => {
+    expect(done('본문\n```info\n장소: 집\n```\n사이\n```info\n장소: 바다\n```\n끝')).toEqual({
+      body: '본문\n사이\n끝',
       info: '장소: 바다',
     });
-    // 닫히지 않은 앞 블록 뒤에 새 여는 줄이 오면 앞 여는 줄은 본문에 남는다.
+    // 블록이 붙어 있어도 각각 블록이다.
+    expect(done('본문\n```info\n장소: 집\n```\n```info\n장소: 바다\n```')).toEqual({
+      body: '본문',
+      info: '장소: 바다',
+    });
+    // 마지막 블록이 비어 있으면 info도 비어 있다(앞 블록 값을 쓰지 않는다).
+    expect(done('본문\n```info\n장소: 집\n```\n사이\n```info\n```')).toEqual({ body: '본문\n사이', info: '' });
+  });
+
+  it('CHAT-US-08 규칙 4·5 (11-27 개정): 닫힌 블록 + 글 + 닫히지 않은 블록이면 마지막 블록은 원문 끝까지다', () => {
+    expect(done('앞\n```info\n장소: 집\n```\n사이\n```info\n장소: 바\n시간:')).toEqual({
+      body: '앞\n사이',
+      info: '장소: 바\n시간:',
+    });
+  });
+
+  it('CHAT-US-08 규칙 4 (11-27 개정): 블록 안의 여는 줄은 여는 줄이 아니라 블록 내용이다', () => {
+    expect(done('본문\n```info\n장소: 집\n```info\n장소: 바다\n```\n뒤')).toEqual({
+      body: '본문\n뒤',
+      info: '장소: 집\n```info\n장소: 바다',
+    });
+    // 닫히지 않은 블록 안의 여는 줄도 그렇다.
     expect(done('본문\n```info\n장소: 집\n```info\n장소: 바다')).toEqual({
-      body: '본문\n```info\n장소: 집',
-      info: '장소: 바다',
+      body: '본문',
+      info: '장소: 집\n```info\n장소: 바다',
     });
+  });
+
+  it('CHAT-US-08 규칙 5·6 (11-27 개정): 응답 중간과 끝에 info 블록을 두 번 쓴 실제 응답도 말풍선에 블록이 새지 않는다', () => {
+    const first =
+      '날짜: 2026년 11월 27일\n시간: 19:20\n장소: 헌책방 온새미\n[도경] 착장: 젖은 트렌치코트 | 속마음: 수상하다';
+    const text = [
+      '@도경: 문 닫을 시간인데요.',
+      '@나레이터: *빗소리가 유리창을 두드린다.*',
+      '```info',
+      first,
+      '```',
+      '...',
+      '@도경: 그 책, 어디서 났죠?',
+      '@나레이터: *도경이 책장을 넘긴다.*',
+      '```info',
+      INFO,
+      '```',
+      '',
+    ].join('\n');
+    expect(done(text)).toEqual({
+      body: '@도경: 문 닫을 시간인데요.\n@나레이터: *빗소리가 유리창을 두드린다.*\n...\n@도경: 그 책, 어디서 났죠?\n@나레이터: *도경이 책장을 넘긴다.*',
+      info: INFO,
+    });
+    expect(live(text)).toEqual(done(text));
   });
 
   it('CHAT-US-08 규칙 2·3: 앞뒤 공백·탭만 무시하고 정확히 ```info / ``` 인 줄만 펜스다', () => {
@@ -140,5 +185,20 @@ describe('splitInfo', () => {
     expect(live('@도경: 안녕\n```info\n장소: 헌')).toEqual({ body: '@도경: 안녕', info: '장소: 헌' });
     expect(live('@도경: 안녕\n```info\n장소: 집\n``')).toEqual({ body: '@도경: 안녕', info: '장소: 집' });
     expect(live('@도경: 안녕\n```info\n장소: 집\n```')).toEqual({ body: '@도경: 안녕', info: '장소: 집' });
+  });
+
+  it('CHAT-US-08 규칙 4·7 (11-27 개정): 스트리밍 중 첫 블록이 닫힌 뒤 둘째 펜스가 반쯤 오면 둘 다 보이지 않는다', () => {
+    const head = '@도경: 안녕\n```info\n장소: 집\n```\n...\n@나레이터: 뒤\n';
+    // 줄바꿈이 아직 없는 ```info 자체도 규칙 7로 숨기므로 info는 아직 첫 블록 값이다.
+    for (const tail of ['`', '``', '```', '```i', '```inf', '```info']) {
+      expect(live(head + tail)).toEqual({ body: '@도경: 안녕\n...\n@나레이터: 뒤', info: '장소: 집' });
+    }
+    // 둘째 여는 줄 뒤에 줄바꿈이 오면 그 뒤 내용이 도착하는 대로 info가 된다.
+    expect(live(`${head}\`\`\`info\n`)).toEqual({ body: '@도경: 안녕\n...\n@나레이터: 뒤', info: '' });
+    expect(live(`${head}\`\`\`info\n장소: 바`)).toEqual({ body: '@도경: 안녕\n...\n@나레이터: 뒤', info: '장소: 바' });
+    expect(live(`${head}\`\`\`info\n장소: 바다\n\`\``)).toEqual({
+      body: '@도경: 안녕\n...\n@나레이터: 뒤',
+      info: '장소: 바다',
+    });
   });
 });
