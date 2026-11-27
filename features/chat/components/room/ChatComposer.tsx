@@ -65,6 +65,11 @@ export function ChatComposer({
     const inserted = trigger === null ? null : insertSpeakerTag(draft.text, trigger, name);
     setTrigger(null);
     if (!inserted) return;
+    // 태그를 넣으면 보통 합산이 줄지만, 늘어서 한도를 넘으면 넣지 않고 이유를 알린다(전송 때도 다시 막힌다).
+    if (limitInput(draft.text, inserted.text, names) !== inserted.text) {
+      setProblem('too_long');
+      return;
+    }
     update(() => ({ text: inserted.text }));
     setSelection({ start: inserted.cursor, end: inserted.cursor });
     // 웹에서는 칩을 누르면 입력창 초점이 빠지므로 다시 둔다.
@@ -91,17 +96,29 @@ export function ChatComposer({
           accessibilityLabel="화자 목록"
           contentContainerStyle={styles.chips}
         >
-          {chips.map((chip) => (
-            <Pressable
-              key={chip.key}
-              accessibilityRole="button"
-              accessibilityLabel={`${withParticle(chip.name, '으로')} 말하기`}
-              onPress={() => choose(chip.name)}
-              style={[styles.chip, { borderColor: colors.chipBorder, backgroundColor: colors.surface }]}
-            >
-              <Text>{chip.name}</Text>
-            </Pressable>
-          ))}
+          {chips.map((chip) => {
+            const disabled = chip.disabledHint !== undefined;
+            return (
+              <Pressable
+                key={chip.key}
+                accessibilityRole="button"
+                accessibilityLabel={`${withParticle(chip.name, '으로')} 말하기`}
+                accessibilityHint={chip.disabledHint}
+                accessibilityState={{ disabled }}
+                // 웹(react-native-web)에서도 비활성을 읽도록 직접 넣는다.
+                aria-disabled={disabled}
+                disabled={disabled}
+                onPress={() => choose(chip.name)}
+                style={[
+                  styles.chip,
+                  { borderColor: colors.chipBorder, backgroundColor: colors.surface },
+                  disabled ? styles.chipDisabled : null,
+                ]}
+              >
+                <Text>{chip.name}</Text>
+              </Pressable>
+            );
+          })}
         </ScrollView>
       ) : null}
       <TextInput
@@ -151,6 +168,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderRadius: Radius.lg,
   },
+  chipDisabled: { opacity: 0.5 },
   input: {
     minHeight: 88,
     borderWidth: 1,

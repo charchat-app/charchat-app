@@ -2,7 +2,7 @@
 import { decodeDraft, encodeDraft } from '@/features/chat/draftCodec';
 import { chatDraftKey, persistDraft, readDraft } from '@/features/chat/draftPersistence';
 import type { DraftStorage } from '@/features/chat/draftStorage.types';
-import { emptyDraft, type MessageDraft, type SpeakerNames } from '@/features/chat/messageDraft';
+import { emptyDraft, type MessageDraft, type SpeakerNames, toMessageParts } from '@/features/chat/messageDraft';
 
 const entries = new Map<string, string>();
 const local: DraftStorage = {
@@ -77,6 +77,28 @@ it('CHAT-US-03-AC05: 이전 형식(v1, 발화자별 부분) 보관분은 버리�
   });
   // 아무것도 없던 v1 보관분은 복원할 것이 없다.
   expect(decodeDraft(v1([], { kind: 'user' }, ''), names)).toBeNull();
+});
+
+it('CHAT-US-03-AC05: `:`가 있는 이름의 v1 보관분도 바꾼 글자를 다시 파싱하면 같은 발화자별 부분이다', () => {
+  const colon: SpeakerNames = { playName: 'Re:Zero', characters: [{ id: 2, name: 'A:B' }] };
+  const restored = decodeDraft(
+    JSON.stringify({
+      v: 1,
+      parts: [
+        { speaker: { kind: 'character', characterId: 2 }, body: '콜론' },
+        { speaker: { kind: 'user' }, body: '유저' },
+      ],
+      speaker: { kind: 'narrator' },
+      text: '바람',
+    }),
+    colon,
+  );
+  expect(restored).toEqual({ text: '@A:B: 콜론\n@Re:Zero: 유저\n@나레이터: 바람' });
+  expect(toMessageParts(restored!, colon)).toEqual([
+    { speaker_kind: 'character', character_id: 2, body: '콜론' },
+    { speaker_kind: 'user', character_id: null, body: '유저' },
+    { speaker_kind: 'narrator', character_id: null, body: '바람' },
+  ]);
 });
 
 it.each([null, '기존 저장본'])(

@@ -104,7 +104,8 @@ describe('CHAT-US-02-AC02: `@` 칩 줄', () => {
   it('CHAT-US-02-AC02: `@`를 하나 새로 입력했을 때만 그 위치를 돌려준다', () => {
     expect(detectSpeakerTrigger('안녕', '안녕@')).toBe(2);
     expect(detectSpeakerTrigger('안녕', '@안녕')).toBe(0);
-    // 같은 글자가 이어지면 어느 `@`를 바꿔도 결과가 같다. 뒤쪽 위치를 돌려준다.
+    // `@`가 이어지면 어느 쪽이 새로 친 글자인지 알 수 없다. 앞부분이 처음 달라지는 위치(뒤쪽 `@`)를 돌려준다.
+    // (칩을 누르면 그 `@`가 태그가 되고, 앞의 `@`는 본문에 남는다: `a@` + `\n@이름: b`.)
     expect(detectSpeakerTrigger('a@b', 'a@@b')).toBe(2);
     expect(detectSpeakerTrigger('안녕', '안녕!')).toBeNull();
     expect(detectSpeakerTrigger('', 'a@b')).toBeNull();
@@ -128,6 +129,63 @@ describe('CHAT-US-02-AC02: `@` 칩 줄', () => {
   });
 });
 
+describe('CHAT-US-02-AC02: 이름에 `:`가 있거나 플레이 이름이 `나레이터`인 세션', () => {
+  // 서버는 플레이 이름·캐릭터 이름에 `:`를 허용한다. 플레이 이름 `나레이터`도 허용한다.
+  const colon: SpeakerNames = {
+    playName: 'Re:Zero',
+    characters: [
+      { id: 2, name: '윤슬' },
+      { id: 4, name: 'A:B' },
+      { id: 5, name: 'A' },
+    ],
+  };
+
+  it.each<[string, string, ChatMessagePartInput[]]>([
+    ['플레이 이름 `Re:Zero` 태그 → 유저', '@Re:Zero: 나는 유저', [user('나는 유저')]],
+    [
+      '캐릭터 줄 뒤의 `@Re:Zero:` 줄은 유저 부분(앞 캐릭터에 붙지 않음)',
+      '@윤슬: 안녕\n@Re:Zero: 나는 유저',
+      [character(2, '안녕'), user('나는 유저')],
+    ],
+    ['`:`가 있는 캐릭터 이름', '@A:B: 콜론 캐릭터', [character(4, '콜론 캐릭터')]],
+    ['긴 이름을 먼저 맞춘다(`A:B`가 `A`보다 먼저)', '@A:B:붙여 씀', [character(4, '붙여 씀')]],
+    ['짧은 이름도 그대로 맞춘다', '@A: 짧은 이름', [character(5, '짧은 이름')]],
+    ['`:` 뒤 탭 하나는 태그에 포함', '@Re:Zero:\t탭 뒤', [user('탭 뒤')]],
+    ['이름 앞부분만 맞는 태그는 모르는 이름', '@윤슬: 하나\n@Re: 둘', [character(2, '하나\n@Re: 둘')]],
+  ])('CHAT-US-02-AC02: %s', (_name, text, expected) => {
+    expect(parseUserText(text, colon)).toEqual(expected);
+  });
+
+  it('CHAT-US-02-AC16: `:`가 있는 이름도 부분 → 글자 → 파싱이 같은 부분이다', () => {
+    const parts = [
+      character(2, 'x'),
+      user('me'),
+      character(4, '콜론'),
+      narrator('바람'),
+      character(5, '짧게'),
+      user('끝'),
+    ];
+    expect(toMessageParts(fromMessageParts(parts, colon), colon)).toEqual(parts);
+  });
+
+  it('CHAT-US-02-AC01·AC16: 플레이 이름이 `나레이터`여도 `@나레이터:`는 나레이터이고, 태그 없는 맨 앞 유저 부분은 그대로 되돌린다', () => {
+    const narratorName: SpeakerNames = { playName: '나레이터', characters: [{ id: 2, name: '윤슬' }] };
+    expect(parseUserText('내 말\n@나레이터: 바람', narratorName)).toEqual([user('내 말'), narrator('바람')]);
+    const parts = [user('내 말'), character(2, '응'), narrator('바람')];
+    const restored = fromMessageParts(parts, narratorName);
+    expect(restored.text).toBe('내 말\n@윤슬: 응\n@나레이터: 바람');
+    expect(toMessageParts(restored, narratorName)).toEqual(parts);
+  });
+
+  it('CHAT-US-02-AC16: (남은 한계) 플레이 이름이 `나레이터`면 맨 앞이 아닌 유저 부분은 나레이터로 되돌아온다', () => {
+    const narratorName: SpeakerNames = { playName: '나레이터', characters: [] };
+    expect(toMessageParts(fromMessageParts([narrator('바람'), user('내 말')], narratorName), narratorName)).toEqual([
+      narrator('바람'),
+      narrator('내 말'),
+    ]);
+  });
+});
+
 describe('CHAT-US-02-AC04: 5,000자 한도와 빈 입력', () => {
   it('CHAT-US-02-AC04: 태그 접두어는 빼고 모든 부분 본문의 공백·줄바꿈·서식 기호를 코드 포인트로 합산한다', () => {
     // '*a b*\n**' (8) + '😀' (1). `@나레이터: `·`@쀠: `와 부분 앞뒤 공백은 세지 않는다.
@@ -148,6 +206,16 @@ describe('CHAT-US-02-AC04: 5,000자 한도와 빈 입력', () => {
     const over = 'a'.repeat(MESSAGE_MAX_LENGTH + 3);
     expect(limitInput(over, `${over}b`, names)).toBe(over);
     expect(limitInput(over, over.slice(1), names)).toBe(over.slice(1));
+  });
+
+  it('CHAT-US-02-AC04: 한도 근처에서 태그의 `:`를 지워 본문 합산이 늘어도 지우기는 받고, 전송 때 한도 초과로 막는다', () => {
+    const prev = `${'a'.repeat(4998)}\n@윤슬: bb`;
+    expect(draftLength({ text: prev }, names)).toBe(5000);
+    const next = `${'a'.repeat(4998)}\n@윤슬 bb`;
+    expect(limitInput(prev, next, names)).toBe(next);
+    expect(validateDraft({ text: next }, names)).toBe('too_long');
+    // 맨 앞 `@`를 지워도 같다.
+    expect(limitInput(prev, `${'a'.repeat(4998)}\n윤슬: bb`, names)).toBe(`${'a'.repeat(4998)}\n윤슬: bb`);
   });
 
   it('CHAT-US-02-AC04: 빈 입력과 한도 초과를 구분해 전송하지 않는다', () => {

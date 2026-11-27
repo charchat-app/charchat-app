@@ -10,9 +10,7 @@ export type AssistantPart = {
 };
 
 // 서버 정규식 `^@([^:\n]+?):[ \t]?(.*)$`와 같다. 이름은 다듬지 않고 그대로 비교한다.
-// 유저 입력창 파서(`messageDraft.parseUserText`)도 같은 정규식을 쓴다(g 플래그 없음: exec가 상태를 남기지 않는다).
-export const SPEAKER_TAG = /^@([^:\n]+?):[ \t]?(.*)$/;
-const TAG = SPEAKER_TAG;
+const TAG = /^@([^:\n]+?):[ \t]?(.*)$/;
 
 /**
  * Python `str.splitlines()`의 줄 경계와 같다: `\r\n`, `\n`, `\r`, `\v`, `\f`, `\x1c`~`\x1e`, `\x85`, `\u2028`, `\u2029`.
