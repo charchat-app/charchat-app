@@ -1,4 +1,6 @@
 // CHAT-US-01 대화 진입 API 조회 투영
+import type { ContentRating } from '@/shared/rating';
+
 export type ConversationMessage = {
   speaker_kind: 'character' | 'user' | 'narrator';
   speaker_name: string | null;
@@ -34,6 +36,11 @@ export type ConversationSession = ConversationSessionCreated & {
   characters: ConversationCharacter[];
   /** CHAT-US-02: 세션에 적용된 플레이 이름. 서버가 항상 준다. */
   play_name: string;
+  /**
+   * CHAT-US-15-AC03: 조회 시점 스토리의 현재 적용 등급(stories.effective_rating). 세션에 고정된 값이 아니다.
+   * 옛 서버는 주지 않는다. 그때 대화방 등급 표시는 보이지 않는다.
+   */
+  effective_rating?: ContentRating | null;
 };
 
 export type ConversationStory = {
@@ -41,7 +48,8 @@ export type ConversationStory = {
   title: string;
   subtitle: string;
   world_description: string;
-  effective_rating: string | null;
+  /** CHAT-US-15-AC01: 서버의 현재 적용 등급(stories.effective_rating). 옛 서버는 null을 준다. */
+  effective_rating: ContentRating | null;
   characters: (ConversationCharacter & { description: string })[];
   intros: ConversationIntro[];
   profiles: ConversationProfile[];
@@ -155,6 +163,11 @@ export type ChatTurns = {
    * 옛 서버는 주지 않는다. 그때 상태 카드는 보이지 않는다.
    */
   current_scene?: CurrentScene | null;
+  /**
+   * CHAT-US-15-AC03: 이 조회 시점 스토리의 현재 적용 등급. 서버가 응답마다 다시 읽는다.
+   * 옛 서버는 주지 않는다. 그때 대화방 등급 표시는 보이지 않는다.
+   */
+  effective_rating?: ContentRating | null;
 };
 
 export type SendChatMessageInput = { request_id: string; parts: ChatMessagePartInput[] };

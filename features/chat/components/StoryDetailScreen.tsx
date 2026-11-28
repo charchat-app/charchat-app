@@ -12,6 +12,7 @@ import {
   useConversationStory,
   useStartConversation,
 } from '@/features/chat/hooks/useConversation';
+import { displayRating } from '@/features/chat/rating';
 import type { ConversationProfile } from '@/shared/story-types';
 
 const keyForProfile = (profile: ConversationProfile) => `${profile.kind}:${profile.id}`;
@@ -37,6 +38,8 @@ export function StoryDetailScreen({
   const intro = story?.intros.find((item) => item.id === introId) ?? story?.intros[0];
   const profile = story?.profiles.find((item) => keyForProfile(item) === profileKey);
   const sessionId = story?.existing_session_id;
+  // CHAT-US-15-AC01: 서버가 준 현재 적용 등급만 보인다.
+  const rating = displayRating(story?.effective_rating);
 
   const handleStart = (replay = false) => {
     if (!story || query.getActionStory() !== story || sessionId != null) return;
@@ -58,7 +61,11 @@ export function StoryDetailScreen({
             {story.title}
           </Text>
           <Text variant="subheading">{story.subtitle}</Text>
-          {story.effective_rating !== null ? <Badge label={story.effective_rating} /> : null}
+          {rating ? (
+            <View testID="story-rating">
+              <Badge label={rating} />
+            </View>
+          ) : null}
           {story.tags.length ? (
             <View style={styles.row}>
               {story.tags.map((tag) => (

@@ -27,6 +27,7 @@ import { type SendAttempt, useSendMessage } from '@/features/chat/hooks/useSendM
 import { splitInfo } from '@/features/chat/infoBlock';
 import { withParticle } from '@/features/chat/koreanParticle';
 import { emptyDraft } from '@/features/chat/messageDraft';
+import { displayRating } from '@/features/chat/rating';
 import { useTheme } from '@/hooks/use-theme';
 import type {
   ChatMessage,
@@ -117,6 +118,9 @@ export function ChatRoom({ session, onBack }: { session: ConversationSession; on
     });
   };
 
+  // CHAT-US-15-AC03: 서버가 조회마다 다시 읽은 현재 적용 등급. 이력(turns)은 응답이 끝날 때마다 다시 읽으므로
+  // 그 값을 따르고, 이력을 읽기 전에만 세션 조회 값을 쓴다. 이력이 값을 주지 않으면(옛 서버) 숨긴다.
+  const rating = displayRating(turns.data ? turns.data.effective_rating : session.effective_rating);
   // CHAT-US-08: 옛 서버(current_scene 없음)·AI 응답 전·응답 생성 중·상태 보기 OFF이면 카드를 그리지 않는다.
   const sceneCard = useSceneCardVisible();
   const scene = turns.data?.current_scene ?? null;
@@ -184,7 +188,16 @@ export function ChatRoom({ session, onBack }: { session: ConversationSession; on
       <Text variant="heading" accessibilityRole="header">
         {session.story_title}
       </Text>
-      {session.read_only ? <Badge label="읽기 전용" /> : null}
+      {session.read_only || rating ? (
+        <View style={styles.badges}>
+          {rating ? (
+            <View testID="chat-room-rating">
+              <Badge label={rating} />
+            </View>
+          ) : null}
+          {session.read_only ? <Badge label="읽기 전용" /> : null}
+        </View>
+      ) : null}
       {model ? (
         session.read_only ? (
           <Text variant="caption">모델: {model}</Text>
@@ -326,6 +339,7 @@ export function ChatRoom({ session, onBack }: { session: ConversationSession; on
 
 const styles = StyleSheet.create({
   progress: { alignItems: 'center', paddingVertical: Spacing.one },
+  badges: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.one },
   modelToggle: {
     alignSelf: 'flex-start',
     minHeight: MinTouchSize,
