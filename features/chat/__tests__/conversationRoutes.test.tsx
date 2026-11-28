@@ -46,7 +46,7 @@ const story = {
   title: '달빛 정원',
   subtitle: '한밤의 초대',
   world_description: '밤이 오면 꽃이 말을 건넨다.',
-  effective_rating: '15세',
+  effective_rating: 'UNSAFE',
   characters: [
     { id: 1, name: '서윤', description: '정원사' },
     { id: 2, name: '윤슬', description: '밤의 안내자' },
@@ -109,7 +109,7 @@ it('KAN-16: 상세를 모두 펼쳐 보여 주고 첫 인트로 말풍선을 순
   for (const text of [
     '한밤의 초대',
     '밤이 오면 꽃이 말을 건넨다.',
-    '15세',
+    'UNSAFE',
     '판타지',
     '서윤',
     '정원사',
