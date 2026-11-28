@@ -19,6 +19,7 @@ import { useChatDraft, useChatTurns } from '@/features/chat/hooks/useChatTurns';
 import { type GenerationStream, useGenerationStream } from '@/features/chat/hooks/useGenerationStream';
 import { useRetryGeneration } from '@/features/chat/hooks/useRetryGeneration';
 import { type SendAttempt, useSendMessage } from '@/features/chat/hooks/useSendMessage';
+import { splitInfo } from '@/features/chat/infoBlock';
 import { withParticle } from '@/features/chat/koreanParticle';
 import { emptyDraft } from '@/features/chat/messageDraft';
 import { useTheme } from '@/hooks/use-theme';
@@ -66,7 +67,9 @@ export function ChatRoom({ session, onBack }: { session: ConversationSession; on
     retryAttempt?.status === 'uncertain' &&
     (!!active || lastFailed?.id !== retryAttempt.generationId);
 
-  const toBubbles = (text: string): ConversationMessage[] => parseAssistantText(text, characterNames);
+  // CHAT-US-08: 원문 끝의 ```info 장면 블록은 말풍선에 넣지 않는다. 반쯤 온 펜스 줄은 스트리밍 중에만 숨긴다.
+  const toBubbles = (text: string, streaming: boolean): ConversationMessage[] =>
+    parseAssistantText(splitInfo(text, { streaming }).body, characterNames);
   const failedText = lastFailed
     ? (client.getQueryData<GenerationStream>(streamKey(lastFailed.id))?.text ?? lastFailed.text)
     : '';
@@ -212,8 +215,10 @@ export function ChatRoom({ session, onBack }: { session: ConversationSession; on
         messages={messages}
         pending={pending}
         pendingNote={attempt ? PENDING_NOTES[attempt.status] : null}
-        streaming={active && stream ? toBubbles(stream.text) : []}
-        unsaved={lastFailed && lastFailed.status !== 'failed' && !active && failedText ? toBubbles(failedText) : []}
+        streaming={active && stream ? toBubbles(stream.text, true) : []}
+        unsaved={
+          lastFailed && lastFailed.status !== 'failed' && !active && failedText ? toBubbles(failedText, false) : []
+        }
       />
       {turns.isPending && turns.fetchStatus !== 'idle' ? (
         <Text accessibilityLiveRegion="polite">대화 이력을 불러오는 중…</Text>

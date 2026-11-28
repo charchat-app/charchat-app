@@ -682,3 +682,110 @@ it('CHAT-US-02-AC06·AC10: 다른 곳에서 이미 생성 중(409)이면 보낸 
   expect(screen.getByLabelText('응답 생성 중')).toBeOnTheScreen();
   expect(sendButton()).toBeDisabled();
 });
+
+// CHAT-US-08 (KAN-22) AI 응답 끝의 ```info 장면 블록은 말풍선에 보이지 않는다(공통 계약 A).
+const codePoints = (text: string) => [...text].length;
+// info 줄(`날짜:`/`시간:`/`장소:`/`[이름] 착장:`로 시작)이나 펜스·반쯤 온 펜스(` … ```info)만인 줄이 보이면 실패한다.
+// 말풍선 본문 안의 백틱이나 '장소'라는 낱말에는 걸리지 않는다.
+const INFO_OR_FENCE_LINE = /^[ \t]*(?:(?:`|``|```(?:i|in|inf|info)?)[ \t]*$|(?:날짜|시간|장소):|\[[^\]\n]+\] 착장:)/m;
+const noInfoShown = () => expect(screen.queryByText(INFO_OR_FENCE_LINE)).not.toBeOnTheScreen();
+
+it('CHAT-US-08: 스트리밍 원문 끝의 info 블록과 반쯤 온 펜스(```in)는 말풍선에 보이지 않고, 끊겨도 본문만 남는다', async () => {
+  const server = fakeServer();
+  server.state.turns = {
+    ...emptyTurns,
+    messages: [userMessage],
+    active_generation: generation({ status: 'streaming' }),
+  };
+  await show();
+
+  const chunks = ['@윤슬: 안녕\n@나레이터: 비가 온다\n```in', 'fo\n장소: 헌책방\n시간: 19:30', '\n```'];
+  let received = '';
+  for (const chunk of chunks) {
+    received += chunk;
+    await server.answerPoll(generation({ status: 'streaming', text: chunk, next_offset: codePoints(received) }));
+    await waitFor(() => expect(screen.getAllByTestId('chat-streaming-bubble')).toHaveLength(2));
+    expect(screen.getAllByTestId('chat-streaming-bubble')[0]).toHaveTextContent('윤슬안녕');
+    expect(screen.getAllByTestId('chat-streaming-bubble')[1]).toHaveTextContent('나레이터비가 온다');
+    noInfoShown();
+  }
+
+  // 블록까지 받은 뒤 끊기면(failed_partial) 이 앱이 모은 원문에서도 본문만 말풍선으로 남는다.
+  const ended = generation({ status: 'failed_partial', text: '', next_offset: codePoints(received) });
+  server.state.turns = { ...emptyTurns, messages: [userMessage], last_failed_generation: { ...ended, text: received } };
+  await server.answerPoll(ended);
+  expect(await screen.findByText('fake-echo 응답이 중간에 끊겼습니다.')).toBeOnTheScreen();
+  expect(screen.queryByTestId('chat-streaming-bubble')).not.toBeOnTheScreen();
+  expect(screen.getAllByTestId('chat-unsaved-bubble')).toHaveLength(2);
+  expect(screen.getAllByTestId('chat-unsaved-bubble')[0]).toHaveTextContent('윤슬안녕');
+  noInfoShown();
+});
+
+it('CHAT-US-08: 스트리밍 중 원문이 반쯤 온 펜스(```in)로 끝나면 그 줄을 숨긴다', async () => {
+  const server = fakeServer();
+  server.state.turns = {
+    ...emptyTurns,
+    messages: [userMessage],
+    active_generation: generation({ status: 'streaming' }),
+  };
+  await show();
+  const text = '@윤슬: 안녕\n```in';
+  await server.answerPoll(generation({ status: 'streaming', text, next_offset: codePoints(text) }));
+  expect(await screen.findByTestId('chat-streaming-bubble')).toHaveTextContent('윤슬안녕');
+  expect(screen.getAllByTestId('chat-streaming-bubble')).toHaveLength(1);
+  noInfoShown();
+});
+
+it('CHAT-US-08: 다시 들어와 보이는 failed_partial 원문도 info 블록을 빼고 본문만 말풍선으로 보인다', async () => {
+  const server = fakeServer();
+  server.state.turns = {
+    ...emptyTurns,
+    messages: [userMessage],
+    last_failed_generation: generation({
+      status: 'failed_partial',
+      error_code: 'STREAM_ERROR',
+      text: '@윤슬: 반쯤\n```info\n장소: 헌책방\n시간: 19:30\n```\n@나레이터: 끝',
+    }),
+  };
+  await show();
+  expect(await screen.findByText('fake-echo 응답이 중간에 끊겼습니다.')).toBeOnTheScreen();
+  expect(screen.getAllByTestId('chat-unsaved-bubble')).toHaveLength(2);
+  expect(screen.getAllByTestId('chat-unsaved-bubble')[0]).toHaveTextContent('윤슬반쯤');
+  expect(screen.getAllByTestId('chat-unsaved-bubble')[1]).toHaveTextContent('나레이터끝');
+  noInfoShown();
+});
+
+it('CHAT-US-08 (11-27 개정): 응답 중간과 끝에 info 블록을 두 번 쓴 원문도 두 블록 모두 말풍선에 보이지 않는다', async () => {
+  const server = fakeServer();
+  server.state.turns = {
+    ...emptyTurns,
+    messages: [userMessage],
+    last_failed_generation: generation({
+      status: 'failed_partial',
+      error_code: 'STREAM_ERROR',
+      text: [
+        '@윤슬: 이 `책` 말이야, 장소가 어디였지?',
+        '```info',
+        '장소: 헌책방',
+        '시간: 19:20',
+        '[윤슬] 착장: 코트 | 속마음: 궁금하다',
+        '```',
+        '...',
+        '@나레이터: 비가 그친다',
+        '```info',
+        '장소: 헌책방',
+        '시간: 19:30',
+        '```',
+      ].join('\n'),
+    }),
+  };
+  await show();
+  expect(await screen.findByText('fake-echo 응답이 중간에 끊겼습니다.')).toBeOnTheScreen();
+  expect(screen.getAllByTestId('chat-unsaved-bubble')).toHaveLength(2);
+  // 본문의 백틱과 '장소'라는 낱말은 그대로 보이고, noInfoShown에도 걸리지 않는다.
+  expect(screen.getAllByTestId('chat-unsaved-bubble')[0]).toHaveTextContent(
+    '윤슬이 `책` 말이야, 장소가 어디였지?\n...',
+  );
+  expect(screen.getAllByTestId('chat-unsaved-bubble')[1]).toHaveTextContent('나레이터비가 그친다');
+  noInfoShown();
+});
