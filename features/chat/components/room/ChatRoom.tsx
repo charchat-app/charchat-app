@@ -177,6 +177,10 @@ export function ChatRoom({
           </View>
         ) : null
       }
+      // 최신 대화가 아래에 붙는다. 처음엔 맨 아래에서 열고, 보고 있는 동안 스트리밍 응답을 따라 내려간다.
+      // 보내기·재시도를 누르면 읽던 위치와 관계없이 맨 아래로 내린다.
+      followLatest
+      jumpToLatestKey={[attempt?.requestId, retryAttempt?.requestId].filter(Boolean).join(':') || null}
       top={
         oldRoomNotice || generating ? (
           <>
