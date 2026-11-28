@@ -71,11 +71,56 @@ export type ChatMessage = {
   created_at: string;
   /**
    * CHAT-US-08 (KAN-22): AI 응답 하나에 적힌 장면 상태(```info 블록, 누적 아님).
-   * 새 서버는 `null | {text, date, time, place, characters}`를 준다. 옛 서버는 주지 않는다.
-   * 아직 쓰는 화면이 없고 모양이 확정되기 전이라 `unknown`으로 받는다. 쓸 때 모양을 확인한다.
+   * 이용자 메시지·info 없는 응답은 null이다. 옛 서버는 주지 않는다.
    */
-  info?: unknown;
+  info?: SceneInfo | null;
 };
+
+// CHAT-US-08 장면 상태(info·current_scene)와 이용자 수정 (KAN-22, KAN-40). 서버 messaging/schemas.py와 같은 모양이다.
+
+/** 세션 날짜 방식. calendar: 연월일 / world: 연호+연월일 / elapsed: 기준 사건+일차 */
+export type SceneDateMode = 'calendar' | 'world' | 'elapsed';
+
+/** 날짜. mode에 해당하는 칸만 채워진다(나머지는 null). */
+export type SceneDate = {
+  mode: SceneDateMode;
+  era: string | null;
+  year: number | null;
+  month: number | null;
+  day: number | null;
+  reference_event: string | null;
+  elapsed_day: number | null;
+};
+
+/** 시각. 분을 모르면(`19시`) minute이 null이다. */
+export type SceneTime = { hour: number; minute: number | null };
+
+/** 캐릭터별 상태. name은 세션 캐릭터 이름이다. 모르는 항목은 null이다. */
+export type SceneCharacter = { name: string; clothing: string | null; inner_thought: string | null };
+
+/** 다음 요청의 [현재 장면]이 쓰는 누적 장면. characters는 세션 캐릭터 전원(세션 순서)이다. */
+export type CurrentScene = {
+  date: SceneDate | null;
+  time: SceneTime | null;
+  place: string | null;
+  characters: SceneCharacter[];
+};
+
+/** AI 응답 하나의 info. text는 블록 원문, characters는 그 블록에서 읽은 캐릭터만이다. */
+export type SceneInfo = CurrentScene & { text: string };
+
+/**
+ * 최신 AI 응답의 info 수정 요청. 빼거나 null인 칸은 지금 값을 그대로 둔다(값을 지우는 방법은 없다).
+ * date는 그 방식의 날짜 전체를 보낸다. elapsed의 reference_event만 빼면 지금 기준 사건을 둔다.
+ */
+export type SceneInfoUpdateInput = {
+  date?: Partial<SceneDate>;
+  time?: SceneTime;
+  place?: string;
+  characters?: { name: string; clothing?: string; inner_thought?: string }[];
+};
+
+export type SceneInfoUpdateResult = { message_id: number; info: SceneInfo; current_scene: CurrentScene };
 
 /** pending·streaming = 진행 중. 나머지는 끝난 상태다. */
 export type ChatGenerationStatus = 'pending' | 'streaming' | 'completed' | 'failed' | 'failed_partial' | 'save_failed';
@@ -107,9 +152,9 @@ export type ChatTurns = {
   model_id: number;
   /**
    * CHAT-US-08 (KAN-22): 다음 요청에 쓰일 누적 현재 장면(세션 시작 값 + 완료 응답 info를 덮어쓴 결과).
-   * 옛 서버는 주지 않는다. 상태 카드를 만들 때 모양을 정하므로 지금은 `unknown`으로 받는다.
+   * 옛 서버는 주지 않는다. 그때 상태 카드는 보이지 않는다.
    */
-  current_scene?: unknown;
+  current_scene?: CurrentScene | null;
 };
 
 export type SendChatMessageInput = { request_id: string; parts: ChatMessagePartInput[] };

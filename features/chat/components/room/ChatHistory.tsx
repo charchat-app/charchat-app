@@ -1,4 +1,6 @@
 // CHAT-US-02 대화 이력 표시: 인트로 → 저장된 메시지 → 보내는 중인 메시지 → 생성 중·미저장 응답
+// CHAT-US-08 가장 뒤 AI 응답 바로 아래에 상태 카드 자리를 둔다.
+import type { ReactNode } from 'react';
 import { StyleSheet, View } from 'react-native';
 
 import { Notice, Text } from '@/components/ui';
@@ -13,6 +15,7 @@ export function ChatHistory({
   pendingNote,
   streaming,
   unsaved,
+  afterLatestReply,
 }: {
   intro: ConversationMessage[];
   messages: ChatMessage[];
@@ -23,14 +26,23 @@ export function ChatHistory({
   streaming: ConversationMessage[];
   /** 중간에 끊겼거나 저장하지 못한 응답 */
   unsaved: ConversationMessage[];
+  /** 저장된 가장 뒤 AI 응답 바로 아래에 둘 내용(상태 카드). AI 응답이 없으면 그리지 않는다. */
+  afterLatestReply?: ReactNode;
 }) {
   const saved = messages.flatMap((message) => message.parts);
+  const latestReply = messages.findLastIndex((message) => message.role === 'assistant');
+  const card = afterLatestReply && latestReply >= 0 ? afterLatestReply : null;
+  // 카드가 있으면 그 응답까지와 그 뒤(실패한 턴의 내 메시지 등)를 나눠 그 사이에 카드를 둔다.
+  const before = card ? messages.slice(0, latestReply + 1).flatMap((message) => message.parts) : saved;
+  const after = card ? messages.slice(latestReply + 1).flatMap((message) => message.parts) : [];
   const empty = !intro.length && !saved.length && !pending.length && !streaming.length && !unsaved.length;
   if (empty) return <Text variant="caption">표시할 대화가 없습니다.</Text>;
   return (
     <View style={styles.list}>
       {intro.length ? <ConversationBubbles messages={intro} /> : null}
-      {saved.length ? <ConversationBubbles messages={saved} testID="chat-message-bubble" /> : null}
+      {before.length ? <ConversationBubbles messages={before} testID="chat-message-bubble" /> : null}
+      {card}
+      {after.length ? <ConversationBubbles messages={after} testID="chat-message-bubble" /> : null}
       {pending.length ? (
         <View style={styles.list}>
           <ConversationBubbles messages={pending} testID="chat-pending-bubble" />

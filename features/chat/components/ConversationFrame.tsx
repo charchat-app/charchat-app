@@ -9,12 +9,15 @@ import { MaxContentWidth, Spacing } from '@/constants/theme';
 export function ConversationFrame({
   title,
   onBack,
+  headerRight,
   top,
   footer,
   children,
 }: {
   title: string;
   onBack?: () => void;
+  /** 헤더 오른쪽 끝 표시 (예: CHAT-US-08 상태 보기 켜기·끄기) */
+  headerRight?: ReactNode;
   /** 스크롤과 관계없이 대화 영역 위쪽에 고정하는 표시 (예: 응답 생성 진행) */
   top?: ReactNode;
   /** 스크롤 영역 아래에 고정하는 입력창 */
@@ -23,7 +26,7 @@ export function ConversationFrame({
 }) {
   return (
     <Surface style={styles.fill}>
-      <ScreenHeader title={title} onBack={onBack} />
+      <ScreenHeader title={title} onBack={onBack} right={headerRight} />
       <SafeAreaView edges={['left', 'right', 'bottom']} style={styles.fill}>
         {top}
         <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
