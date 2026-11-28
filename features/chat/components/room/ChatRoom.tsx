@@ -2,8 +2,9 @@
 // CHAT-US-13 대화 중 모델 변경: 다음 응답부터 적용, 진행 중 생성은 기존 모델 유지
 // CHAT-US-08 상태 카드: 가장 뒤 AI 응답 아래 현재 장면, 상태 보기 ON/OFF, 장면 정보 수정
 // CHAT-US-09 여러 세션: 헤더 ☰ 메뉴(새로하기·이어하기·대화 삭제)
+// charchat-app#36 상단 제목은 스토리 제목, 말풍선 옆에 화자 사진(캐릭터 대표 사진·유저 프로필 사진)
 import { skipToken, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { AccessibilityInfo, Pressable, StyleSheet, View } from 'react-native';
 
 import { Badge, Button, Notice, Section, Text } from '@/components/ui';
@@ -28,6 +29,7 @@ import { useSceneCardVisible } from '@/features/chat/hooks/useSceneCard';
 import { roomNoticeKey } from '@/features/chat/hooks/useSessions';
 import { type SendAttempt, useSendMessage } from '@/features/chat/hooks/useSendMessage';
 import { splitInfo } from '@/features/chat/infoBlock';
+import type { SpeakerImages } from '@/features/chat/speakerAvatars';
 import { withParticle } from '@/features/chat/koreanParticle';
 import { emptyDraft } from '@/features/chat/messageDraft';
 import { displayRating } from '@/features/chat/rating';
@@ -137,6 +139,11 @@ export function ChatRoom({
   const showScene = sceneCard.ready && sceneCard.visible && !!scene && !!latestReply && !generating;
   // 연 때의 응답·장면을 고정한다. 그사이 새 응답이 끝나면 서버가 409(새 응답)로 거절한다.
   const [editing, setEditing] = useState<{ messageId: number; scene: CurrentScene } | null>(null);
+  // charchat-app#36: 옛 서버는 사진 주소를 주지 않는다. 그때는 모든 화자가 이름 첫 글자로 보인다.
+  const speakers = useMemo<SpeakerImages>(
+    () => ({ user: session.user_image_url ?? null, characters: session.characters }),
+    [session.user_image_url, session.characters],
+  );
 
   const blockedReason = !turns.isSuccess
     ? '대화 이력을 불러온 뒤 보낼 수 있습니다.'
@@ -167,7 +174,8 @@ export function ChatRoom({
 
   return (
     <ConversationFrame
-      title="대화방"
+      // charchat-app#36: 어떤 스토리의 대화인지 상단에 보인다. 제목이 비어 있으면(옛 데이터) 대화방으로 둔다.
+      title={session.story_title || '대화방'}
       onBack={onBack}
       headerRight={
         scene || onOpenSession ? (
@@ -224,9 +232,6 @@ export function ChatRoom({
         )
       }
     >
-      <Text variant="heading" accessibilityRole="header">
-        {session.story_title}
-      </Text>
       {session.read_only || rating ? (
         <View style={styles.badges}>
           {rating ? (
@@ -283,6 +288,7 @@ export function ChatRoom({
         </Section>
       ) : null}
       <ChatHistory
+        speakers={speakers}
         intro={session.messages}
         messages={messages}
         pending={pending}
