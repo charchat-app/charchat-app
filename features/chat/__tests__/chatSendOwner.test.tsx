@@ -151,7 +151,8 @@ describe('BASE-03 전송 중 계정 전환', () => {
 
     expect(draftOf('1')).toContain('거절될 말');
     expect(client.getQueryData(draftKey(SESSION))).toBeDefined();
-    expect(hook.result.current.attempt).toMatchObject({ status: 'rejected', restored: true });
+    // 화면 상태 갱신은 react-query 알림 타이머 뒤에 온다. 느린 CI에서는 기기 기록 정리가 먼저 끝날 수 있다.
+    await waitFor(() => expect(hook.result.current.attempt).toMatchObject({ status: 'rejected', restored: true }));
     expect(keysOf('2')).toEqual([]);
   });
 

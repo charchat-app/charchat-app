@@ -1,7 +1,8 @@
 // CHAT-US-02 대화방: 이력·스트리밍 응답·생성 진행 표시·입력창을 묶는다 · CHAT-US-03 작성 중 입력 기기 보관
 // CHAT-US-13 대화 중 모델 변경: 다음 응답부터 적용, 진행 중 생성은 기존 모델 유지
 // CHAT-US-08 상태 카드: 가장 뒤 AI 응답 아래 현재 장면, 상태 보기 ON/OFF, 장면 정보 수정
-import { useQueryClient } from '@tanstack/react-query';
+// CHAT-US-09 여러 세션: 헤더 ☰ 메뉴(새로하기·이어하기·대화 삭제)
+import { skipToken, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { AccessibilityInfo, Pressable, StyleSheet, View } from 'react-native';
 
@@ -16,6 +17,7 @@ import { ModelPicker } from '@/features/chat/components/room/ModelPicker';
 import { SceneCardToggle } from '@/features/chat/components/room/SceneCardToggle';
 import { SceneEditSheet } from '@/features/chat/components/room/SceneEditSheet';
 import { SceneStatusCard } from '@/features/chat/components/room/SceneStatusCard';
+import { SessionMenu } from '@/features/chat/components/sessions/SessionMenu';
 import { useSpeakers } from '@/features/chat/hooks/useSpeakers';
 import { streamKey } from '@/features/chat/hooks/chatCache';
 import { useChangeSessionModel } from '@/features/chat/hooks/useChatModel';
@@ -23,18 +25,15 @@ import { useChatDraft, useChatTurns } from '@/features/chat/hooks/useChatTurns';
 import { type GenerationStream, useGenerationStream } from '@/features/chat/hooks/useGenerationStream';
 import { useRetryGeneration } from '@/features/chat/hooks/useRetryGeneration';
 import { useSceneCardVisible } from '@/features/chat/hooks/useSceneCard';
+import { roomNoticeKey } from '@/features/chat/hooks/useSessions';
 import { type SendAttempt, useSendMessage } from '@/features/chat/hooks/useSendMessage';
 import { splitInfo } from '@/features/chat/infoBlock';
 import { withParticle } from '@/features/chat/koreanParticle';
 import { emptyDraft } from '@/features/chat/messageDraft';
+import { displayRating } from '@/features/chat/rating';
+import type { ConversationRoom } from '@/features/chat/types';
 import { useTheme } from '@/hooks/use-theme';
-import type {
-  ChatMessage,
-  ConversationMessage,
-  ConversationSession,
-  CurrentScene,
-  SessionModelChange,
-} from '@/shared/story-types';
+import type { ChatMessage, ConversationMessage, CurrentScene, SessionModelChange } from '@/shared/story-types';
 
 const PENDING_NOTES: Record<SendAttempt['status'], string | null> = {
   posting: '보내는 중…',
@@ -58,10 +57,21 @@ function showPending(attempt: SendAttempt | null | undefined, messages: ChatMess
   return attempt.status !== 'rejected' || !attempt.restored;
 }
 
-export function ChatRoom({ session, onBack }: { session: ConversationSession; onBack?: () => void }) {
+export function ChatRoom({
+  session,
+  onBack,
+  onOpenSession,
+}: {
+  session: ConversationRoom;
+  onBack?: () => void;
+  /** CHAT-US-09: 새로하기·이어하기로 고른 방으로 바꾼다. 없으면 ☰ 메뉴를 그리지 않는다. */
+  onOpenSession?: (sessionId: string) => void;
+}) {
   const sessionId = String(session.id);
   const colors = useTheme();
   const client = useQueryClient();
+  // CHAT-US-09-AC04: 보관을 껐는데 원래 방을 지우지 못했으면 새 방에서 한 번 알린다.
+  const oldRoomNotice = useQuery<string | null>({ queryKey: roomNoticeKey(sessionId), queryFn: skipToken }).data;
   const turns = useChatTurns(sessionId, true);
   const { names, chips, labelOf, characterNames } = useSpeakers(session);
   const { draft, update, clearSent, deviceUnavailable } = useChatDraft(sessionId, names, !session.read_only);
@@ -117,6 +127,9 @@ export function ChatRoom({ session, onBack }: { session: ConversationSession; on
     });
   };
 
+  // CHAT-US-15-AC03: 서버가 조회마다 다시 읽은 현재 적용 등급. 이력(turns)은 응답이 끝날 때마다 다시 읽으므로
+  // 그 값을 따르고, 이력을 읽기 전에만 세션 조회 값을 쓴다. 이력이 값을 주지 않으면(옛 서버) 숨긴다.
+  const rating = displayRating(turns.data ? turns.data.effective_rating : session.effective_rating);
   // CHAT-US-08: 옛 서버(current_scene 없음)·AI 응답 전·응답 생성 중·상태 보기 OFF이면 카드를 그리지 않는다.
   const sceneCard = useSceneCardVisible();
   const scene = turns.data?.current_scene ?? null;
@@ -156,20 +169,46 @@ export function ChatRoom({ session, onBack }: { session: ConversationSession; on
     <ConversationFrame
       title="대화방"
       onBack={onBack}
-      headerRight={scene ? <SceneCardToggle visible={sceneCard.visible} onChange={sceneCard.setVisible} /> : null}
+      headerRight={
+        scene || onOpenSession ? (
+          <View style={styles.headerActions}>
+            {scene ? <SceneCardToggle visible={sceneCard.visible} onChange={sceneCard.setVisible} /> : null}
+            {onOpenSession ? <SessionMenu session={session} onOpenSession={onOpenSession} /> : null}
+          </View>
+        ) : null
+      }
       // 최신 대화가 아래에 붙는다. 처음엔 맨 아래에서 열고, 보고 있는 동안 스트리밍 응답을 따라 내려간다.
       // 보내기·재시도를 누르면 읽던 위치와 관계없이 맨 아래로 내린다.
       followLatest
       jumpToLatestKey={[attempt?.requestId, retryAttempt?.requestId].filter(Boolean).join(':') || null}
       top={
-        generating ? (
-          <View style={styles.progress}>
-            <View accessibilityRole="progressbar" accessibilityLabel="응답 생성 중">
-              <Text variant="subheading">...</Text>
-            </View>
-            {/* 진행 중 생성이 요청한 모델. 도중에 모델을 바꿔도 이 이름은 그대로다(CHAT-US-13-AC02). */}
-            {active?.model ? <Text variant="caption">{active.model} 답변 중</Text> : null}
-          </View>
+        oldRoomNotice || generating ? (
+          <>
+            {oldRoomNotice ? (
+              <View style={styles.roomNotice}>
+                <View style={styles.roomNoticeText}>
+                  <Notice tone="alert" message={oldRoomNotice} />
+                </View>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="이전 대화방 안내 닫기"
+                  onPress={() => client.setQueryData<string | null>(roomNoticeKey(sessionId), null)}
+                  style={styles.roomNoticeClose}
+                >
+                  <Text>닫기</Text>
+                </Pressable>
+              </View>
+            ) : null}
+            {generating ? (
+              <View style={styles.progress}>
+                <View accessibilityRole="progressbar" accessibilityLabel="응답 생성 중">
+                  <Text variant="subheading">...</Text>
+                </View>
+                {/* 진행 중 생성이 요청한 모델. 도중에 모델을 바꿔도 이 이름은 그대로다(CHAT-US-13-AC02). */}
+                {active?.model ? <Text variant="caption">{active.model} 답변 중</Text> : null}
+              </View>
+            ) : null}
+          </>
         ) : null
       }
       footer={
@@ -188,7 +227,16 @@ export function ChatRoom({ session, onBack }: { session: ConversationSession; on
       <Text variant="heading" accessibilityRole="header">
         {session.story_title}
       </Text>
-      {session.read_only ? <Badge label="읽기 전용" /> : null}
+      {session.read_only || rating ? (
+        <View style={styles.badges}>
+          {rating ? (
+            <View testID="chat-room-rating">
+              <Badge label={rating} />
+            </View>
+          ) : null}
+          {session.read_only ? <Badge label="읽기 전용" /> : null}
+        </View>
+      ) : null}
       {model ? (
         session.read_only ? (
           <Text variant="caption">모델: {model}</Text>
@@ -329,7 +377,12 @@ export function ChatRoom({ session, onBack }: { session: ConversationSession; on
 }
 
 const styles = StyleSheet.create({
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: Spacing.one },
   progress: { alignItems: 'center', paddingVertical: Spacing.one },
+  badges: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.one },
+  roomNotice: { flexDirection: 'row', alignItems: 'center', gap: Spacing.one, padding: Spacing.one },
+  roomNoticeText: { flex: 1 },
+  roomNoticeClose: { minHeight: MinTouchSize, justifyContent: 'center', paddingHorizontal: Spacing.two },
   modelToggle: {
     alignSelf: 'flex-start',
     minHeight: MinTouchSize,
