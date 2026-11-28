@@ -169,6 +169,17 @@ export function useDeleteSession() {
 
 export type RestartFailure = { message: string; uncertain: boolean };
 
+/** 새로하기로 연 방에 한 번 보여 줄 안내(보관을 껐지만 원래 방을 지우지 못했을 때). */
+export const roomNoticeKey = (sessionId: string) => ['conversation', 'room-notice', sessionId] as const;
+
+export function oldRoomNotDeletedMessage(error: unknown) {
+  const where = '☰ → 이어하기에서 직접 지울 수 있어요.';
+  if (error instanceof ApiError && error.code === 'GENERATION_IN_PROGRESS') {
+    return `이전 대화방은 응답을 만드는 중이라 지우지 못했어요. ${where}`;
+  }
+  return `이전 대화방을 지우지 못했어요. ${where}`;
+}
+
 /**
  * 새로하기(CHAT-US-09-AC01~AC04). 순서:
  * 1) 원본 방 기준으로 새 방을 만든다(request_id는 결과가 정해질 때까지 같은 값을 다시 쓴다).
@@ -210,8 +221,13 @@ export function useRestartSession(sessionId: string) {
       void client.invalidateQueries({ queryKey: ['conversation', 'sessions'] });
       void client.invalidateQueries({ queryKey: ['conversation', 'story'] });
       onOpened(newId);
-      // 새 방이 열린 뒤에만 원본을 지운다. 실패하면 원본은 이어하기 목록에 남는다.
-      if (!keep) void deleteSession(client, sessionId).catch(() => {});
+      // 새 방이 열린 뒤에만 원본을 지운다. 실패하면 원본은 이어하기 목록에 남고, 새 방에 그 사실을 알린다.
+      if (!keep) {
+        void deleteSession(client, sessionId).catch((error: unknown) => {
+          client.setQueryDefaults(['conversation', 'room-notice'], { gcTime: Infinity });
+          client.setQueryData<string>(roomNoticeKey(newId), oldRoomNotDeletedMessage(error));
+        });
+      }
     } catch (error) {
       if (created === null && isDefiniteRejection(error)) {
         // 서버가 확실히 거절했다. 같은 요청을 다시 보내도 결과가 같으므로 다음에는 새 요청으로 시작한다.

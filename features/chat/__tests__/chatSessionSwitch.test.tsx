@@ -8,7 +8,7 @@ import { isSessionChatDeviceKey } from '@/features/chat/deviceDataCleanup';
 import * as storage from '@/features/chat/draftStorage';
 import type { DraftStorage } from '@/features/chat/draftStorage.types';
 import { conversationSessionKey, draftKey, turnsKey } from '@/features/chat/hooks/chatCache';
-import { sessionName } from '@/features/chat/hooks/useSessions';
+import { oldRoomNotDeletedMessage, roomNoticeKey, sessionName } from '@/features/chat/hooks/useSessions';
 import type { ConversationRoom, StorySessionSummary } from '@/features/chat/types';
 import type { ChatTurns, ConversationStory } from '@/shared/story-types';
 
@@ -551,6 +551,31 @@ it('CHAT-US-09-AC14: 「대화방 삭제」를 눌러야 DELETE하고, 목록에
   expect(client.getQueryData(turnsKey('70'))).toBeDefined();
   expect(client.getQueryData(turnsKey('19'))).toBeDefined();
   expect(screen.getByText('A방에서 한 약속')).toBeOnTheScreen();
+});
+
+it('CHAT-US-09-AC04: 보관을 해제했는데 원래 방 삭제가 거절되면(409) 새 방에 안내를 남기고 원래 방은 목록에 둔다', async () => {
+  const server = fakeServer();
+  server.handlers.remove.mockImplementation(() =>
+    problem(409, 'GENERATION_IN_PROGRESS', '응답이 끝난 뒤 삭제할 수 있어요.'),
+  );
+  await openRoom();
+  await openRestartIntro({ keep: false });
+  await press('새 대화 시작');
+  await waitFor(() => expect(server.deletes()).toEqual(['/sessions/19']));
+  await waitFor(() =>
+    expect(client.getQueryData(roomNoticeKey('31'))).toBe(
+      '이전 대화방은 응답을 만드는 중이라 지우지 못했어요. ☰ → 이어하기에서 직접 지울 수 있어요.',
+    ),
+  );
+});
+
+it('CHAT-US-09-AC04: 새 방에 남긴 「이전 대화방을 지우지 못했어요」 안내를 보이고 닫을 수 있다', async () => {
+  fakeServer();
+  client.setQueryData(roomNoticeKey('19'), oldRoomNotDeletedMessage(new Error('network')));
+  await openRoom();
+  expect(screen.getByText('이전 대화방을 지우지 못했어요. ☰ → 이어하기에서 직접 지울 수 있어요.')).toBeOnTheScreen();
+  await press('이전 대화방 안내 닫기');
+  await waitFor(() => expect(screen.queryByText(/이전 대화방을 지우지 못했어요/)).toBeNull());
 });
 
 it('CHAT-US-09-AC13: 응답 생성 중이라 409 GENERATION_IN_PROGRESS로 거절되면 서버 문구를 보이고 방을 남긴다', async () => {
