@@ -71,6 +71,8 @@ function Photo({ uri, onLoad, onError, style }: PhotoProps) {
       onLoad={onLoad}
       onError={onError}
       contentFit="cover"
+      // 소유자 전용 사진은 서버가 `private, no-store`로 보낸다. 기기 디스크에 남기지 않고 메모리에만 둔다.
+      cachePolicy="memory"
       style={style}
     />
   );

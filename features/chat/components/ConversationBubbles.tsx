@@ -49,6 +49,9 @@ export function ConversationBubbles({
           <View
             key={index}
             testID={`${testID}-row`}
+            // 이어진 말풍선은 이름을 숨기므로 화면 읽기 프로그램에는 누가 한 말인지 붙여 읽힌다.
+            accessible={!starts[index]}
+            accessibilityLabel={starts[index] ? undefined : `${avatar.name}: ${message.body.replaceAll('*', '')}`}
             style={[styles.row, message.speaker_kind === 'user' ? styles.userRow : styles.characterRow]}
           >
             {starts[index] ? <SpeakerAvatar name={avatar.name} uri={avatar.uri} /> : <View style={styles.spacer} />}

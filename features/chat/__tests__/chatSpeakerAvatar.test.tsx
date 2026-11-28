@@ -71,11 +71,11 @@ const turns: ChatTurns = {
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
 
-function serve(body: unknown) {
+function serve(body: unknown, history: ChatTurns = turns) {
   jest.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
     const url = String(input);
     if (url === `${BASE}/sessions/19`) return json(body);
-    if (url === `${BASE}/sessions/19/turns`) return json(turns);
+    if (url === `${BASE}/sessions/19/turns`) return json(history);
     return json({}, 404);
   });
 }
@@ -162,6 +162,26 @@ it('#36 나래님 확인 전(추천안): 같은 화자가 이어지면 첫 말�
   const [user, userAgain] = savedRows();
   expect(avatarIn(user)).not.toBeNull();
   expect(avatarIn(userAgain)).toBeNull();
+}, 20_000);
+
+it('#36 나래님 확인 전(추천안): 인트로 마지막 화자가 저장된 첫 답에서 이어지면 그 말풍선도 사진·이름 없이 붙고, 화면 읽기에는 화자 이름을 읽힌다', async () => {
+  const reply: ChatMessage = {
+    id: 6,
+    role: 'assistant',
+    parts: [
+      { speaker_kind: 'character', character_id: 3, speaker_name: '서윤', body: '*고개를 든다.* 또 왔네.' },
+      { speaker_kind: 'character', character_id: 2, speaker_name: '윤슬', body: '반가워.' },
+    ],
+    created_at: '2026-11-28T00:00:00Z',
+  };
+  serve(room, { ...turns, messages: [reply] });
+  await show();
+  await waitFor(() => expect(savedRows()).toHaveLength(2));
+  const [continued, changed] = savedRows();
+  // 인트로 마지막이 서윤이므로 저장된 첫 서윤 말풍선은 이어진 말풍선이다.
+  expect(avatarIn(continued)).toBeNull();
+  expect(screen.getByLabelText('서윤: 고개를 든다. 또 왔네.')).toBeOnTheScreen();
+  expect(avatarIn(changed)).not.toBeNull();
 }, 20_000);
 
 it('#36 나래님 확인 전(추천안): 사진이 없는 화자는 이름 첫 글자, 사진을 불러오지 못해도(비공개·삭제 스토리 404) 첫 글자로 돌아간다', async () => {
