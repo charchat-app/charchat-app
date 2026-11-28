@@ -1,12 +1,11 @@
 // CHAT-US-01 대화 진입 API · CHAT-US-02 메시지 전송·응답 API · CHAT-US-03 내 대화 목록·요청 ID 확인
-// CHAT-US-13 대화 중 모델 변경 · CHAT-US-08 최신 AI 응답의 장면 정보 수정
+// CHAT-US-13 대화 중 모델 변경 · CHAT-US-08 최신 AI 응답의 장면 정보 수정 · CHAT-US-09 새로하기·이어하기·대화 삭제
 import { ApiError, apiRequest } from '@/lib/api-client';
 import type {
   ChatGeneration,
   ChatGenerationLookup,
   ChatModelList,
   ChatTurns,
-  ConversationSession,
   ConversationSessionCreated,
   ConversationSessionPage,
   ConversationStory,
@@ -16,6 +15,7 @@ import type {
   SessionModelChange,
   StartConversationInput,
 } from '@/shared/story-types';
+import type { ConversationRoom, RestartConversationInput, StorySessionPage } from '@/features/chat/types';
 
 function idSegment(id: string) {
   if (typeof id !== 'string' || !/^[1-9][0-9]*$/.test(id)) {
@@ -33,7 +33,7 @@ export const startConversation = (id: string, input: StartConversationInput) =>
   apiRequest<ConversationSessionCreated>(`${storyPath(id)}/sessions`, { method: 'POST', body: JSON.stringify(input) });
 
 export const getConversationSession = (id: string, signal: AbortSignal) =>
-  apiRequest<ConversationSession>(`/conversation/sessions/${idSegment(id)}`, { signal });
+  apiRequest<ConversationRoom>(`/conversation/sessions/${idSegment(id)}`, { signal });
 
 const sessionPath = (id: string) => `/conversation/sessions/${idSegment(id)}`;
 
@@ -89,6 +89,32 @@ export const changeSessionModel = (sessionId: string, modelId: number) =>
     method: 'PUT',
     body: JSON.stringify({ model_id: modelId }),
   });
+
+/**
+ * CHAT-US-09 새로하기: 지금 방(원본)의 프로필·플레이 이름·모델로 고른 인트로의 새 방을 만든다.
+ * 같은 request_id로 다시 보내면 서버는 같은 새 방을 돌려준다. 원본 방은 건드리지 않는다.
+ */
+export const restartConversation = (sessionId: string, input: RestartConversationInput) =>
+  apiRequest<ConversationSessionCreated>(`${sessionPath(sessionId)}/restart`, {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+
+/** CHAT-US-09 이어하기 목록: 같은 스토리의 내 방 중 지금 방을 뺀 목록(AC02·AC05·AC06·AC08). */
+export function getStorySessions(
+  storyId: string,
+  excludeSessionId: string,
+  beforeId: number | null,
+  signal: AbortSignal,
+) {
+  const query = [`story_id=${idSegment(storyId)}`, `exclude_session_id=${idSegment(excludeSessionId)}`];
+  if (beforeId !== null) query.push(`before_id=${idSegment(String(beforeId))}`);
+  return apiRequest<StorySessionPage>(`/conversation/sessions?${query.join('&')}`, { signal });
+}
+
+/** CHAT-US-09 대화 삭제: 그 방의 기록·장면·관계까지 실제로 지운다. 되돌릴 수 없다(AC13·AC14). */
+export const deleteConversationSession = (sessionId: string) =>
+  apiRequest<void>(sessionPath(sessionId), { method: 'DELETE' });
 
 /**
  * 가장 뒤 완료 AI 응답의 장면 정보(info)를 고친다(CHAT-US-08, KAN-40 결정 C). 바뀐 칸만 보낸다.
